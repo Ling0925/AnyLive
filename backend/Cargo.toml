@@ -9,6 +9,7 @@ members = [
     "crates/wallet",
     "crates/realtime",
     "crates/moderation",
+    "crates/social",
     "crates/api",
 ]
 default-members = ["crates/api"]

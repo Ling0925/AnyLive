@@ -170,8 +170,11 @@ impl MemoryWallet {
             return Err(AppError::validation("cannot gift yourself"));
         }
 
+        // Idempotency is scoped per sender so one user's key cannot replay another's order.
+        let idem_key = format!("{}:{}", sender.0, client_request_id);
+
         let mut g = self.inner.lock().await;
-        if let Some(existing) = g.gift_orders_by_key.get(&client_request_id) {
+        if let Some(existing) = g.gift_orders_by_key.get(&idem_key) {
             return Ok((existing.clone(), true));
         }
 
@@ -188,21 +191,23 @@ impl MemoryWallet {
             .checked_mul(count as i64)
             .ok_or_else(|| AppError::validation("total overflow"))?;
 
-        let sender_bal = g.balances.entry(sender.0).or_insert(0);
-        if *sender_bal < total {
+        // Read both balances first so debit+credit stay atomic under the lock
+        // (no partial debit if the credit would overflow).
+        let sender_before = *g.balances.get(&sender.0).unwrap_or(&0);
+        if sender_before < total {
             return Err(AppError::new(
                 ErrorCode::GiftInsufficientBalance,
                 "insufficient balance",
             ));
         }
-        *sender_bal -= total;
-        let sender_after = *sender_bal;
-
-        let recv_bal = g.balances.entry(receiver.0).or_insert(0);
-        *recv_bal = recv_bal.checked_add(total).ok_or_else(|| {
+        let recv_before = *g.balances.get(&receiver.0).unwrap_or(&0);
+        let recv_after = recv_before.checked_add(total).ok_or_else(|| {
             AppError::new(ErrorCode::WalletConflict, "receiver balance overflow")
         })?;
-        let recv_after = *recv_bal;
+        let sender_after = sender_before - total;
+
+        g.balances.insert(sender.0, sender_after);
+        g.balances.insert(receiver.0, recv_after);
 
         let now = Utc::now();
         let order = GiftOrder {
@@ -235,8 +240,7 @@ impl MemoryWallet {
             reference: order.id.to_string(),
             created_at: now,
         });
-        g.gift_orders_by_key
-            .insert(client_request_id, order.clone());
+        g.gift_orders_by_key.insert(idem_key, order.clone());
         Ok((order, false))
     }
 
@@ -327,5 +331,31 @@ mod tests {
         assert!(r_led
             .iter()
             .any(|e| e.entry_type == LedgerType::GiftCredit));
+    }
+
+    #[tokio::test]
+    async fn idempotency_key_is_scoped_per_sender() {
+        let w = MemoryWallet::new();
+        w.seed_default_gifts().await;
+        let rose = w.list_gifts().await[0].clone();
+        let a = UserId::new();
+        let b = UserId::new();
+        let recv = UserId::new();
+        w.credit_topup(a, 10, "t").await.unwrap();
+        w.credit_topup(b, 10, "t").await.unwrap();
+        let room = Uuid::new_v4();
+        let (o1, _) = w
+            .send_gift(room, a, recv, rose.id, 1, "shared-key")
+            .await
+            .unwrap();
+        let (o2, replay) = w
+            .send_gift(room, b, recv, rose.id, 1, "shared-key")
+            .await
+            .unwrap();
+        assert!(!replay);
+        assert_ne!(o1.id, o2.id);
+        assert_eq!(w.balance(a).await, 9);
+        assert_eq!(w.balance(b).await, 9);
+        assert_eq!(w.balance(recv).await, 2);
     }
 }

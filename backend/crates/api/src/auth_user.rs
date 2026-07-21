@@ -50,8 +50,17 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
             }
         })?;
 
+        let user_id = UserId(claims.sub);
+        // Enforce bans on every authenticated request (chat/gift/room/admin).
+        if state.moderation.is_banned(user_id).await {
+            return Err(ApiError(AppError::new(
+                ErrorCode::ForbiddenPolicy,
+                "user is banned",
+            )));
+        }
+
         Ok(AuthUser {
-            user_id: UserId(claims.sub),
+            user_id,
             email: claims.email.clone(),
             claims,
         })

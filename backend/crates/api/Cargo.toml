@@ -17,6 +17,7 @@ anylive-media = { path = "../media" }
 anylive-wallet = { path = "../wallet" }
 anylive-realtime = { path = "../realtime" }
 anylive-moderation = { path = "../moderation" }
+anylive-social = { path = "../social" }
 anyhow = { workspace = true }
 axum = { workspace = true }
 serde = { workspace = true }

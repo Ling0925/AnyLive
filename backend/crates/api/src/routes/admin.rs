@@ -50,7 +50,11 @@ pub struct AuditListResponse {
     pub items: Vec<AuditEventDto>,
 }
 
-/// Bootstrap/grant admin role (dev: first grant free; later admin-only).
+/// Bootstrap/grant admin role.
+///
+/// First-boot only: any authenticated user may grant **themselves** while the
+/// admin set is empty. After that, only existing admins may grant others (or
+/// re-grant themselves). Arbitrary self-promotion is rejected once any admin exists.
 #[utoipa::path(post, path = "/api/v1/admin/grant", tag = "admin", security(("bearerAuth" = [])), request_body = GrantAdminBody, responses((status = 204)))]
 pub async fn grant_admin(
     State(state): State<Arc<AppState>>,
@@ -59,14 +63,26 @@ pub async fn grant_admin(
 ) -> Result<StatusCode, ApiError> {
     let target = Uuid::parse_str(&body.user_id)
         .map_err(|_| ApiError(anylive_common::AppError::validation("invalid user_id")))?;
-    // Allow self-bootstrap when caller grants themselves and is not blocked.
-    if target != user.user_id.0 {
-        state
-            .moderation
-            .require_admin(user.user_id)
-            .await
-            .map_err(ApiError::from)?;
+    let is_self = target == user.user_id.0;
+    let admin_count = state.moderation.admin_count().await;
+    let caller_is_admin = state.moderation.is_admin(user.user_id).await;
+
+    if admin_count == 0 {
+        // Bootstrap window: only self-grant is allowed (prevents granting a peer
+        // before any admin exists via a stolen session of a non-admin).
+        if !is_self {
+            return Err(ApiError(anylive_common::AppError::new(
+                anylive_common::ErrorCode::Forbidden,
+                "bootstrap may only grant the caller",
+            )));
+        }
+    } else if !caller_is_admin {
+        return Err(ApiError(anylive_common::AppError::new(
+            anylive_common::ErrorCode::Forbidden,
+            "admin only",
+        )));
     }
+
     state.moderation.grant_admin(UserId(target)).await;
     Ok(StatusCode::NO_CONTENT)
 }

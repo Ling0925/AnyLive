@@ -46,6 +46,11 @@ impl MemoryModeration {
         self.inner.lock().await.admins.contains(&user_id.0)
     }
 
+    /// True when the admin set is empty (first-boot bootstrap window).
+    pub async fn admin_count(&self) -> usize {
+        self.inner.lock().await.admins.len()
+    }
+
     pub async fn require_admin(&self, user_id: UserId) -> Result<(), AppError> {
         if self.is_admin(user_id).await {
             Ok(())
@@ -115,9 +120,11 @@ mod tests {
         let m = MemoryModeration::new();
         let admin = UserId::new();
         let user = UserId::new();
+        assert_eq!(m.admin_count().await, 0);
         let err = m.ban_user(admin, user, "x").await.unwrap_err();
         assert_eq!(err.code, ErrorCode::Forbidden);
         m.grant_admin(admin).await;
+        assert_eq!(m.admin_count().await, 1);
         m.ban_user(admin, user, "spam").await.unwrap();
         assert!(m.is_banned(user).await);
         let audit = m.recent_audit(10).await;

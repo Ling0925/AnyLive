@@ -44,6 +44,7 @@ dependencies = [
  "anylive-media",
  "anylive-moderation",
  "anylive-realtime",
+ "anylive-social",
  "anylive-wallet",
  "axum",
  "chrono",
@@ -150,6 +151,16 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "anylive-social"
+version = "0.1.0"
+dependencies = [
+ "anylive-common",
+ "anylive-domain",
+ "tokio",
  "uuid",
 ]
 

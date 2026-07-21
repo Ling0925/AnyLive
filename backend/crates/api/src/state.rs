@@ -6,6 +6,7 @@ use anylive_auth::MemoryAuthService;
 use anylive_media::SrsMediaProvider;
 use anylive_moderation::MemoryModeration;
 use anylive_realtime::{CentrifugoConfig, MemoryChatBus};
+use anylive_social::MemorySocial;
 use anylive_wallet::MemoryWallet;
 
 use crate::rooms::MemoryRoomStore;
@@ -19,6 +20,7 @@ pub struct AppState {
     pub chat: MemoryChatBus,
     pub centrifugo: CentrifugoConfig,
     pub moderation: MemoryModeration,
+    pub social: MemorySocial,
 }
 
 impl AppState {
@@ -30,6 +32,7 @@ impl AppState {
         chat: MemoryChatBus,
         centrifugo: CentrifugoConfig,
         moderation: MemoryModeration,
+        social: MemorySocial,
     ) -> Self {
         Self {
             auth,
@@ -39,6 +42,7 @@ impl AppState {
             chat,
             centrifugo,
             moderation,
+            social,
         }
     }
 
@@ -51,6 +55,7 @@ impl AppState {
             MemoryChatBus::new(),
             CentrifugoConfig::default(),
             MemoryModeration::new(),
+            MemorySocial::new(),
         ))
     }
 

@@ -9,7 +9,7 @@ mod state;
 use std::sync::Arc;
 
 use axum::{
-    routing::{get, post},
+    routing::{delete, get, post},
     Router,
 };
 use serde::Serialize;
@@ -62,6 +62,11 @@ pub fn build_app_with_state(state: Arc<AppState>) -> Router {
             post(routes::force_close_room),
         )
         .route("/api/v1/admin/audit", get(routes::list_audit))
+        .route(
+            "/api/v1/users/{id}/follow",
+            post(routes::follow_user).delete(routes::unfollow_user),
+        )
+        .route("/api/v1/me/following", get(routes::list_following))
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
         .with_state(state)
