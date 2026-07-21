@@ -380,13 +380,15 @@ class _RoomHeader extends StatelessWidget {
   void _copyStreamUrl(BuildContext context) {
     final url = hlsUrl;
     if (url == null || url.isEmpty) return;
-    // Do not await Clipboard — the platform channel can hang under flutter_test
-    // when no clipboard plugin is wired; snackbar is the user-visible signal.
+    // Fire-and-forget clipboard; do not await (plugin may hang under flutter_test).
     // ignore: unawaited_futures
     Clipboard.setData(ClipboardData(text: url));
-    ScaffoldMessenger.of(context).showSnackBar(
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger?.showSnackBar(
       const SnackBar(
+        key: Key('stream-url-copied-snackbar'),
         content: Text('Copied - open in VLC / browser player'),
+        duration: Duration(seconds: 4),
       ),
     );
   }

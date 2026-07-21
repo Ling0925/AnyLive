@@ -33,8 +33,9 @@ Scope: [mvp-scope.md](./mvp-scope.md). Status from `git log` + current tree (API
 | Compliance stubs: legal privacy/terms, account export, soft-delete | Done | API + Flutter `ComplianceRepository` |
 | Chat rate limit (5 / 10s) | Done | `ChatRateLimiter` |
 | Live-only gifts + public active gift catalog | Done | `ROOM_NOT_LIVE` / filter active |
-| Flutter login + privacy/terms URLs | Done | `login_page.dart` |
+| Flutter login + privacy/terms + age declaration gate | Done | login requires 18+ before Verify; best-effort PATCH /me |
 | Flutter rooms / gifts / profile / feed / follow / report / ended banner | Done | Discover + room control-plane (`b28fc68`) |
+| Flutter go-live OBS publish dialog + copy HLS for external player | Done | `room_list_page` publish info; room page copy stream URL |
 | H5 HLS watch + share deep-link + room-ended UI | Done | `hlsAttach` + `share` |
 | Admin-web OTP + moderation + gifts + reports + HLS preview | Done | `admin.ts` + `App.vue` |
 | Control-plane dogfood smoke script | Done | `scripts/dogfood-api-smoke.sh` |
@@ -63,7 +64,7 @@ Scope: [mvp-scope.md](./mvp-scope.md). Status from `git log` + current tree (API
 1. End-to-end OBS → SRS → Flutter/H5 HLS play smoke on compose stack (control-plane script is ready; media path documented in `scripts/dogfood-media.md`)
 2. Real email OTP (or documented test harness for dogfood — dev code `123456` is the current harness)
 3. Persist soft-delete + refresh tokens (or document single-process dogfood)
-4. In-app Flutter player (or documented external player path for hosts — see media dogfood notes)
+4. In-app Flutter player (external copy-URL path is shipped; media_kit embed still open)
 5. 1k WS room pressure report + device smoke matrix
 6. Full Vben admin modules if required beyond current shell
 
@@ -91,7 +92,7 @@ Scope: [mvp-scope.md](./mvp-scope.md). Status from `git log` + current tree (API
 ### Compliance hooks
 
 - [x] Privacy / terms visible on login (static URLs; legal API stubs available)
-- [x] Age declaration on profile (API + profile UI checkboxes)
+- [x] Age declaration on login + profile (API + UI checkboxes)
 - [x] Report API + Flutter room report dialog
 - [x] Account delete / export API stubs + mobile client + docs
 
