@@ -212,6 +212,7 @@ pub fn map_room_error(err: RoomError) -> AppError {
 }
 
 /// Pure SQL fragments (offline-testable, no live DB).
+#[allow(dead_code)]
 pub mod sql {
     /// Insert returning full room row.
     pub const INSERT_ROOM: &str = r#"

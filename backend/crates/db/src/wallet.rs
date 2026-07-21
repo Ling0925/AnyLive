@@ -610,6 +610,7 @@ impl LedgerRow {
 }
 
 /// Pure SQL fragments for offline unit tests / documentation.
+#[allow(dead_code)]
 pub mod sql {
     pub const UPSERT_BALANCE_ZERO: &str = r#"
         INSERT INTO wallet_balances (user_id, balance)

@@ -25,37 +25,6 @@ class LegalDoc {
   }
 }
 
-/// Account export stub from `GET /api/v1/me/export`.
-class AccountExport {
-  AccountExport({
-    required this.userId,
-    required this.displayName,
-    required this.email,
-    required this.createdAt,
-    required this.roomsOwnedCount,
-    required this.note,
-  });
-
-  final String userId;
-  final String displayName;
-  final String? email;
-  final String createdAt;
-  final int roomsOwnedCount;
-  final String note;
-
-  factory AccountExport.fromJson(Map<String, dynamic> json) {
-    final user = json['user'] as Map<String, dynamic>? ?? {};
-    return AccountExport(
-      userId: user['id'] as String? ?? '',
-      displayName: user['display_name'] as String? ?? '',
-      email: user['email'] as String?,
-      createdAt: user['created_at'] as String? ?? '',
-      roomsOwnedCount: json['rooms_owned_count'] as int? ?? 0,
-      note: json['note'] as String? ?? '',
-    );
-  }
-}
-
 /// Compliance / DSAR API calls. [httpClient] injectable for tests.
 class ComplianceRepository {
   ComplianceRepository({
@@ -66,7 +35,8 @@ class ComplianceRepository {
   final ApiClient client;
   final http.Client httpClient;
 
-  Future<LegalDoc> fetchLegalPrivacy() async {
+  /// GET `/api/v1/legal/privacy`
+  Future<LegalDoc> legalPrivacy() async {
     final res = await httpClient.get(
       client.uri('/api/v1/legal/privacy'),
       headers: client.jsonHeaders(),
@@ -77,7 +47,8 @@ class ComplianceRepository {
     return LegalDoc.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
-  Future<LegalDoc> fetchLegalTerms() async {
+  /// GET `/api/v1/legal/terms`
+  Future<LegalDoc> legalTerms() async {
     final res = await httpClient.get(
       client.uri('/api/v1/legal/terms'),
       headers: client.jsonHeaders(),
@@ -88,7 +59,8 @@ class ComplianceRepository {
     return LegalDoc.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
-  Future<AccountExport> exportMe() async {
+  /// GET `/api/v1/me/export` — returns the raw JSON map (P1 stub payload).
+  Future<Map<String, dynamic>> exportMe() async {
     final res = await httpClient.get(
       client.uri('/api/v1/me/export'),
       headers: client.jsonHeaders(auth: true),
@@ -96,9 +68,10 @@ class ComplianceRepository {
     if (res.statusCode != 200) {
       throw ComplianceException('export_me_failed', res.statusCode, res.body);
     }
-    return AccountExport.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+    return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
+  /// DELETE `/api/v1/me` — soft-delete account (P1 stub, expects 204).
   Future<void> deleteMe() async {
     final res = await httpClient.delete(
       client.uri('/api/v1/me'),

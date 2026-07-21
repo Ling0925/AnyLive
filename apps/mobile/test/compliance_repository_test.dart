@@ -8,7 +8,7 @@ import 'package:anylive_mobile/api/compliance_repository.dart';
 
 void main() {
   group('ComplianceRepository', () {
-    test('fetchLegalPrivacy parses doc', () async {
+    test('legalPrivacy parses doc', () async {
       final mock = MockClient((request) async {
         expect(request.url.path, '/api/v1/legal/privacy');
         expect(request.method, 'GET');
@@ -26,13 +26,13 @@ void main() {
         client: ApiClient(baseUrl: 'http://localhost:8088'),
         httpClient: mock,
       );
-      final doc = await repo.fetchLegalPrivacy();
+      final doc = await repo.legalPrivacy();
       expect(doc.title, 'Privacy Policy');
       expect(doc.url, 'https://anylive.example/privacy');
       expect(doc.version, '1.0');
     });
 
-    test('fetchLegalTerms parses doc', () async {
+    test('legalTerms parses doc', () async {
       final mock = MockClient((request) async {
         expect(request.url.path, '/api/v1/legal/terms');
         return http.Response(
@@ -49,12 +49,12 @@ void main() {
         client: ApiClient(baseUrl: 'http://localhost:8088'),
         httpClient: mock,
       );
-      final doc = await repo.fetchLegalTerms();
+      final doc = await repo.legalTerms();
       expect(doc.title, 'Terms of Service');
       expect(doc.url, 'https://anylive.example/terms');
     });
 
-    test('exportMe parses stub payload and sends auth', () async {
+    test('exportMe returns map and sends auth', () async {
       final mock = MockClient((request) async {
         expect(request.url.path, '/api/v1/me/export');
         expect(request.headers['Authorization'], 'Bearer tok');
@@ -76,11 +76,12 @@ void main() {
       final api = ApiClient(baseUrl: 'http://x', accessToken: 'tok');
       final repo = ComplianceRepository(client: api, httpClient: mock);
       final exp = await repo.exportMe();
-      expect(exp.userId, 'u1');
-      expect(exp.displayName, 'Ada');
-      expect(exp.email, 'ada@example.com');
-      expect(exp.roomsOwnedCount, 0);
-      expect(exp.note, 'P1 export stub');
+      expect(exp['rooms_owned_count'], 0);
+      expect(exp['note'], 'P1 export stub');
+      final user = exp['user'] as Map<String, dynamic>;
+      expect(user['id'], 'u1');
+      expect(user['display_name'], 'Ada');
+      expect(user['email'], 'ada@example.com');
     });
 
     test('deleteMe expects 204', () async {

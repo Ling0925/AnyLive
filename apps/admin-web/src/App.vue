@@ -297,12 +297,15 @@ async function resolveReport(reportId: string) {
   error.value = ''
   actionBusy.value = true
   try {
-    const res = await fetch(apiUrl(apiBase, reportResolvePath()), {
-      method: 'POST',
+    const res = await fetch(apiUrl(apiBase, reportResolvePath(reportId)), {
+      method: 'PATCH',
       headers: authHeaders(),
-      body: JSON.stringify({ report_id: reportId }),
+      body: JSON.stringify({
+        status: 'resolved',
+        note: actionReason.value.trim() || undefined,
+      }),
     })
-    if (res.status !== 204 && !res.ok) {
+    if (!res.ok) {
       throw new Error(`resolve report ${res.status}`)
     }
     notice.value = `Resolved report ${reportId}`

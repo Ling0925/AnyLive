@@ -74,8 +74,8 @@ describe('api path helpers', () => {
 
   it('exposes reports list and resolve paths', () => {
     expect(reportsListPath()).toBe('/api/v1/admin/reports')
-    expect(reportResolvePath()).toBe('/api/v1/admin/reports/resolve')
     expect(reportsListPath()).toBe(API_PATHS.adminReports)
-    expect(reportResolvePath()).toBe(API_PATHS.adminReportResolve)
+    expect(reportResolvePath('abc-123')).toBe('/api/v1/admin/reports/abc-123')
+    expect(reportResolvePath('/abc-123/')).toBe('/api/v1/admin/reports/abc-123')
   })
 })

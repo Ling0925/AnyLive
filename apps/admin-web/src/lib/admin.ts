@@ -32,7 +32,6 @@ export const API_PATHS = {
   adminMute: '/api/v1/admin/mute',
   adminForceClose: '/api/v1/admin/rooms/force-close',
   adminReports: '/api/v1/admin/reports',
-  adminReportResolve: '/api/v1/admin/reports/resolve',
 } as const
 
 /** Gifts list path: admin catalog when authed, else public catalog. */
@@ -73,6 +72,8 @@ export function reportsListPath(): string {
   return API_PATHS.adminReports
 }
 
-export function reportResolvePath(): string {
-  return API_PATHS.adminReportResolve
+/** PATCH resolve path for a report id: `/api/v1/admin/reports/{id}`. */
+export function reportResolvePath(id: string): string {
+  const clean = id.replace(/^\/+|\/+$/g, '')
+  return `${API_PATHS.adminReports}/${encodeURIComponent(clean)}`
 }
