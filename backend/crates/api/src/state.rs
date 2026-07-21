@@ -6,7 +6,7 @@ use anylive_auth::{
     AuthService, InMemoryOtpStore, InMemoryRefreshStore, JwtConfig, JwtService, OtpConfig,
     OtpService,
 };
-use anylive_db::{postgres_enabled, AnyUserStore, PgPool};
+use anylive_db::{postgres_enabled, AnyUserStore, AnyWallet, PgPool};
 use anylive_media::SrsMediaProvider;
 use anylive_moderation::MemoryModeration;
 use anylive_realtime::{
@@ -14,10 +14,9 @@ use anylive_realtime::{
     NoopCentrifugoPublisher,
 };
 use anylive_social::MemorySocial;
-use anylive_wallet::MemoryWallet;
 
 use crate::guards::{check_production_secrets, is_production_env};
-use crate::rooms::MemoryRoomStore;
+use crate::rooms::AnyRoomStore;
 use crate::routes::reports::MemoryReports;
 
 /// Auth service with pluggable user store (memory default, Postgres when enabled).
@@ -26,9 +25,9 @@ pub type AppAuthService = AuthService<AnyUserStore, InMemoryOtpStore, InMemoryRe
 #[derive(Clone)]
 pub struct AppState {
     pub auth: AppAuthService,
-    pub rooms: MemoryRoomStore,
+    pub rooms: AnyRoomStore,
     pub media: SrsMediaProvider,
-    pub wallet: MemoryWallet,
+    pub wallet: AnyWallet,
     pub chat: MemoryChatBus,
     pub centrifugo: CentrifugoConfig,
     /// Centrifugo HTTP API publisher (noop when env not set).
@@ -43,9 +42,9 @@ pub struct AppState {
 impl AppState {
     pub fn new(
         auth: AppAuthService,
-        rooms: MemoryRoomStore,
+        rooms: AnyRoomStore,
         media: SrsMediaProvider,
-        wallet: MemoryWallet,
+        wallet: AnyWallet,
         chat: MemoryChatBus,
         centrifugo: CentrifugoConfig,
         centrifugo_publisher: Arc<dyn CentrifugoPublisher>,
@@ -70,7 +69,7 @@ impl AppState {
     }
 
     /// Local/dev defaults (fixed OTP `123456`, insecure JWT defaults allowed).
-    /// Unchanged for integration tests and offline development.
+    /// Unchanged for integration tests and offline development — always memory stores.
     pub fn dev() -> Arc<Self> {
         let jwt = JwtService::new(JwtConfig::from_env());
         let otp = OtpService::new(InMemoryOtpStore::default(), OtpConfig::dev());
@@ -82,9 +81,9 @@ impl AppState {
         );
         Arc::new(Self::new(
             auth,
-            MemoryRoomStore::new(),
+            AnyRoomStore::memory(),
             SrsMediaProvider::from_env(),
-            MemoryWallet::new(),
+            AnyWallet::memory(),
             MemoryChatBus::new(),
             CentrifugoConfig::default(),
             // Tests/offline: never require a live Centrifugo.
@@ -110,7 +109,7 @@ impl AppState {
     /// - `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` via [`JwtConfig::from_env`]
     /// - `CENTRIFUGO_TOKEN_SECRET` via [`CentrifugoConfig::default`]
     /// - OTP: fixed/dev OTP only when **not** production
-    /// - `USE_POSTGRES=1` + `DATABASE_URL` — optional Postgres user store + migrations
+    /// - `USE_POSTGRES=1` + `DATABASE_URL` — optional Postgres users/rooms/wallet + migrations
     ///
     /// Realtime routes are always mounted, so Centrifugo secret is always guarded
     /// in production.
@@ -139,26 +138,46 @@ impl AppState {
         let jwt = JwtService::new(jwt_cfg);
         let otp = OtpService::new(InMemoryOtpStore::default(), otp_cfg);
 
-        let (users, db) = if postgres_enabled() {
+        let (users, rooms, wallet, db) = if postgres_enabled() {
             let pool = anylive_db::connect_and_migrate_from_env()
                 .await
                 .map_err(|e| format!("postgres connect/migrate failed: {e}"))?;
-            tracing::info!("postgres enabled: migrations applied, using PostgresUserStore");
-            (AnyUserStore::postgres(pool.clone()), Some(pool))
+            tracing::info!(
+                "postgres enabled: migrations applied; using PostgresUserStore + \
+                 PostgresRoomStore + PostgresWallet"
+            );
+            (
+                AnyUserStore::postgres(pool.clone()),
+                AnyRoomStore::postgres(pool.clone()),
+                AnyWallet::postgres(pool.clone()),
+                Some(pool),
+            )
         } else {
+            if is_production_env(&app_env) {
+                // Fail closed: production must not silently run on volatile memory stores.
+                return Err(
+                    "production requires USE_POSTGRES=1 and DATABASE_URL (in-memory store forbidden)"
+                        .into(),
+                );
+            }
             tracing::info!(
                 "postgres disabled (set USE_POSTGRES=1 and DATABASE_URL to enable)"
             );
-            (AnyUserStore::memory(), None)
+            (
+                AnyUserStore::memory(),
+                AnyRoomStore::memory(),
+                AnyWallet::memory(),
+                None,
+            )
         };
 
         let auth = AuthService::new(users, otp, InMemoryRefreshStore::default(), jwt);
 
         let state = Arc::new(Self::new(
             auth,
-            MemoryRoomStore::new(),
+            rooms,
             SrsMediaProvider::from_env(),
-            MemoryWallet::new(),
+            wallet,
             MemoryChatBus::new(),
             centrifugo,
             publisher_from_env(),

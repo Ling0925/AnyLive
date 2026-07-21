@@ -956,4 +956,282 @@ mod tests {
         let audit = body_json(res).await;
         assert!(audit["items"].as_array().unwrap().len() >= 2);
     }
+
+    async fn bootstrap_admin(app: &axum::Router, token: &str) {
+        let me = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/me")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let admin_id = body_json(me).await["id"].as_str().unwrap().to_string();
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/admin/grant")
+                    .header("authorization", format!("Bearer {token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(r#"{{"user_id":"{admin_id}"}}"#)))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn admin_upsert_gift_and_list() {
+        let state = AppState::dev();
+        let app = build_app_with_state(state);
+        let admin_token = login(&app, "gift-admin@example.com").await;
+        bootstrap_admin(&app, &admin_token).await;
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/admin/gifts")
+                    .header("authorization", format!("Bearer {admin_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"name":"Rocket","price":99,"active":true}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::CREATED);
+        let gift = body_json(res).await;
+        assert_eq!(gift["name"], "Rocket");
+        assert_eq!(gift["price"], 99);
+        let gift_id = gift["id"].as_str().unwrap().to_string();
+
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/admin/gifts")
+                    .header("authorization", format!("Bearer {admin_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let list = body_json(res).await;
+        assert!(list["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|g| g["id"] == gift_id && g["name"] == "Rocket"));
+    }
+
+    #[tokio::test]
+    async fn create_report_and_admin_list() {
+        let state = AppState::dev();
+        let app = build_app_with_state(state);
+        let admin_token = login(&app, "report-admin@example.com").await;
+        let reporter_token = login(&app, "reporter@example.com").await;
+        bootstrap_admin(&app, &admin_token).await;
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/reports")
+                    .header("authorization", format!("Bearer {reporter_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"target_type":"user","target_id":"some-user","reason":"harassment"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::CREATED);
+        let report = body_json(res).await;
+        let report_id = report["id"].as_str().unwrap().to_string();
+        assert_eq!(report["target_type"], "user");
+        assert_eq!(report["reason"], "harassment");
+
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/admin/reports")
+                    .header("authorization", format!("Bearer {admin_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let list = body_json(res).await;
+        assert!(list["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["id"] == report_id && r["reason"] == "harassment"));
+    }
+
+    #[tokio::test]
+    async fn srs_on_publish_allow_live_deny_idle() {
+        let state = AppState::dev();
+        let app = build_app_with_state(state);
+        let token = login(&app, "srs-host@example.com").await;
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/rooms")
+                    .header("authorization", format!("Bearer {token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"title":"SRS Room"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::CREATED);
+        let room_id = body_json(res).await["id"].as_str().unwrap().to_string();
+
+        // idle -> deny (code 1)
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/webhooks/srs/on_publish")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(r#"{{"stream":"{room_id}"}}"#)))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(body_json(res).await["code"], 1);
+
+        // start live
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/rooms/{room_id}/start"))
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        // live -> allow (code 0)
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/webhooks/srs/on_publish")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(r#"{{"stream":"{room_id}"}}"#)))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(body_json(res).await["code"], 0);
+    }
+
+    #[tokio::test]
+    async fn feed_following_after_follow_live_host() {
+        let state = AppState::dev();
+        let app = build_app_with_state(state);
+        let host_token = login(&app, "follow-host@example.com").await;
+        let fan_token = login(&app, "follow-fan@example.com").await;
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/rooms")
+                    .header("authorization", format!("Bearer {host_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"title":"Follow Show"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let room = body_json(res).await;
+        let room_id = room["id"].as_str().unwrap().to_string();
+        let host_id = room["owner_id"].as_str().unwrap().to_string();
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/rooms/{room_id}/start"))
+                    .header("authorization", format!("Bearer {host_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        // empty before follow
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/feed/following")
+                    .header("authorization", format!("Bearer {fan_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert!(body_json(res).await["items"].as_array().unwrap().is_empty());
+
+        // follow host
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/users/{host_id}/follow"))
+                    .header("authorization", format!("Bearer {fan_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/feed/following")
+                    .header("authorization", format!("Bearer {fan_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let feed = body_json(res).await;
+        assert!(feed["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["id"] == room_id && r["status"] == "live"));
+    }
 }

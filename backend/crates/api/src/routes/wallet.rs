@@ -40,6 +40,7 @@ pub struct GiftDto {
     pub id: String,
     pub name: String,
     pub price: i64,
+    pub active: bool,
 }
 
 impl From<GiftCatalogItem> for GiftDto {
@@ -48,6 +49,7 @@ impl From<GiftCatalogItem> for GiftDto {
             id: g.id.to_string(),
             name: g.name,
             price: g.price,
+            active: g.active,
         }
     }
 }
@@ -149,8 +151,7 @@ pub async fn send_gift(
 ) -> Result<(StatusCode, Json<GiftOrderDto>), ApiError> {
     let room_id = Uuid::parse_str(&id)
         .map_err(|_| ApiError(anylive_common::AppError::validation("invalid room id")))?;
-    // Ensure room exists (and optionally live — allow idle for dogfood simplicity? Prefer exists)
-    let _room = state
+    let room = state
         .rooms
         .get(anylive_domain::RoomId(room_id))
         .await
@@ -162,7 +163,13 @@ pub async fn send_gift(
         .map_err(|_| ApiError(anylive_common::AppError::validation("invalid receiver_id")))?;
     let receiver = UserId(receiver_uuid);
 
-    // Default receiver to room owner if client sends owner's id — already required.
+    // Showroom P1: gifts only go to the room owner.
+    if room.owner_id != receiver {
+        return Err(ApiError(anylive_common::AppError::validation(
+            "receiver must be room owner",
+        )));
+    }
+
     let (order, replayed) = state
         .wallet
         .send_gift(

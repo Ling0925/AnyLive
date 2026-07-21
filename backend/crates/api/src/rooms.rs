@@ -1,9 +1,10 @@
-//! In-memory room store (control plane). Enforces domain transitions.
+//! In-memory room store (control plane) + dual backend with Postgres.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use anylive_common::{AppError, ErrorCode};
+use anylive_db::{map_room_error, PostgresRoomStore, PgPool};
 use anylive_domain::room::RoomError;
 use anylive_domain::{Room, RoomId, RoomStatus, UserId};
 use tokio::sync::RwLock;
@@ -100,17 +101,74 @@ impl MemoryRoomStore {
     }
 }
 
-fn map_room_error(err: RoomError) -> AppError {
-    match err {
-        RoomError::InvalidTitle => AppError::validation("invalid title"),
-        RoomError::InvalidTransition { from, to } => AppError::new(
-            ErrorCode::Conflict,
-            format!(
-                "invalid room transition from {} to {}",
-                from.as_str(),
-                to.as_str()
-            ),
-        ),
+/// Dual backend so the API can switch memory ↔ Postgres without generics on `AppState`.
+#[derive(Clone)]
+pub enum AnyRoomStore {
+    Memory(MemoryRoomStore),
+    Postgres(PostgresRoomStore),
+}
+
+impl AnyRoomStore {
+    pub fn memory() -> Self {
+        Self::Memory(MemoryRoomStore::new())
+    }
+
+    pub fn postgres(pool: PgPool) -> Self {
+        Self::Postgres(PostgresRoomStore::new(pool))
+    }
+
+    pub fn is_postgres(&self) -> bool {
+        matches!(self, Self::Postgres(_))
+    }
+
+    pub async fn create(
+        &self,
+        owner_id: UserId,
+        title: impl Into<String>,
+    ) -> Result<Room, AppError> {
+        match self {
+            Self::Memory(s) => s.create(owner_id, title).await,
+            Self::Postgres(s) => s.create(owner_id, title).await,
+        }
+    }
+
+    pub async fn get(&self, id: RoomId) -> Result<Room, AppError> {
+        match self {
+            Self::Memory(s) => s.get(id).await,
+            Self::Postgres(s) => s.get(id).await,
+        }
+    }
+
+    pub async fn list(&self, status: Option<RoomStatus>) -> Vec<Room> {
+        match self {
+            Self::Memory(s) => s.list(status).await,
+            Self::Postgres(s) => s.list(status).await,
+        }
+    }
+
+    pub async fn start(&self, id: RoomId, actor: UserId) -> Result<Room, AppError> {
+        match self {
+            Self::Memory(s) => s.start(id, actor).await,
+            Self::Postgres(s) => s.start(id, actor).await,
+        }
+    }
+
+    pub async fn stop(&self, id: RoomId, actor: UserId) -> Result<Room, AppError> {
+        match self {
+            Self::Memory(s) => s.stop(id, actor).await,
+            Self::Postgres(s) => s.stop(id, actor).await,
+        }
+    }
+
+    pub async fn force_close(
+        &self,
+        id: RoomId,
+        actor: Option<UserId>,
+    ) -> Result<Room, AppError> {
+        match self {
+            Self::Memory(s) => s.force_close(id, actor).await,
+            Self::Postgres(s) => s.force_close(id, actor).await,
+        }
     }
 }
 
