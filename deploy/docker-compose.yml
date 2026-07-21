@@ -1,20 +1,21 @@
-# AnyLive local dependencies (P0)
-# Usage: docker compose -f deploy/docker-compose.yml up -d
+# AnyLive local / test stack
+# Deps only:  docker compose -f deploy/docker-compose.yml up -d
+# Full test:  ./scripts/deploy-test.sh
 name: anylive
 
 services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: anylive
-      POSTGRES_PASSWORD: anylive
-      POSTGRES_DB: anylive
+      POSTGRES_USER: ${POSTGRES_USER:-anylive}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-anylive}
+      POSTGRES_DB: ${POSTGRES_DB:-anylive}
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U anylive -d anylive"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-anylive} -d ${POSTGRES_DB:-anylive}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -64,20 +65,72 @@ services:
       redis:
         condition: service_healthy
 
-  # SRS: RTMP ingest + HTTP-FLV/HLS for local push/play
   srs:
     image: ossrs/srs:5
     ports:
-      - "1935:1935"   # RTMP
-      - "1985:1985"   # API
-      - "8080:8080"   # HTTP play
-    # So http_hooks can reach the host API at host.docker.internal:8088
-    # (Docker Desktop provides this; Linux needs the host-gateway mapping).
+      - "1935:1935"
+      - "1985:1985"
+      - "8080:8080"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./srs/srs.conf:/usr/local/srs/conf/docker.conf:ro
     command: ["./objs/srs", "-c", "conf/docker.conf"]
+
+  api:
+    profiles: ["app"]
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    image: anylive-api:test
+    ports:
+      - "8088:8088"
+    environment:
+      APP_ENV: local
+      API_BIND: 0.0.0.0:8088
+      RUST_LOG: info,anylive_api=info
+      USE_POSTGRES: "1"
+      DATABASE_URL: postgres://${POSTGRES_USER:-anylive}:${POSTGRES_PASSWORD:-anylive}@postgres:5432/${POSTGRES_DB:-anylive}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-test-access-secret-change-me-32ch}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-test-refresh-secret-change-me-32ch}
+      CENTRIFUGO_URL: http://centrifugo:8000
+      CENTRIFUGO_API_KEY: ${CENTRIFUGO_API_KEY:-anylive-dev-api-key}
+      CENTRIFUGO_TOKEN_SECRET: ${CENTRIFUGO_TOKEN_SECRET:-anylive-dev-token-secret-change-me}
+      SRS_RTMP_URL: rtmp://localhost:1935/live
+      SRS_HLS_BASE: http://localhost:8080/live
+      REDIS_URL: redis://redis:6379
+      NATS_URL: nats://nats:4222
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      centrifugo:
+        condition: service_started
+      srs:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8088/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 40s
+    restart: unless-stopped
+
+  admin:
+    profiles: ["app"]
+    build:
+      context: ../apps/admin-web
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE: ${VITE_API_BASE:-http://localhost:8088}
+    image: anylive-admin:test
+    ports:
+      - "8090:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   pgdata:

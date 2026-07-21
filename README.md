@@ -26,6 +26,7 @@
 | Admin ops shell (OTP, gifts, moderation, reports, HLS preview) | ✅ |
 | Flutter feed/follow/report/profile + go-live OBS + copy HLS | ✅ |
 | Control-plane dogfood smoke (`scripts/dogfood-api-smoke.sh`) | ✅ |
+| Docker test deploy API + Admin (`./scripts/deploy-test.sh`) | ✅ |
 
 默认仍是 **内存后端**（`cargo test` / 本地 dogfood 无需 docker）。设 `USE_POSTGRES=1` + `DATABASE_URL` 时 users/rooms/wallet/social/moderation/reports/chat/profile_extras/**deleted_users**/**refresh_tokens** 切到 SQLx；OTP 挑战仍为进程内内存。媒体推流另需 SRS（见 `scripts/dogfood-media.md`）。
 
@@ -37,12 +38,20 @@
 | [产品与开发规划索引](./docs/product/README.md) | 全周期规划分册 |
 | [MVP 范围](./docs/product/mvp-scope.md) | P1 验收 |
 | [P1 实现状态](./docs/product/p1-status.md) | 已实现 / 剩余清单 |
+| [Docker 测试部署](./deploy/README.md) | API + Admin compose 测试栈 |
 
 ## 本地开发
 
 ```bash
 cp .env.example .env
-docker compose -f deploy/docker-compose.yml up -d   # 可选依赖（内存模式 API 不需要）
+
+# 一键测试栈：Postgres + API + Admin（推荐）
+./scripts/deploy-test.sh
+# API  http://localhost:8088   Admin http://localhost:8090
+# 开发 OTP = 123456
+
+# 或仅依赖
+docker compose -f deploy/docker-compose.yml up -d
 
 cd backend && cargo test --workspace
 cargo run -p anylive-api   # :8088  开发 OTP = 123456

@@ -1,0 +1,6 @@
+target/
+**/*.rs.bk
+.git/
+.gitignore
+**/*_test.rs
+**/tests/

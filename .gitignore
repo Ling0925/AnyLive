@@ -13,6 +13,7 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+!deploy/.env.test
 *.pem
 *.key
 secrets/
