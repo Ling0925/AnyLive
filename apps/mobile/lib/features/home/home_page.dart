@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../config/app_config.dart';
 import '../auth/login_page.dart';
+import '../rooms/room_list_page.dart';
 
 class HomePage extends StatelessWidget {
   const HomePage({
@@ -53,13 +54,26 @@ class HomePage extends StatelessWidget {
                 Text('signed in as $sessionLabel'),
               ],
               const SizedBox(height: 24),
-              Text(
-                loggedIn
-                    ? 'P1 control plane ready — rooms/chat/gifts via API.'
-                    : 'Sign in with email OTP (dev code 123456).',
-                style: Theme.of(context).textTheme.bodyMedium,
-                textAlign: TextAlign.center,
-              ),
+              if (loggedIn)
+                FilledButton(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => RoomListPage(
+                          config: config,
+                          accessToken: accessToken!,
+                        ),
+                      ),
+                    );
+                  },
+                  child: const Text('Browse live rooms'),
+                )
+              else
+                Text(
+                  'Sign in with email OTP (dev code 123456).',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                  textAlign: TextAlign.center,
+                ),
             ],
           ),
         ),
