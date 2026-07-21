@@ -131,8 +131,10 @@ void main() {
     expect(fake.startCalls, 1);
     expect(fake.publishCalls, 1);
     expect(find.text('You are live'), findsOneWidget);
-    expect(find.textContaining('rtmp://localhost:1935/live/r-host'), findsOneWidget);
-    expect(find.text('Copy push URL'), findsOneWidget);
+    // Server is base without stream key; key shown separately.
+    expect(find.textContaining('rtmp://localhost:1935/live'), findsOneWidget);
+    expect(find.text('r-host'), findsWidgets);
+    expect(find.text('Copy server'), findsOneWidget);
     expect(find.text('Copy stream key'), findsOneWidget);
     expect(find.text('Open room'), findsOneWidget);
 

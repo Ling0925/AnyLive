@@ -1,10 +1,14 @@
 //! SRS HTTP hooks: on_publish / on_unpublish.
+//!
+//! When `SRS_WEBHOOK_SECRET` is set, requests must present the same value via
+//! header `X-AnyLive-Webhook-Secret` or query `?secret=`. Production should
+//! always set the secret; local dogfood may leave it empty (open hooks).
 
 use std::sync::Arc;
 
 use anylive_domain::{RoomId, RoomStatus};
-use axum::extract::State;
-use axum::http::StatusCode;
+use axum::extract::{Query, State};
+use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -33,11 +37,36 @@ pub struct SrsHookResponse {
     pub code: i32,
 }
 
+#[derive(Debug, Deserialize, Default)]
+pub struct WebhookQuery {
+    #[serde(default)]
+    pub secret: Option<String>,
+}
+
 fn parse_room_stream(stream: &str) -> Option<RoomId> {
     let name = stream.trim().trim_start_matches('/');
     // Accept raw uuid or "uuid.flv" style
     let base = name.split('.').next().unwrap_or(name);
     Uuid::parse_str(base).ok().map(RoomId)
+}
+
+/// Validate optional shared secret for SRS callbacks.
+pub fn check_webhook_secret(headers: &HeaderMap, query: &WebhookQuery) -> Result<(), ApiError> {
+    let expected = match std::env::var("SRS_WEBHOOK_SECRET") {
+        Ok(s) if !s.is_empty() => s,
+        _ => return Ok(()), // open in local when unset
+    };
+    let header = headers
+        .get("x-anylive-webhook-secret")
+        .and_then(|v| v.to_str().ok());
+    let provided = header.or(query.secret.as_deref());
+    match provided {
+        Some(got) if got == expected => Ok(()),
+        _ => Err(ApiError(anylive_common::AppError::new(
+            anylive_common::ErrorCode::Forbidden,
+            "invalid webhook secret",
+        ))),
+    }
 }
 
 /// POST /api/v1/webhooks/srs/on_publish
@@ -50,8 +79,11 @@ fn parse_room_stream(stream: &str) -> Option<RoomId> {
 )]
 pub async fn srs_on_publish(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(query): Query<WebhookQuery>,
     Json(body): Json<SrsPublishHook>,
 ) -> Result<(StatusCode, Json<SrsHookResponse>), ApiError> {
+    check_webhook_secret(&headers, &query)?;
     let Some(room_id) = parse_room_stream(&body.stream) else {
         return Ok((StatusCode::OK, Json(SrsHookResponse { code: 1 })));
     };
@@ -81,8 +113,11 @@ pub async fn srs_on_publish(
 )]
 pub async fn srs_on_unpublish(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(query): Query<WebhookQuery>,
     Json(body): Json<SrsPublishHook>,
 ) -> Result<(StatusCode, Json<SrsHookResponse>), ApiError> {
+    check_webhook_secret(&headers, &query)?;
     if let Some(room_id) = parse_room_stream(&body.stream) {
         if let Ok(room) = state.rooms.get(room_id).await {
             if room.status == RoomStatus::Live {
@@ -98,6 +133,7 @@ pub async fn srs_on_unpublish(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::http::HeaderValue;
 
     #[test]
     fn parse_stream_uuid() {
@@ -107,5 +143,51 @@ mod tests {
         let room2 = parse_room_stream(&format!("{id}.flv")).unwrap();
         assert_eq!(room2.0, id);
         assert!(parse_room_stream("not-a-uuid").is_none());
+    }
+
+    #[test]
+    fn webhook_secret_open_when_unset() {
+        // Other tests may set this env var; force open mode for this case.
+        std::env::remove_var("SRS_WEBHOOK_SECRET");
+        // Also tolerate empty string as open.
+        std::env::set_var("SRS_WEBHOOK_SECRET", "");
+        let headers = HeaderMap::new();
+        let q = WebhookQuery::default();
+        let res = check_webhook_secret(&headers, &q);
+        std::env::remove_var("SRS_WEBHOOK_SECRET");
+        assert!(res.is_ok(), "empty secret should be open");
+    }
+
+    #[test]
+    fn webhook_secret_rejects_missing() {
+        std::env::set_var("SRS_WEBHOOK_SECRET", "s3cret");
+        let headers = HeaderMap::new();
+        let q = WebhookQuery::default();
+        assert!(check_webhook_secret(&headers, &q).is_err());
+        std::env::remove_var("SRS_WEBHOOK_SECRET");
+    }
+
+    #[test]
+    fn webhook_secret_accepts_header() {
+        std::env::set_var("SRS_WEBHOOK_SECRET", "s3cret");
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-anylive-webhook-secret",
+            HeaderValue::from_static("s3cret"),
+        );
+        let q = WebhookQuery::default();
+        assert!(check_webhook_secret(&headers, &q).is_ok());
+        std::env::remove_var("SRS_WEBHOOK_SECRET");
+    }
+
+    #[test]
+    fn webhook_secret_accepts_query() {
+        std::env::set_var("SRS_WEBHOOK_SECRET", "s3cret");
+        let headers = HeaderMap::new();
+        let q = WebhookQuery {
+            secret: Some("s3cret".into()),
+        };
+        assert!(check_webhook_secret(&headers, &q).is_ok());
+        std::env::remove_var("SRS_WEBHOOK_SECRET");
     }
 }

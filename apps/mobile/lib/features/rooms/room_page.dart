@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -56,6 +57,11 @@ class _RoomPageState extends State<RoomPage> {
   bool _sending = false;
   bool _followingHost = false;
   bool _followBusy = false;
+  bool _hostBusy = false;
+  PublishInfo? _publishInfo;
+  /// Durable gift idempotency keys keyed by gift id (reused until success).
+  final Map<String, String> _giftRequestIds = {};
+  Timer? _statusPoll;
 
   bool get _roomEnded =>
       !_room.isLive &&
@@ -76,10 +82,38 @@ class _RoomPageState extends State<RoomPage> {
     _social = widget.socialRepository ?? SocialRepository(client: api);
     _reports = widget.reportsRepository ?? ReportsRepository(client: api);
     _load();
+    _startStatusPoll();
+  }
+
+  void _startStatusPoll() {
+    _statusPoll?.cancel();
+    // Lightweight poll so stop/force-close/webhook flips ended UI without manual refresh.
+    _statusPoll = Timer.periodic(const Duration(seconds: 8), (_) async {
+      if (!mounted || _roomEnded) {
+        _statusPoll?.cancel();
+        return;
+      }
+      try {
+        final room = await _rooms.getRoom(_room.id);
+        if (!mounted) return;
+        if (room.status != _room.status) {
+          setState(() {
+            _room = room;
+            if (!room.isLive) {
+              _hlsUrl = null;
+              _statusPoll?.cancel();
+            }
+          });
+        }
+      } catch (_) {
+        // ignore transient poll errors
+      }
+    });
   }
 
   @override
   void dispose() {
+    _statusPoll?.cancel();
     _chatController.dispose();
     super.dispose();
   }
@@ -212,17 +246,21 @@ class _RoomPageState extends State<RoomPage> {
   }
 
   Future<void> _sendGift(GiftItem gift) async {
-    if (_sending) return;
+    if (_sending || _roomEnded) return;
     setState(() => _sending = true);
+    // One durable key per gift intent; reuse on retry until success.
+    final clientRequestId = _giftRequestIds.putIfAbsent(
+      gift.id,
+      () => 'gift-${DateTime.now().microsecondsSinceEpoch}-${gift.id}',
+    );
     try {
-      final clientRequestId =
-          'gift-${DateTime.now().microsecondsSinceEpoch}-${gift.id}';
       await _gifts.sendGift(
         roomId: _room.id,
         giftId: gift.id,
         receiverId: _room.ownerId,
         clientRequestId: clientRequestId,
       );
+      _giftRequestIds.remove(gift.id);
       final balance = await _gifts.walletBalance();
       if (!mounted) return;
       setState(() => _balance = balance);
@@ -236,6 +274,82 @@ class _RoomPageState extends State<RoomPage> {
       );
     } finally {
       if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  Future<void> _showPublishInfo() async {
+    if (_hostBusy) return;
+    setState(() => _hostBusy = true);
+    try {
+      final info = await _rooms.publishInfo(_room.id);
+      if (!mounted) return;
+      setState(() => _publishInfo = info);
+      final server = _obsServerBase(info.pushUrl, info.streamKey);
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('OBS publish'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('Server', style: Theme.of(ctx).textTheme.labelLarge),
+              SelectableText(server.isEmpty ? info.pushUrl : server),
+              const SizedBox(height: 8),
+              Text('Stream key', style: Theme.of(ctx).textTheme.labelLarge),
+              SelectableText(info.streamKey),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: server.isEmpty ? info.pushUrl : server));
+              },
+              child: const Text('Copy server'),
+            ),
+            TextButton(
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: info.streamKey));
+              },
+              child: const Text('Copy key'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('publish info failed: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _hostBusy = false);
+    }
+  }
+
+  Future<void> _stopLive() async {
+    if (_hostBusy || _roomEnded) return;
+    setState(() => _hostBusy = true);
+    try {
+      final room = await _rooms.stopRoom(_room.id);
+      if (!mounted) return;
+      setState(() {
+        _room = room;
+        _hlsUrl = null;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Live stopped')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('stop failed: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _hostBusy = false);
     }
   }
 
@@ -261,6 +375,16 @@ class _RoomPageState extends State<RoomPage> {
       appBar: AppBar(
         title: Text(_room.title),
         actions: [
+          if (_room.isLive && !_roomEnded) ...[
+            TextButton(
+              onPressed: _hostBusy ? null : _showPublishInfo,
+              child: const Text('OBS'),
+            ),
+            TextButton(
+              onPressed: _hostBusy ? null : _stopLive,
+              child: const Text('Stop'),
+            ),
+          ],
           TextButton(
             onPressed: _followBusy ? null : _toggleFollow,
             child: Text(_followingHost ? 'Unfollow' : 'Follow'),
@@ -587,4 +711,19 @@ class _ChatInput extends StatelessWidget {
       ),
     );
   }
+}
+
+String _obsServerBase(String pushUrl, String streamKey) {
+  final push = pushUrl.trim();
+  if (push.isEmpty) return '';
+  final key = streamKey.trim();
+  if (key.isNotEmpty) {
+    final suffix = '/$key';
+    if (push.endsWith(suffix)) {
+      return push.substring(0, push.length - suffix.length);
+    }
+  }
+  final i = push.lastIndexOf('/');
+  if (i > 'rtmp://'.length) return push.substring(0, i);
+  return push;
 }

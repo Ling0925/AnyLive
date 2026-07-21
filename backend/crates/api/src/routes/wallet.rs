@@ -157,20 +157,45 @@ pub async fn get_wallet_ledger(
     }))
 }
 
-/// POST /api/v1/wallet/topups — mock topup for P1 sandbox.
+/// Max mock topup per request (sandbox only).
+pub const MAX_MOCK_TOPUP_AMOUNT: i64 = 100_000;
+
+/// POST /api/v1/wallet/topups — mock topup for local/dogfood sandbox only.
+///
+/// Disabled when `APP_ENV` is production/prod. Amount capped at
+/// [`MAX_MOCK_TOPUP_AMOUNT`]. Prefer a unique `reference` for idempotency once
+/// the wallet layer enforces unique topup references.
 #[utoipa::path(post, path = "/api/v1/wallet/topups", tag = "wallet", security(("bearerAuth" = [])), request_body = TopupBody, responses((status = 200, body = WalletDto)))]
 pub async fn topup_wallet(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Json(body): Json<TopupBody>,
 ) -> Result<Json<WalletDto>, ApiError> {
+    let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "local".into());
+    if crate::guards::is_production_env(&app_env) {
+        return Err(ApiError(anylive_common::AppError::new(
+            anylive_common::ErrorCode::ForbiddenPolicy,
+            "mock topup disabled in production",
+        )));
+    }
+    if body.amount <= 0 {
+        return Err(ApiError(anylive_common::AppError::validation(
+            "topup amount must be positive",
+        )));
+    }
+    if body.amount > MAX_MOCK_TOPUP_AMOUNT {
+        return Err(ApiError(anylive_common::AppError::validation(format!(
+            "topup amount exceeds max {MAX_MOCK_TOPUP_AMOUNT}"
+        ))));
+    }
+    // Default reference is unique per request so accidental double-taps do not
+    // share a single non-idempotent "mock-topup" key once uniqueness lands.
+    let reference = body.reference.filter(|s| !s.trim().is_empty()).unwrap_or_else(|| {
+        format!("mock-topup-{}", Uuid::new_v4())
+    });
     let snap = state
         .wallet
-        .credit_topup(
-            user.user_id,
-            body.amount,
-            body.reference.unwrap_or_else(|| "mock-topup".into()),
-        )
+        .credit_topup(user.user_id, body.amount, reference)
         .await
         .map_err(ApiError::from)?;
     Ok(Json(snap.into()))

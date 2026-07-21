@@ -167,6 +167,8 @@ class _GoLiveDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     final push = publish?.pushUrl ?? '';
     final key = publish?.streamKey ?? room.id;
+    // push_url is rtmp://host/app/stream — OBS wants Server=rtmp://host/app and Key=stream.
+    final server = _obsServerFromPushUrl(push, key);
     return AlertDialog(
       title: const Text('You are live'),
       content: SingleChildScrollView(
@@ -179,26 +181,27 @@ class _GoLiveDialog extends StatelessWidget {
             Text('Room: ${room.id}',
                 style: Theme.of(context).textTheme.bodySmall),
             const SizedBox(height: 16),
-            Text('OBS / RTMP publish',
+            Text('OBS Server (Custom RTMP)',
                 style: Theme.of(context).textTheme.labelLarge),
             const SizedBox(height: 4),
-            SelectableText(push.isEmpty ? '(unavailable)' : push),
+            SelectableText(server.isEmpty ? '(unavailable)' : server),
             const SizedBox(height: 8),
-            Text('Stream key', style: Theme.of(context).textTheme.labelLarge),
+            Text('OBS Stream key',
+                style: Theme.of(context).textTheme.labelLarge),
             SelectableText(key),
             const SizedBox(height: 8),
             const Text(
-              'P1 host path: paste push URL into OBS Custom RTMP. '
-              'Stream key is the room UUID.',
+              'In OBS: Settings → Stream → Service=Custom. '
+              'Paste Server and Stream key separately — do not put the key in the server URL.',
             ),
           ],
         ),
       ),
       actions: [
-        if (push.isNotEmpty)
+        if (server.isNotEmpty)
           TextButton(
-            onPressed: () => _copy(context, 'Push URL', push),
-            child: const Text('Copy push URL'),
+            onPressed: () => _copy(context, 'OBS Server', server),
+            child: const Text('Copy server'),
           ),
         TextButton(
           onPressed: () => _copy(context, 'Stream key', key),
@@ -216,3 +219,20 @@ class _GoLiveDialog extends StatelessWidget {
     );
   }
 }
+
+/// Strip trailing /{streamKey} from a full RTMP push URL for OBS Server field.
+String _obsServerFromPushUrl(String pushUrl, String streamKey) {
+  final push = pushUrl.trim();
+  if (push.isEmpty) return '';
+  final key = streamKey.trim();
+  if (key.isNotEmpty) {
+    final suffix = '/$key';
+    if (push.endsWith(suffix)) {
+      return push.substring(0, push.length - suffix.length);
+    }
+  }
+  final i = push.lastIndexOf('/');
+  if (i > 'rtmp://'.length) return push.substring(0, i);
+  return push;
+}
+
