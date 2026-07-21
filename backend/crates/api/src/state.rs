@@ -10,6 +10,7 @@ use anylive_social::MemorySocial;
 use anylive_wallet::MemoryWallet;
 
 use crate::rooms::MemoryRoomStore;
+use crate::routes::reports::MemoryReports;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -21,6 +22,7 @@ pub struct AppState {
     pub centrifugo: CentrifugoConfig,
     pub moderation: MemoryModeration,
     pub social: MemorySocial,
+    pub reports: MemoryReports,
 }
 
 impl AppState {
@@ -33,6 +35,7 @@ impl AppState {
         centrifugo: CentrifugoConfig,
         moderation: MemoryModeration,
         social: MemorySocial,
+        reports: MemoryReports,
     ) -> Self {
         Self {
             auth,
@@ -43,6 +46,7 @@ impl AppState {
             centrifugo,
             moderation,
             social,
+            reports,
         }
     }
 
@@ -56,6 +60,7 @@ impl AppState {
             CentrifugoConfig::default(),
             MemoryModeration::new(),
             MemorySocial::new(),
+            MemoryReports::new(),
         ))
     }
 
