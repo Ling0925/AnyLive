@@ -62,3 +62,4 @@ coverage/
 **/local.properties
 **/.idea/
 output/
+reports/

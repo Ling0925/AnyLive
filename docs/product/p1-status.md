@@ -38,8 +38,8 @@ Scope: [mvp-scope.md](./mvp-scope.md). Status from `git log` + current tree (API
 | Flutter go-live OBS publish dialog + copy HLS for external player | Done | `room_list_page` publish info; room page copy stream URL |
 | H5 HLS watch + share deep-link + room-ended UI | Done | `hlsAttach` + `share` |
 | Admin-web OTP + moderation + gifts + reports + HLS preview | Done | `admin.ts` + `App.vue` |
-| Control-plane dogfood smoke script | Done | `scripts/dogfood-api-smoke.sh` |
-| Media dogfood notes (OBS → SRS → H5/Flutter) | Done | `scripts/dogfood-media.md` |
+| Production CORS restriction | Done | `CORS_ALLOWED_ORIGINS` required when `APP_ENV=production` |
+| 1k WS loadtest harness (dry-run) | Done | `scripts/loadtest/ws-1k-baseline.sh` + report stub (full Centrifugo run still operator) |
 
 ---
 
@@ -64,8 +64,10 @@ Scope: [mvp-scope.md](./mvp-scope.md). Status from `git log` + current tree (API
 1. End-to-end OBS → SRS → Flutter/H5 HLS play smoke on compose stack (control-plane script is ready; media path + SRS hooks documented)
 2. Real email OTP provider (dev fixed code `123456` is the current harness; OTP store still memory)
 3. In-app Flutter player (external copy-URL path is shipped; media_kit embed still open)
-4. 1k WS room pressure report + device smoke matrix
+4. Full Centrifugo 1k WS run with filled report numbers + device smoke matrix
 5. Full Vben admin modules if required beyond current shell
+
+Harness for (4): `./scripts/loadtest/ws-1k-baseline.sh` (dry-run) and README under `scripts/loadtest/`.
 
 ---
 
@@ -85,7 +87,8 @@ Scope: [mvp-scope.md](./mvp-scope.md). Status from `git log` + current tree (API
 
 - [ ] No open P0
 - [x] Wallet/gift automated tests green
-- [ ] 1k WS report archived
+- [x] 1k WS harness + report stub archived path (`scripts/loadtest/`, `reports/` gitignored)
+- [ ] Full 1k Centrifugo numbers filled in a report
 - [ ] Mid Android + recent iPhone smoke
 
 ### Compliance hooks

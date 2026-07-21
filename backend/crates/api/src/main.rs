@@ -1,6 +1,6 @@
 //! AnyLive HTTP API binary.
 
-use anylive_api::{build_app_with_state, AppState};
+use anylive_api::{build_app_with_state_and_cors, cors_layer_from_env, AppState};
 use std::net::SocketAddr;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -27,7 +27,9 @@ async fn main() -> anyhow::Result<()> {
     } else {
         "memory"
     };
-    let app = build_app_with_state(state);
+    // Production requires CORS_ALLOWED_ORIGINS; local keeps permissive CORS.
+    let cors = cors_layer_from_env().map_err(|e| anyhow::anyhow!("cors config: {e}"))?;
+    let app = build_app_with_state_and_cors(state, cors);
 
     let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "local".into());
     tracing::info!(%addr, %app_env, backend, "anylive-api listening");

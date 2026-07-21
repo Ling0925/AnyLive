@@ -1,6 +1,7 @@
 //! HTTP routes and OpenAPI surface for AnyLive API.
 
 mod auth_user;
+pub mod cors;
 mod error;
 pub mod guards;
 mod profile;
@@ -20,6 +21,7 @@ use tower_http::trace::TraceLayer;
 use utoipa::OpenApi;
 
 pub use auth_user::AuthUser;
+pub use cors::{cors_layer_for_env, cors_layer_from_env, is_permissive_cors};
 pub use error::ApiError;
 pub use guards::{
     check_centrifugo_for_production, check_jwt_secrets_for_production, check_otp_for_production,
@@ -33,8 +35,13 @@ pub fn build_app() -> Router {
     build_app_with_state(AppState::dev())
 }
 
-/// Build router with explicit shared state.
+/// Build router with explicit shared state (permissive CORS for offline tests).
 pub fn build_app_with_state(state: Arc<AppState>) -> Router {
+    build_app_with_state_and_cors(state, CorsLayer::permissive())
+}
+
+/// Build router with explicit shared state and CORS layer (binary uses env CORS).
+pub fn build_app_with_state_and_cors(state: Arc<AppState>, cors: CorsLayer) -> Router {
     Router::new()
         .route("/health", get(routes::health))
         .route("/ready", get(routes::ready))
@@ -97,7 +104,7 @@ pub fn build_app_with_state(state: Arc<AppState>) -> Router {
         .route("/api/v1/webhooks/srs/on_publish", post(routes::srs_on_publish))
         .route("/api/v1/webhooks/srs/on_unpublish", post(routes::srs_on_unpublish))
         .layer(TraceLayer::new_for_http())
-        .layer(CorsLayer::permissive())
+        .layer(cors)
         .with_state(state)
 }
 
