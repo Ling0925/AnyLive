@@ -18,15 +18,16 @@
 | Chat history + Centrifugo token + env-gated publish | ✅ |
 | Admin ban / mute / unmute / force-close / audit / gifts / reports | ✅ |
 | Follow / unfollow + hot / following feeds | ✅ |
-| Postgres dual store (users/rooms/wallet/social/moderation/reports/chat) | ✅ |
+| Postgres dual store (users/rooms/wallet/social/moderation/reports/chat/profile_extras) | ✅ |
 | SRS on_publish / on_unpublish webhooks | ✅ |
 | Compliance stubs (legal + export + soft-delete) | ✅ |
 | Chat rate limit + live-only gifts | ✅ |
 | H5 HLS watch + share + room-ended | ✅ |
 | Admin ops shell (OTP, gifts, moderation, reports, HLS preview) | ✅ |
 | Flutter feed/follow/report/profile + room control-plane | ✅ |
+| Control-plane dogfood smoke (`scripts/dogfood-api-smoke.sh`) | ✅ |
 
-默认仍是 **内存后端**（`cargo test` 无需 PG）。设 `USE_POSTGRES=1` + `DATABASE_URL` 时 users/rooms/wallet/social/moderation/reports/chat 切到 SQLx；soft-delete/age-privacy 仍为进程内内存。
+默认仍是 **内存后端**（`cargo test` / 本地 dogfood 无需 docker）。设 `USE_POSTGRES=1` + `DATABASE_URL` 时 users/rooms/wallet/social/moderation/reports/**chat**/profile_extras 切到 SQLx；**soft-delete** 与 **refresh token** 存储仍为进程内内存。媒体推流另需 SRS（见 `scripts/dogfood-media.md`）。
 
 ## 文档
 
@@ -41,10 +42,14 @@
 
 ```bash
 cp .env.example .env
-docker compose -f deploy/docker-compose.yml up -d   # 可选依赖
+docker compose -f deploy/docker-compose.yml up -d   # 可选依赖（内存模式 API 不需要）
 
 cd backend && cargo test --workspace
 cargo run -p anylive-api   # :8088  开发 OTP = 123456
+
+# 控制面 happy path（需 API 已启动）
+./scripts/dogfood-api-smoke.sh
+# OBS → SRS → H5/Flutter：scripts/dogfood-media.md
 
 # 客户端
 cd apps/mobile && flutter test
