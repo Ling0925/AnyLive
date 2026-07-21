@@ -162,6 +162,10 @@ impl PostgresWallet {
     }
 
     /// Idempotent gift send. Same `(sender_id, client_request_id)` returns original order.
+    ///
+    /// Concurrency: balances are locked in UUID order; idempotency is re-checked **after**
+    /// the locks so a concurrent winner is visible before any debit. A unique-constraint
+    /// loss on `gift_orders` rolls back (never commits partial balance mutations).
     pub async fn send_gift(
         &self,
         room_id: Uuid,
@@ -184,10 +188,11 @@ impl PostgresWallet {
 
         let mut tx = self.pool.begin().await.map_err(map_db)?;
 
-        // Idempotent replay first.
+        // Fast-path idempotent replay (already committed by a prior request).
         if let Some(existing) =
             fetch_order_by_idem(&mut tx, sender, &client_request_id).await?
         {
+            validate_idem_params(&existing, room_id, receiver, gift_id, count)?;
             tx.commit().await.map_err(map_db)?;
             return Ok((existing, true));
         }
@@ -234,6 +239,16 @@ impl PostgresWallet {
         .fetch_one(&mut *tx)
         .await
         .map_err(map_db)?;
+
+        // Critical: a concurrent sender may have committed while we waited on locks.
+        // Re-check before any debit so we never double-charge then "replay".
+        if let Some(existing) =
+            fetch_order_by_idem(&mut tx, sender, &client_request_id).await?
+        {
+            validate_idem_params(&existing, room_id, receiver, gift_id, count)?;
+            tx.commit().await.map_err(map_db)?;
+            return Ok((existing, true));
+        }
 
         let sender_before: i64 = sqlx::query_scalar(
             "SELECT balance FROM wallet_balances WHERE user_id = $1",
@@ -307,13 +322,14 @@ impl PostgresWallet {
             Err(sqlx::Error::Database(ref db))
                 if db.constraint() == Some("gift_orders_sender_id_client_request_id_key") =>
             {
-                // Concurrent insert won the race — return the winner as replay.
-                let existing = fetch_order_by_idem(&mut tx, sender, &client_request_id)
+                // Belt-and-suspenders: never commit a losing racer's balance mutations.
+                tx.rollback().await.map_err(map_db)?;
+                let existing = fetch_order_by_idem_pool(&self.pool, sender, &client_request_id)
                     .await?
                     .ok_or_else(|| {
                         AppError::new(ErrorCode::WalletConflict, "idempotent race unresolved")
                     })?;
-                tx.commit().await.map_err(map_db)?;
+                validate_idem_params(&existing, room_id, receiver, gift_id, count)?;
                 return Ok((existing, true));
             }
             Err(e) => return Err(map_db(e)),
@@ -500,6 +516,47 @@ async fn fetch_order_by_idem(
     Ok(row.map(GiftOrderRow::into_order))
 }
 
+async fn fetch_order_by_idem_pool(
+    pool: &PgPool,
+    sender: UserId,
+    client_request_id: &str,
+) -> Result<Option<GiftOrder>, AppError> {
+    let row = sqlx::query_as::<_, GiftOrderRow>(
+        r#"
+        SELECT id, room_id, sender_id, receiver_id, gift_id,
+               count, total_coins, client_request_id, created_at
+        FROM gift_orders
+        WHERE sender_id = $1 AND client_request_id = $2
+        "#,
+    )
+    .bind(sender.0)
+    .bind(client_request_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(map_db)?;
+    Ok(row.map(GiftOrderRow::into_order))
+}
+
+/// Match MemoryWallet: reject reusing an idempotency key with different gift params.
+fn validate_idem_params(
+    existing: &GiftOrder,
+    room_id: Uuid,
+    receiver: UserId,
+    gift_id: Uuid,
+    count: u32,
+) -> Result<(), AppError> {
+    if existing.gift_id != gift_id
+        || existing.count != count
+        || existing.receiver_id != receiver
+        || existing.room_id != room_id
+    {
+        return Err(AppError::validation(
+            "idempotency key reused with different gift parameters",
+        ));
+    }
+    Ok(())
+}
+
 fn map_db(err: sqlx::Error) -> AppError {
     tracing::error!(error = %err, "postgres wallet error");
     if let sqlx::Error::Database(db) = &err {
@@ -682,6 +739,38 @@ mod tests {
             assert_eq!(parse_ledger_type(ledger_type_str(t)), Some(t));
         }
         assert_eq!(parse_ledger_type("nope"), None);
+    }
+
+    #[test]
+    fn validate_idem_params_rejects_mismatch() {
+        let order = GiftOrder {
+            id: Uuid::new_v4(),
+            room_id: Uuid::new_v4(),
+            sender_id: UserId::new(),
+            receiver_id: UserId::new(),
+            gift_id: Uuid::new_v4(),
+            count: 1,
+            total_coins: 1,
+            client_request_id: "k".into(),
+            created_at: Utc::now(),
+        };
+        assert!(validate_idem_params(
+            &order,
+            order.room_id,
+            order.receiver_id,
+            order.gift_id,
+            order.count,
+        )
+        .is_ok());
+        let err = validate_idem_params(
+            &order,
+            order.room_id,
+            order.receiver_id,
+            Uuid::new_v4(),
+            order.count,
+        )
+        .unwrap_err();
+        assert_eq!(err.code, ErrorCode::Validation);
     }
 
     #[tokio::test]
