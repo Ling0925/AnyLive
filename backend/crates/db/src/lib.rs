@@ -6,6 +6,9 @@
 /// Expected migrations directory relative to backend workspace.
 pub const MIGRATIONS_DIR: &str = "migrations";
 
+/// Embedded list of known migration filenames (P1).
+pub const MIGRATION_FILES: &[&str] = &["001_init.sql"];
+
 /// Validate that a SQL identifier is safe for use in limited admin tooling.
 pub fn is_safe_ident(name: &str) -> bool {
     !name.is_empty()
@@ -20,6 +23,23 @@ pub fn is_safe_ident(name: &str) -> bool {
             .unwrap_or(false)
 }
 
+/// Tables created by 001_init.sql (for smoke assertions without a live DB).
+pub fn expected_tables() -> &'static [&'static str] {
+    &[
+        "users",
+        "rooms",
+        "wallet_balances",
+        "wallet_ledger",
+        "gifts",
+        "gift_orders",
+        "follows",
+        "chat_messages",
+        "admin_users",
+        "banned_users",
+        "admin_audit",
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -27,6 +47,15 @@ mod tests {
     #[test]
     fn migrations_dir_constant() {
         assert_eq!(MIGRATIONS_DIR, "migrations");
+        assert_eq!(MIGRATION_FILES, &["001_init.sql"]);
+    }
+
+    #[test]
+    fn expected_tables_cover_p1() {
+        let tables = expected_tables();
+        assert!(tables.contains(&"users"));
+        assert!(tables.contains(&"gift_orders"));
+        assert!(tables.contains(&"admin_audit"));
     }
 
     #[test]
@@ -42,5 +71,19 @@ mod tests {
         assert!(!is_safe_ident("users;drop"));
         assert!(!is_safe_ident("1users"));
         assert!(!is_safe_ident("a-b"));
+    }
+
+    #[test]
+    fn init_migration_file_exists() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../migrations/001_init.sql");
+        assert!(
+            path.exists(),
+            "expected migration at {}",
+            path.display()
+        );
+        let sql = std::fs::read_to_string(&path).unwrap();
+        assert!(sql.contains("CREATE TABLE IF NOT EXISTS users"));
+        assert!(sql.contains("UNIQUE (sender_id, client_request_id)"));
     }
 }
