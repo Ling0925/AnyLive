@@ -139,6 +139,15 @@ where
             .ok_or_else(|| AppError::not_found("user not found"))
     }
 
+    /// Update the authenticated user's display name.
+    pub async fn update_display_name(
+        &self,
+        user_id: UserId,
+        display_name: String,
+    ) -> Result<User, AppError> {
+        self.users.update_display_name(user_id, display_name).await
+    }
+
     pub async fn require_email_normalized(email: &str) -> Result<String, AppError> {
         normalize_email(email)
     }
@@ -210,6 +219,25 @@ mod tests {
 
         let me = svc.me(session.user.id).await.unwrap();
         assert_eq!(me.id, session.user.id);
+    }
+
+    #[tokio::test]
+    async fn update_display_name_via_service() {
+        let svc = service();
+        let session = svc
+            .verify_otp(OtpVerifyRequest {
+                email: "rename@example.com".into(),
+                code: DEV_OTP_CODE.into(),
+            })
+            .await
+            .unwrap();
+        let updated = svc
+            .update_display_name(session.user.id, "Renamed".into())
+            .await
+            .unwrap();
+        assert_eq!(updated.display_name, "Renamed");
+        let me = svc.me(session.user.id).await.unwrap();
+        assert_eq!(me.display_name, "Renamed");
     }
 
     #[tokio::test]

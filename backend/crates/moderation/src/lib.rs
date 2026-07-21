@@ -1,4 +1,4 @@
-//! Admin moderation: ban users, force-close rooms, audit log.
+//! Admin moderation: ban/mute users, force-close rooms, audit log.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -28,6 +28,8 @@ pub struct MemoryModeration {
 #[derive(Default)]
 struct ModState {
     banned_users: HashSet<Uuid>,
+    /// Global mute (P1: no expiry). Muted users cannot chat or send gifts.
+    muted_users: HashSet<Uuid>,
     /// user_id -> admin role
     admins: HashSet<Uuid>,
     audit: Vec<AuditEvent>,
@@ -83,6 +85,52 @@ impl MemoryModeration {
         self.inner.lock().await.banned_users.contains(&user_id.0)
     }
 
+    /// Mute a user (admin). Global mute for P1 — blocks chat + gifts.
+    pub async fn mute_user(
+        &self,
+        actor: UserId,
+        target: UserId,
+        reason: impl Into<String>,
+    ) -> Result<(), AppError> {
+        self.require_admin(actor).await?;
+        let mut g = self.inner.lock().await;
+        g.muted_users.insert(target.0);
+        g.audit.push(AuditEvent {
+            id: Uuid::new_v4(),
+            actor_id: actor,
+            action: "mute_user".into(),
+            target: target.0.to_string(),
+            detail: reason.into(),
+            created_at: Utc::now(),
+        });
+        Ok(())
+    }
+
+    /// Unmute a user (admin).
+    pub async fn unmute_user(
+        &self,
+        actor: UserId,
+        target: UserId,
+        reason: impl Into<String>,
+    ) -> Result<(), AppError> {
+        self.require_admin(actor).await?;
+        let mut g = self.inner.lock().await;
+        g.muted_users.remove(&target.0);
+        g.audit.push(AuditEvent {
+            id: Uuid::new_v4(),
+            actor_id: actor,
+            action: "unmute_user".into(),
+            target: target.0.to_string(),
+            detail: reason.into(),
+            created_at: Utc::now(),
+        });
+        Ok(())
+    }
+
+    pub async fn is_muted(&self, user_id: UserId) -> bool {
+        self.inner.lock().await.muted_users.contains(&user_id.0)
+    }
+
     pub async fn audit_force_close(
         &self,
         actor: UserId,
@@ -129,5 +177,42 @@ mod tests {
         assert!(m.is_banned(user).await);
         let audit = m.recent_audit(10).await;
         assert_eq!(audit[0].action, "ban_user");
+    }
+
+    #[tokio::test]
+    async fn mute_requires_admin_and_unmutes() {
+        let m = MemoryModeration::new();
+        let admin = UserId::new();
+        let user = UserId::new();
+
+        let err = m.mute_user(admin, user, "noise").await.unwrap_err();
+        assert_eq!(err.code, ErrorCode::Forbidden);
+        assert!(!m.is_muted(user).await);
+
+        m.grant_admin(admin).await;
+        m.mute_user(admin, user, "spam chat").await.unwrap();
+        assert!(m.is_muted(user).await);
+
+        let audit = m.recent_audit(10).await;
+        assert_eq!(audit[0].action, "mute_user");
+        assert_eq!(audit[0].detail, "spam chat");
+
+        m.unmute_user(admin, user, "appeal accepted").await.unwrap();
+        assert!(!m.is_muted(user).await);
+        let audit = m.recent_audit(10).await;
+        assert_eq!(audit[0].action, "unmute_user");
+    }
+
+    #[tokio::test]
+    async fn unmute_requires_admin() {
+        let m = MemoryModeration::new();
+        let admin = UserId::new();
+        let other = UserId::new();
+        let user = UserId::new();
+        m.grant_admin(admin).await;
+        m.mute_user(admin, user, "x").await.unwrap();
+        let err = m.unmute_user(other, user, "nope").await.unwrap_err();
+        assert_eq!(err.code, ErrorCode::Forbidden);
+        assert!(m.is_muted(user).await);
     }
 }

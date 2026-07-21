@@ -20,6 +20,9 @@ pub const MAX_CHAT_LEN: usize = 500;
 /// Realtime event type for chat messages on room channels.
 pub const EVENT_CHAT_MESSAGE: &str = "chat.message";
 
+/// Realtime event type for gift orders fan-out on room channels.
+pub const EVENT_GIFT_SENT: &str = "gift.sent";
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChatMessage {
     pub id: Uuid,
@@ -30,7 +33,7 @@ pub struct ChatMessage {
     pub created_at: chrono::DateTime<Utc>,
 }
 
-/// Envelope published to Centrifugo channels (and future event types).
+/// Envelope published to Centrifugo channels (chat; gift uses [`gift_envelope`]).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MessageEnvelope {
     #[serde(rename = "type")]
@@ -47,6 +50,18 @@ pub struct ChatMessagePayload {
     pub sender_name: String,
     pub body: String,
     pub created_at: String,
+}
+
+/// JSON-stable gift fan-out payload (string ids for client compatibility).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GiftSentPayload {
+    pub order_id: String,
+    pub room_id: String,
+    pub sender_id: String,
+    pub receiver_id: String,
+    pub gift_id: String,
+    pub count: u32,
+    pub total_coins: i64,
 }
 
 impl From<&ChatMessage> for ChatMessagePayload {
@@ -78,6 +93,31 @@ impl MessageEnvelope {
         serde_json::to_value(self)
             .map_err(|e| AppError::new(ErrorCode::Internal, format!("envelope serialize: {e}")))
     }
+}
+
+/// Build a Centrifugo-ready gift.sent envelope (`type` + `payload`).
+pub fn gift_envelope(
+    order_id: Uuid,
+    room_id: Uuid,
+    sender_id: UserId,
+    receiver_id: UserId,
+    gift_id: Uuid,
+    count: u32,
+    total_coins: i64,
+) -> serde_json::Value {
+    let payload = GiftSentPayload {
+        order_id: order_id.to_string(),
+        room_id: room_id.to_string(),
+        sender_id: sender_id.0.to_string(),
+        receiver_id: receiver_id.0.to_string(),
+        gift_id: gift_id.to_string(),
+        count,
+        total_coins,
+    };
+    serde_json::json!({
+        "type": EVENT_GIFT_SENT,
+        "payload": payload,
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -422,6 +462,51 @@ mod tests {
         let back: MessageEnvelope = serde_json::from_value(json).unwrap();
         assert_eq!(back.event_type, EVENT_CHAT_MESSAGE);
         assert_eq!(back.payload.body, "hello live");
+    }
+
+    #[test]
+    fn gift_envelope_serializes_gift_sent_type() {
+        let order_id = Uuid::new_v4();
+        let room_id = Uuid::new_v4();
+        let sender = UserId::new();
+        let receiver = UserId::new();
+        let gift_id = Uuid::new_v4();
+        let json = gift_envelope(order_id, room_id, sender, receiver, gift_id, 3, 300);
+        assert_eq!(json["type"], "gift.sent");
+        assert_eq!(json["type"], EVENT_GIFT_SENT);
+        assert_eq!(json["payload"]["order_id"], order_id.to_string());
+        assert_eq!(json["payload"]["room_id"], room_id.to_string());
+        assert_eq!(json["payload"]["sender_id"], sender.0.to_string());
+        assert_eq!(json["payload"]["receiver_id"], receiver.0.to_string());
+        assert_eq!(json["payload"]["gift_id"], gift_id.to_string());
+        assert_eq!(json["payload"]["count"], 3);
+        assert_eq!(json["payload"]["total_coins"], 300);
+        // payload round-trip
+        let payload: GiftSentPayload =
+            serde_json::from_value(json["payload"].clone()).unwrap();
+        assert_eq!(payload.count, 3);
+        assert_eq!(payload.total_coins, 300);
+        assert_eq!(payload.order_id, order_id.to_string());
+    }
+
+    #[tokio::test]
+    async fn recording_publisher_captures_gift_envelope() {
+        let pubr = RecordingCentrifugoPublisher::new();
+        let room = RoomId::new();
+        let order_id = Uuid::new_v4();
+        let sender = UserId::new();
+        let receiver = UserId::new();
+        let gift_id = Uuid::new_v4();
+        let data = gift_envelope(order_id, room.0, sender, receiver, gift_id, 1, 10);
+        let channel = MessageEnvelope::room_channel(room);
+        pubr.publish(&channel, data).await.unwrap();
+        let snap = pubr.snapshot().await;
+        assert_eq!(snap.len(), 1);
+        assert_eq!(snap[0].0, format!("room:{}", room.0));
+        assert_eq!(snap[0].1["type"], "gift.sent");
+        assert_eq!(snap[0].1["payload"]["order_id"], order_id.to_string());
+        assert_eq!(snap[0].1["payload"]["count"], 1);
+        assert_eq!(snap[0].1["payload"]["total_coins"], 10);
     }
 
     #[tokio::test]

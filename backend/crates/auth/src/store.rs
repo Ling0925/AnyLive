@@ -29,6 +29,12 @@ pub trait UserStore: Send + Sync + Clone {
     async fn find_by_email(&self, email: &str) -> Result<Option<User>, AppError>;
     async fn find_by_id(&self, id: UserId) -> Result<Option<User>, AppError>;
     async fn upsert_by_email(&self, email: &str) -> Result<User, AppError>;
+    /// Update display name for an existing user; returns the updated user.
+    async fn update_display_name(
+        &self,
+        id: UserId,
+        display_name: String,
+    ) -> Result<User, AppError>;
 }
 
 /// Active refresh tokens keyed by jti.
@@ -112,6 +118,21 @@ impl UserStore for InMemoryUserStore {
         self.by_id.write().await.insert(user.id.0, user.clone());
         Ok(user)
     }
+
+    async fn update_display_name(
+        &self,
+        id: UserId,
+        display_name: String,
+    ) -> Result<User, AppError> {
+        let name = User::validate_display_name(display_name)
+            .map_err(|e| AppError::validation(format!("{e}")))?;
+        let mut by_id = self.by_id.write().await;
+        let user = by_id
+            .get_mut(&id.0)
+            .ok_or_else(|| AppError::not_found("user not found"))?;
+        user.display_name = name;
+        Ok(user.clone())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -166,6 +187,40 @@ mod tests {
         let a = store.upsert_by_email("a@example.com").await.unwrap();
         let b = store.upsert_by_email("a@example.com").await.unwrap();
         assert_eq!(a.id, b.id);
+    }
+
+    #[tokio::test]
+    async fn update_display_name_persists() {
+        let store = InMemoryUserStore::default();
+        let u = store.upsert_by_email("name@example.com").await.unwrap();
+        let updated = store
+            .update_display_name(u.id, "New Name".into())
+            .await
+            .unwrap();
+        assert_eq!(updated.display_name, "New Name");
+        let again = store.find_by_id(u.id).await.unwrap().unwrap();
+        assert_eq!(again.display_name, "New Name");
+    }
+
+    #[tokio::test]
+    async fn update_display_name_rejects_empty() {
+        let store = InMemoryUserStore::default();
+        let u = store.upsert_by_email("bad@example.com").await.unwrap();
+        let err = store
+            .update_display_name(u.id, "   ".into())
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, anylive_common::ErrorCode::Validation);
+    }
+
+    #[tokio::test]
+    async fn update_display_name_missing_user() {
+        let store = InMemoryUserStore::default();
+        let err = store
+            .update_display_name(UserId::new(), "Ghost".into())
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, anylive_common::ErrorCode::NotFound);
     }
 
     #[tokio::test]

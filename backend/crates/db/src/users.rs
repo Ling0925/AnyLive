@@ -121,6 +121,30 @@ impl UserStore for PostgresUserStore {
         .map_err(map_db)?;
         Ok(row.into())
     }
+
+    async fn update_display_name(
+        &self,
+        id: UserId,
+        display_name: String,
+    ) -> Result<User, AppError> {
+        let name = User::validate_display_name(display_name)
+            .map_err(|e| AppError::validation(format!("{e}")))?;
+        let row = sqlx::query_as::<_, UserRow>(
+            r#"
+            UPDATE users
+            SET display_name = $2
+            WHERE id = $1
+            RETURNING id, display_name, email, created_at
+            "#,
+        )
+        .bind(id.0)
+        .bind(&name)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_db)?
+        .ok_or_else(|| AppError::not_found("user not found"))?;
+        Ok(row.into())
+    }
 }
 
 /// Dual backend so the API can switch memory ↔ Postgres without generics on `AppState`.
@@ -166,6 +190,17 @@ impl UserStore for AnyUserStore {
             Self::Postgres(s) => s.upsert_by_email(email).await,
         }
     }
+
+    async fn update_display_name(
+        &self,
+        id: UserId,
+        display_name: String,
+    ) -> Result<User, AppError> {
+        match self {
+            Self::Memory(s) => s.update_display_name(id, display_name).await,
+            Self::Postgres(s) => s.update_display_name(id, display_name).await,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -180,6 +215,19 @@ mod tests {
         let b = store.upsert_by_email("a@example.com").await.unwrap();
         assert_eq!(a.id, b.id);
         assert!(!store.is_postgres());
+    }
+
+    #[tokio::test]
+    async fn memory_backend_update_display_name() {
+        let store = AnyUserStore::memory();
+        let u = store.upsert_by_email("rename@example.com").await.unwrap();
+        let updated = store
+            .update_display_name(u.id, "Renamed".into())
+            .await
+            .unwrap();
+        assert_eq!(updated.display_name, "Renamed");
+        let again = store.find_by_id(u.id).await.unwrap().unwrap();
+        assert_eq!(again.display_name, "Renamed");
     }
 
     #[test]
