@@ -1,0 +1,64 @@
+# AnyLive error codes
+# Source of truth mirrored in anylive-common::ErrorCode
+
+codes:
+  INTERNAL:
+    http: 500
+    retryable: true
+    description: Unexpected server error
+  NOT_FOUND:
+    http: 404
+    retryable: false
+    description: Resource not found
+  UNAUTHORIZED:
+    http: 401
+    retryable: false
+    description: Missing or invalid credentials
+  FORBIDDEN:
+    http: 403
+    retryable: false
+    description: Authenticated but not allowed
+  VALIDATION:
+    http: 400
+    retryable: false
+    description: Request validation failed
+  CONFLICT:
+    http: 409
+    retryable: false
+    description: State conflict
+  RATE_LIMITED:
+    http: 429
+    retryable: true
+    description: Too many requests
+  AUTH_INVALID_OTP:
+    http: 401
+    retryable: false
+    description: OTP invalid or expired
+  AUTH_TOKEN_REVOKED:
+    http: 401
+    retryable: false
+    description: Refresh or access token revoked
+  ROOM_NOT_LIVE:
+    http: 409
+    retryable: false
+    description: Room is not in live state
+  MEDIA_PROVIDER_ERROR:
+    http: 502
+    retryable: true
+    description: Upstream media provider failure
+  GIFT_INSUFFICIENT_BALANCE:
+    http: 402
+    retryable: false
+    description: Wallet balance too low
+  GIFT_IDEMPOTENT_REPLAY:
+    http: 200
+    retryable: false
+    description: Idempotent gift replay returns original result
+  WALLET_CONFLICT:
+    http: 409
+    retryable: true
+    description: Concurrent wallet mutation conflict
+  FORBIDDEN_POLICY:
+    http: 403
+    retryable: false
+    description: Blocked by policy engine

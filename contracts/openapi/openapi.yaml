@@ -1,0 +1,304 @@
+openapi: 3.1.0
+info:
+  title: AnyLive API
+  version: 0.1.0
+  description: |
+    AnyLive overseas-first live streaming control plane.
+    P0 surface: system health + meta. Auth/rooms freeze in v0.1/v0.2.
+servers:
+  - url: http://localhost:8088
+    description: Local API
+tags:
+  - name: system
+    description: Health and metadata
+  - name: auth
+    description: Authentication (stub paths for freeze)
+  - name: users
+    description: User profile (stub paths for freeze)
+  - name: rooms
+    description: Rooms (stub paths for freeze)
+paths:
+  /health:
+    get:
+      tags: [system]
+      operationId: health
+      summary: Liveness probe
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /ready:
+    get:
+      tags: [system]
+      operationId: ready
+      summary: Readiness probe
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadyResponse"
+  /api/v1/meta:
+    get:
+      tags: [system]
+      operationId: meta
+      summary: Service metadata
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetaResponse"
+  /api/v1/auth/otp/send:
+    post:
+      tags: [auth]
+      operationId: authOtpSend
+      summary: Send email OTP (P1)
+      description: Stub contract — implemented in auth milestone.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OtpSendRequest"
+      responses:
+        "204":
+          description: OTP sent (or silently accepted)
+        "400":
+          $ref: "#/components/responses/Error"
+  /api/v1/auth/otp/verify:
+    post:
+      tags: [auth]
+      operationId: authOtpVerify
+      summary: Verify OTP and issue tokens (P1)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OtpVerifyRequest"
+      responses:
+        "200":
+          description: Tokens issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenPair"
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/me:
+    get:
+      tags: [users]
+      operationId: getMe
+      summary: Current user profile (P1)
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/rooms:
+    post:
+      tags: [rooms]
+      operationId: createRoom
+      summary: Create a room (P1)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRoomRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Room"
+        "401":
+          $ref: "#/components/responses/Error"
+    get:
+      tags: [rooms]
+      operationId: listRooms
+      summary: List live/hot rooms (P1)
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [idle, live, closed]
+      responses:
+        "200":
+          description: Room list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Room"
+  /api/v1/rooms/{roomId}:
+    get:
+      tags: [rooms]
+      operationId: getRoom
+      summary: Get room by id
+      parameters:
+        - $ref: "#/components/parameters/RoomId"
+      responses:
+        "200":
+          description: Room
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Room"
+        "404":
+          $ref: "#/components/responses/Error"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    RoomId:
+      name: roomId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    Error:
+      description: Error envelope
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status, service]
+      properties:
+        status:
+          type: string
+          example: ok
+        service:
+          type: string
+          example: anylive-api
+    ReadyResponse:
+      type: object
+      required: [ready]
+      properties:
+        ready:
+          type: boolean
+    MetaResponse:
+      type: object
+      required: [name, version, api_version]
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+        api_version:
+          type: string
+          example: v1
+    ApiError:
+      type: object
+      required: [code, message, retryable]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        request_id:
+          type: string
+        retryable:
+          type: boolean
+    OtpSendRequest:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+    OtpVerifyRequest:
+      type: object
+      required: [email, code]
+      properties:
+        email:
+          type: string
+          format: email
+        code:
+          type: string
+          minLength: 4
+          maxLength: 8
+    TokenPair:
+      type: object
+      required: [access_token, refresh_token, expires_in]
+      properties:
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        expires_in:
+          type: integer
+          description: Access token lifetime seconds
+    User:
+      type: object
+      required: [id, display_name, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        display_name:
+          type: string
+        email:
+          type: string
+          format: email
+        created_at:
+          type: string
+          format: date-time
+    CreateRoomRequest:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 80
+    Room:
+      type: object
+      required: [id, owner_id, title, status, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        owner_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        status:
+          type: string
+          enum: [idle, live, closed]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
