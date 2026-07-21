@@ -11,13 +11,16 @@
 //! ```
 //!
 //! When enabled, API [`AppState::from_env`] wires Postgres dual stores for
-//! users/rooms/wallet/social/moderation/reports/chat/profile_extras. Default (no env) keeps
-//! in-memory stores so `cargo test --workspace` needs no live PG.
+//! users/rooms/wallet/social/moderation/reports/chat/profile_extras/deleted_users/refresh.
+//! OTP stays in-memory for P1. Default (no env) keeps in-memory stores so
+//! `cargo test --workspace` needs no live PG.
 
 mod chat;
+mod deleted_users;
 mod moderation;
 mod pool;
 mod profile;
+mod refresh;
 mod reports;
 mod rooms;
 mod social;
@@ -25,6 +28,7 @@ mod users;
 mod wallet;
 
 pub use chat::{validate_chat_body, AnyChat, PostgresChat};
+pub use deleted_users::{AnyDeletedUsers, MemoryDeletedUsers, PostgresDeletedUsers};
 pub use moderation::{AnyModeration, PostgresModeration};
 pub use pool::{
     connect, connect_and_migrate_from_env, migrate, migrations_dir, ping, postgres_enabled,
@@ -33,6 +37,7 @@ pub use pool::{
 pub use profile::{
     AnyProfileExtras, MemoryProfileExtras, PostgresProfileExtras, ProfileExtras,
 };
+pub use refresh::{AnyRefreshStore, PostgresRefreshStore};
 pub use reports::{AnyReports, MemoryReports, PostgresReports, Report, ReportStatus};
 pub use rooms::{map_room_error, PostgresRoomStore};
 pub use social::{AnySocial, PostgresSocial};
@@ -47,6 +52,7 @@ pub const MIGRATION_FILES: &[&str] = &[
     "001_init.sql",
     "002_reports_mute.sql",
     "003_profile_extras.sql",
+    "004_auth_sessions.sql",
 ];
 
 /// Validate that a SQL identifier is safe for use in limited admin tooling.
@@ -63,7 +69,7 @@ pub fn is_safe_ident(name: &str) -> bool {
             .unwrap_or(false)
 }
 
-/// Tables created by 001–003 migrations (smoke assertions without a live DB).
+/// Tables created by 001–004 migrations (smoke assertions without a live DB).
 pub fn expected_tables() -> &'static [&'static str] {
     &[
         "users",
@@ -80,6 +86,8 @@ pub fn expected_tables() -> &'static [&'static str] {
         "reports",
         "muted_users",
         "profile_extras",
+        "deleted_users",
+        "refresh_tokens",
     ]
 }
 
@@ -95,7 +103,8 @@ mod tests {
             &[
                 "001_init.sql",
                 "002_reports_mute.sql",
-                "003_profile_extras.sql"
+                "003_profile_extras.sql",
+                "004_auth_sessions.sql",
             ]
         );
     }
@@ -109,6 +118,8 @@ mod tests {
         assert!(tables.contains(&"reports"));
         assert!(tables.contains(&"muted_users"));
         assert!(tables.contains(&"profile_extras"));
+        assert!(tables.contains(&"deleted_users"));
+        assert!(tables.contains(&"refresh_tokens"));
     }
 
     #[test]
@@ -167,6 +178,21 @@ mod tests {
         assert!(sql.contains("CREATE TABLE IF NOT EXISTS profile_extras"));
         assert!(sql.contains("age_confirmed_at"));
         assert!(sql.contains("privacy_accepted_at"));
+    }
+
+    #[test]
+    fn auth_sessions_migration_file_exists() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../migrations/004_auth_sessions.sql");
+        assert!(
+            path.exists(),
+            "expected migration at {}",
+            path.display()
+        );
+        let sql = std::fs::read_to_string(&path).unwrap();
+        assert!(sql.contains("CREATE TABLE IF NOT EXISTS deleted_users"));
+        assert!(sql.contains("CREATE TABLE IF NOT EXISTS refresh_tokens"));
+        assert!(sql.contains("idx_refresh_tokens_user"));
     }
 
     #[test]

@@ -1,15 +1,12 @@
 //! P1 compliance stubs: account export/delete + legal links.
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use anylive_common::AppError;
-use anylive_domain::UserId;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
 use serde::Serialize;
-use tokio::sync::Mutex;
 use utoipa::ToSchema;
 
 use crate::auth_user::AuthUser;
@@ -17,25 +14,8 @@ use crate::error::ApiError;
 use crate::routes::auth::UserDto;
 use crate::state::AppState;
 
-/// In-memory set of soft-deleted user IDs (P1 stub).
-#[derive(Clone, Default)]
-pub struct DeletedUsers {
-    inner: Arc<Mutex<HashSet<UserId>>>,
-}
-
-impl DeletedUsers {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub async fn mark_deleted(&self, user_id: UserId) {
-        self.inner.lock().await.insert(user_id);
-    }
-
-    pub async fn is_deleted(&self, user_id: UserId) -> bool {
-        self.inner.lock().await.contains(&user_id)
-    }
-}
+/// Re-export dual soft-delete store for call sites / tests.
+pub use anylive_db::AnyDeletedUsers as DeletedUsers;
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct AccountExportDto {
@@ -280,6 +260,8 @@ mod tests {
 
     #[tokio::test]
     async fn deleted_users_set_works() {
+        use anylive_domain::UserId;
+
         let set = DeletedUsers::new();
         let id = UserId::new();
         assert!(!set.is_deleted(id).await);

@@ -2,13 +2,10 @@
 
 use std::sync::Arc;
 
-use anylive_auth::{
-    AuthService, InMemoryOtpStore, InMemoryRefreshStore, JwtConfig, JwtService, OtpConfig,
-    OtpService,
-};
+use anylive_auth::{AuthService, InMemoryOtpStore, JwtConfig, JwtService, OtpConfig, OtpService};
 use anylive_db::{
-    postgres_enabled, AnyChat, AnyModeration, AnyProfileExtras, AnyReports, AnySocial,
-    AnyUserStore, AnyWallet, PgPool,
+    postgres_enabled, AnyChat, AnyDeletedUsers, AnyModeration, AnyProfileExtras, AnyRefreshStore,
+    AnyReports, AnySocial, AnyUserStore, AnyWallet, PgPool,
 };
 use anylive_media::SrsMediaProvider;
 use anylive_realtime::{
@@ -18,10 +15,10 @@ use anylive_realtime::{
 
 use crate::guards::{check_production_secrets, is_production_env};
 use crate::rooms::AnyRoomStore;
-use crate::routes::compliance::DeletedUsers;
 
-/// Auth service with pluggable user store (memory default, Postgres when enabled).
-pub type AppAuthService = AuthService<AnyUserStore, InMemoryOtpStore, InMemoryRefreshStore>;
+/// Auth service with pluggable user + refresh stores (memory default, Postgres when enabled).
+/// OTP stays in-memory for P1 (short TTL; process-local is acceptable).
+pub type AppAuthService = AuthService<AnyUserStore, InMemoryOtpStore, AnyRefreshStore>;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -38,8 +35,8 @@ pub struct AppState {
     pub moderation: AnyModeration,
     pub social: AnySocial,
     pub reports: AnyReports,
-    /// Soft-deleted accounts (P1 compliance stub).
-    pub deleted_users: DeletedUsers,
+    /// Soft-deleted accounts (memory dual store; Postgres when USE_POSTGRES=1).
+    pub deleted_users: AnyDeletedUsers,
     /// Age/privacy declarations (memory dual store; Postgres when USE_POSTGRES=1).
     pub profile_extras: AnyProfileExtras,
     /// Present when `USE_POSTGRES=1` + `DATABASE_URL` were used at startup.
@@ -59,7 +56,7 @@ impl AppState {
         moderation: AnyModeration,
         social: AnySocial,
         reports: AnyReports,
-        deleted_users: DeletedUsers,
+        deleted_users: AnyDeletedUsers,
         profile_extras: AnyProfileExtras,
         db: Option<PgPool>,
     ) -> Self {
@@ -86,12 +83,7 @@ impl AppState {
     pub fn dev() -> Arc<Self> {
         let jwt = JwtService::new(JwtConfig::from_env());
         let otp = OtpService::new(InMemoryOtpStore::default(), OtpConfig::dev());
-        let auth = AuthService::new(
-            AnyUserStore::memory(),
-            otp,
-            InMemoryRefreshStore::default(),
-            jwt,
-        );
+        let auth = AuthService::new(AnyUserStore::memory(), otp, AnyRefreshStore::memory(), jwt);
         Arc::new(Self::new(
             auth,
             AnyRoomStore::memory(),
@@ -105,7 +97,7 @@ impl AppState {
             AnyModeration::memory(),
             AnySocial::memory(),
             AnyReports::memory(),
-            DeletedUsers::new(),
+            AnyDeletedUsers::memory(),
             AnyProfileExtras::memory(),
             None,
         ))
@@ -124,7 +116,7 @@ impl AppState {
     /// - `APP_ENV` — `production` / `prod` enables fail-closed secret checks
     /// - `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` via [`JwtConfig::from_env`]
     /// - `CENTRIFUGO_TOKEN_SECRET` via [`CentrifugoConfig::default`]
-    /// - OTP: fixed/dev OTP only when **not** production
+    /// - OTP: fixed/dev OTP only when **not** production (OTP store stays in-memory for P1)
     /// - `USE_POSTGRES=1` + `DATABASE_URL` — optional Postgres dual stores + migrations
     ///
     /// Realtime routes are always mounted, so Centrifugo secret is always guarded
@@ -152,53 +144,68 @@ impl AppState {
         )?;
 
         let jwt = JwtService::new(jwt_cfg);
+        // OTP remains process-local for P1 (short TTL; dual store deferred).
         let otp = OtpService::new(InMemoryOtpStore::default(), otp_cfg);
 
-        let (users, rooms, wallet, moderation, social, reports, chat, profile_extras, db) =
-            if postgres_enabled() {
-                let pool = anylive_db::connect_and_migrate_from_env()
-                    .await
-                    .map_err(|e| format!("postgres connect/migrate failed: {e}"))?;
-                tracing::info!(
-                    "postgres enabled: migrations applied; using Postgres dual stores for \
-                     users/rooms/wallet/social/moderation/reports/chat/profile_extras"
+        let (
+            users,
+            rooms,
+            wallet,
+            moderation,
+            social,
+            reports,
+            chat,
+            profile_extras,
+            deleted_users,
+            refresh,
+            db,
+        ) = if postgres_enabled() {
+            let pool = anylive_db::connect_and_migrate_from_env()
+                .await
+                .map_err(|e| format!("postgres connect/migrate failed: {e}"))?;
+            tracing::info!(
+                "postgres enabled: migrations applied; using Postgres dual stores for \
+                 users/rooms/wallet/social/moderation/reports/chat/profile_extras/\
+                 deleted_users/refresh (OTP remains in-memory for P1)"
+            );
+            (
+                AnyUserStore::postgres(pool.clone()),
+                AnyRoomStore::postgres(pool.clone()),
+                AnyWallet::postgres(pool.clone()),
+                AnyModeration::postgres(pool.clone()),
+                AnySocial::postgres(pool.clone()),
+                AnyReports::postgres(pool.clone()),
+                AnyChat::postgres(pool.clone()),
+                AnyProfileExtras::postgres(pool.clone()),
+                AnyDeletedUsers::postgres(pool.clone()),
+                AnyRefreshStore::postgres(pool.clone()),
+                Some(pool),
+            )
+        } else {
+            if is_production_env(&app_env) {
+                // Fail closed: production must not silently run on volatile memory stores.
+                return Err(
+                    "production requires USE_POSTGRES=1 and DATABASE_URL (in-memory store forbidden)"
+                        .into(),
                 );
-                (
-                    AnyUserStore::postgres(pool.clone()),
-                    AnyRoomStore::postgres(pool.clone()),
-                    AnyWallet::postgres(pool.clone()),
-                    AnyModeration::postgres(pool.clone()),
-                    AnySocial::postgres(pool.clone()),
-                    AnyReports::postgres(pool.clone()),
-                    AnyChat::postgres(pool.clone()),
-                    AnyProfileExtras::postgres(pool.clone()),
-                    Some(pool),
-                )
-            } else {
-                if is_production_env(&app_env) {
-                    // Fail closed: production must not silently run on volatile memory stores.
-                    return Err(
-                        "production requires USE_POSTGRES=1 and DATABASE_URL (in-memory store forbidden)"
-                            .into(),
-                    );
-                }
-                tracing::info!(
-                    "postgres disabled (set USE_POSTGRES=1 and DATABASE_URL to enable)"
-                );
-                (
-                    AnyUserStore::memory(),
-                    AnyRoomStore::memory(),
-                    AnyWallet::memory(),
-                    AnyModeration::memory(),
-                    AnySocial::memory(),
-                    AnyReports::memory(),
-                    AnyChat::memory(),
-                    AnyProfileExtras::memory(),
-                    None,
-                )
-            };
+            }
+            tracing::info!("postgres disabled (set USE_POSTGRES=1 and DATABASE_URL to enable)");
+            (
+                AnyUserStore::memory(),
+                AnyRoomStore::memory(),
+                AnyWallet::memory(),
+                AnyModeration::memory(),
+                AnySocial::memory(),
+                AnyReports::memory(),
+                AnyChat::memory(),
+                AnyProfileExtras::memory(),
+                AnyDeletedUsers::memory(),
+                AnyRefreshStore::memory(),
+                None,
+            )
+        };
 
-        let auth = AuthService::new(users, otp, InMemoryRefreshStore::default(), jwt);
+        let auth = AuthService::new(users, otp, refresh, jwt);
 
         let state = Arc::new(Self::new(
             auth,
@@ -212,7 +219,7 @@ impl AppState {
             moderation,
             social,
             reports,
-            DeletedUsers::new(),
+            deleted_users,
             profile_extras,
             db,
         ));
