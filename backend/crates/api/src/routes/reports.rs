@@ -12,9 +12,6 @@ use crate::auth_user::AuthUser;
 use crate::error::ApiError;
 use crate::state::AppState;
 
-// Re-export dual-store types used by AppState / admin routes / tests.
-pub use anylive_db::{MemoryReports, Report, ReportStatus};
-
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateReportBody {
     pub target_type: String,
@@ -66,8 +63,7 @@ pub async fn create_report(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use anylive_db::AnyReports;
+    use anylive_db::{AnyReports, ReportStatus};
     use anylive_domain::UserId;
     use uuid::Uuid;
 

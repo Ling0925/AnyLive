@@ -144,6 +144,12 @@ pub async fn otp_verify(
         })
         .await
         .map_err(ApiError::from)?;
+    // Soft-deleted accounts cannot re-login via OTP (user id only known after upsert).
+    if state.deleted_users.is_deleted(session.user.id).await {
+        return Err(ApiError(anylive_common::AppError::unauthorized(
+            "account deleted",
+        )));
+    }
     let extras = state.profile_extras.get(session.user.id).await;
     Ok(Json(AuthSessionResponse {
         user: UserDto::from_user(
@@ -169,6 +175,24 @@ pub async fn token_refresh(
     State(state): State<Arc<AppState>>,
     Json(body): Json<RefreshBody>,
 ) -> Result<Json<TokenPairDto>, ApiError> {
+    // Enforce ban/delete before rotating — refresh does not go through AuthUser.
+    let claims = state
+        .auth
+        .jwt()
+        .verify_refresh(&body.refresh_token)
+        .map_err(ApiError::from)?;
+    let user_id = anylive_domain::UserId(claims.sub);
+    if state.deleted_users.is_deleted(user_id).await {
+        return Err(ApiError(anylive_common::AppError::unauthorized(
+            "account deleted",
+        )));
+    }
+    if state.moderation.is_banned(user_id).await {
+        return Err(ApiError(anylive_common::AppError::new(
+            anylive_common::ErrorCode::ForbiddenPolicy,
+            "user is banned",
+        )));
+    }
     let pair = state
         .auth
         .refresh(RefreshRequest {

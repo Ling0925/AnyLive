@@ -67,8 +67,9 @@ pub async fn export_me(
         return Err(ApiError(AppError::unauthorized("account deleted")));
     }
     let u = state.auth.me(user.user_id).await.map_err(ApiError::from)?;
+    let extras = state.profile_extras.get(user.user_id).await;
     Ok(Json(AccountExportDto {
-        user: u.into(),
+        user: UserDto::from_user(u, extras.age_confirmed(), extras.privacy_accepted()),
         rooms_owned_count: 0,
         note: "P1 export stub".into(),
     }))

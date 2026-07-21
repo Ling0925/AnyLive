@@ -729,6 +729,21 @@ mod tests {
         let room_id = room["id"].as_str().unwrap().to_string();
         let owner_id = room["owner_id"].as_str().unwrap().to_string();
 
+        // Gifts require a live room.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/rooms/{room_id}/start"))
+                    .header("authorization", format!("Bearer {host_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
         // topup fan
         let res = app
             .clone()
@@ -837,6 +852,20 @@ mod tests {
         let room = body_json(res).await;
         let room_id = room["id"].as_str().unwrap().to_string();
         let owner_id = room["owner_id"].as_str().unwrap().to_string();
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/rooms/{room_id}/start"))
+                    .header("authorization", format!("Bearer {host_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
 
         let res = app
             .clone()
@@ -1175,6 +1204,20 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("POST")
+                    .uri(format!("/api/v1/rooms/{room_id}/start"))
+                    .header("authorization", format!("Bearer {host_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
                     .uri("/api/v1/wallet/topups")
                     .header("authorization", format!("Bearer {fan_token}"))
                     .header("content-type", "application/json")
@@ -1418,6 +1461,20 @@ mod tests {
         let room = body_json(res).await;
         let room_id = room["id"].as_str().unwrap().to_string();
         let owner_id = room["owner_id"].as_str().unwrap().to_string();
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/rooms/{room_id}/start"))
+                    .header("authorization", format!("Bearer {host_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
 
         // resolve fan id
         let me = app

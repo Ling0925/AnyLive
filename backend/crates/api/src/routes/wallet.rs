@@ -176,14 +176,18 @@ pub async fn topup_wallet(
     Ok(Json(snap.into()))
 }
 
-/// GET /api/v1/gifts
+/// GET /api/v1/gifts — public catalog (active gifts only).
 #[utoipa::path(get, path = "/api/v1/gifts", tag = "gifts", responses((status = 200, body = GiftListResponse)))]
 pub async fn list_gifts(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<GiftListResponse>, ApiError> {
     let items = state.wallet.list_gifts().await;
     Ok(Json(GiftListResponse {
-        items: items.into_iter().map(GiftDto::from).collect(),
+        items: items
+            .into_iter()
+            .filter(|g| g.active)
+            .map(GiftDto::from)
+            .collect(),
     }))
 }
 
@@ -208,6 +212,12 @@ pub async fn send_gift(
         .get(anylive_domain::RoomId(room_id))
         .await
         .map_err(ApiError::from)?;
+    if room.status != anylive_domain::RoomStatus::Live {
+        return Err(ApiError(anylive_common::AppError::new(
+            anylive_common::ErrorCode::RoomNotLive,
+            "room is not live",
+        )));
+    }
 
     let gift_id = Uuid::parse_str(&body.gift_id)
         .map_err(|_| ApiError(anylive_common::AppError::validation("invalid gift_id")))?;
