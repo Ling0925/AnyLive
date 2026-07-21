@@ -91,5 +91,10 @@ mod tests {
             "missing 002 under {}",
             dir.display()
         );
+        assert!(
+            dir.join("003_profile_extras.sql").exists(),
+            "missing 003 under {}",
+            dir.display()
+        );
     }
 }

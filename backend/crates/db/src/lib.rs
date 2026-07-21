@@ -11,12 +11,13 @@
 //! ```
 //!
 //! When enabled, API [`AppState::from_env`] wires Postgres dual stores for
-//! users/rooms/wallet/social/moderation/reports/chat. Default (no env) keeps
+//! users/rooms/wallet/social/moderation/reports/chat/profile_extras. Default (no env) keeps
 //! in-memory stores so `cargo test --workspace` needs no live PG.
 
 mod chat;
 mod moderation;
 mod pool;
+mod profile;
 mod reports;
 mod rooms;
 mod social;
@@ -29,6 +30,9 @@ pub use pool::{
     connect, connect_and_migrate_from_env, migrate, migrations_dir, ping, postgres_enabled,
     DbError, PgPool,
 };
+pub use profile::{
+    AnyProfileExtras, MemoryProfileExtras, PostgresProfileExtras, ProfileExtras,
+};
 pub use reports::{AnyReports, MemoryReports, PostgresReports, Report, ReportStatus};
 pub use rooms::{map_room_error, PostgresRoomStore};
 pub use social::{AnySocial, PostgresSocial};
@@ -39,7 +43,11 @@ pub use wallet::{AnyWallet, PostgresWallet};
 pub const MIGRATIONS_DIR: &str = "migrations";
 
 /// Embedded list of known migration filenames (P1).
-pub const MIGRATION_FILES: &[&str] = &["001_init.sql", "002_reports_mute.sql"];
+pub const MIGRATION_FILES: &[&str] = &[
+    "001_init.sql",
+    "002_reports_mute.sql",
+    "003_profile_extras.sql",
+];
 
 /// Validate that a SQL identifier is safe for use in limited admin tooling.
 pub fn is_safe_ident(name: &str) -> bool {
@@ -55,7 +63,7 @@ pub fn is_safe_ident(name: &str) -> bool {
             .unwrap_or(false)
 }
 
-/// Tables created by 001_init.sql + 002_reports_mute.sql (smoke assertions without a live DB).
+/// Tables created by 001–003 migrations (smoke assertions without a live DB).
 pub fn expected_tables() -> &'static [&'static str] {
     &[
         "users",
@@ -71,6 +79,7 @@ pub fn expected_tables() -> &'static [&'static str] {
         "admin_audit",
         "reports",
         "muted_users",
+        "profile_extras",
     ]
 }
 
@@ -83,7 +92,11 @@ mod tests {
         assert_eq!(MIGRATIONS_DIR, "migrations");
         assert_eq!(
             MIGRATION_FILES,
-            &["001_init.sql", "002_reports_mute.sql"]
+            &[
+                "001_init.sql",
+                "002_reports_mute.sql",
+                "003_profile_extras.sql"
+            ]
         );
     }
 
@@ -95,6 +108,7 @@ mod tests {
         assert!(tables.contains(&"admin_audit"));
         assert!(tables.contains(&"reports"));
         assert!(tables.contains(&"muted_users"));
+        assert!(tables.contains(&"profile_extras"));
     }
 
     #[test]
@@ -138,6 +152,21 @@ mod tests {
         let sql = std::fs::read_to_string(&path).unwrap();
         assert!(sql.contains("CREATE TABLE IF NOT EXISTS reports"));
         assert!(sql.contains("CREATE TABLE IF NOT EXISTS muted_users"));
+    }
+
+    #[test]
+    fn profile_extras_migration_file_exists() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../migrations/003_profile_extras.sql");
+        assert!(
+            path.exists(),
+            "expected migration at {}",
+            path.display()
+        );
+        let sql = std::fs::read_to_string(&path).unwrap();
+        assert!(sql.contains("CREATE TABLE IF NOT EXISTS profile_extras"));
+        assert!(sql.contains("age_confirmed_at"));
+        assert!(sql.contains("privacy_accepted_at"));
     }
 
     #[test]

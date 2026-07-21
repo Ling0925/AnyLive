@@ -7,8 +7,8 @@ use anylive_auth::{
     OtpService,
 };
 use anylive_db::{
-    postgres_enabled, AnyChat, AnyModeration, AnyReports, AnySocial, AnyUserStore, AnyWallet,
-    PgPool,
+    postgres_enabled, AnyChat, AnyModeration, AnyProfileExtras, AnyReports, AnySocial,
+    AnyUserStore, AnyWallet, PgPool,
 };
 use anylive_media::SrsMediaProvider;
 use anylive_realtime::{
@@ -17,7 +17,6 @@ use anylive_realtime::{
 };
 
 use crate::guards::{check_production_secrets, is_production_env};
-use crate::profile::MemoryProfileExtras;
 use crate::rooms::AnyRoomStore;
 use crate::routes::compliance::DeletedUsers;
 
@@ -41,8 +40,8 @@ pub struct AppState {
     pub reports: AnyReports,
     /// Soft-deleted accounts (P1 compliance stub).
     pub deleted_users: DeletedUsers,
-    /// Age/privacy declarations (in-memory dual store; no PG migration).
-    pub profile_extras: MemoryProfileExtras,
+    /// Age/privacy declarations (memory dual store; Postgres when USE_POSTGRES=1).
+    pub profile_extras: AnyProfileExtras,
     /// Present when `USE_POSTGRES=1` + `DATABASE_URL` were used at startup.
     pub db: Option<PgPool>,
 }
@@ -61,7 +60,7 @@ impl AppState {
         social: AnySocial,
         reports: AnyReports,
         deleted_users: DeletedUsers,
-        profile_extras: MemoryProfileExtras,
+        profile_extras: AnyProfileExtras,
         db: Option<PgPool>,
     ) -> Self {
         Self {
@@ -107,7 +106,7 @@ impl AppState {
             AnySocial::memory(),
             AnyReports::memory(),
             DeletedUsers::new(),
-            MemoryProfileExtras::new(),
+            AnyProfileExtras::memory(),
             None,
         ))
     }
@@ -155,46 +154,49 @@ impl AppState {
         let jwt = JwtService::new(jwt_cfg);
         let otp = OtpService::new(InMemoryOtpStore::default(), otp_cfg);
 
-        let (users, rooms, wallet, moderation, social, reports, chat, db) = if postgres_enabled() {
-            let pool = anylive_db::connect_and_migrate_from_env()
-                .await
-                .map_err(|e| format!("postgres connect/migrate failed: {e}"))?;
-            tracing::info!(
-                "postgres enabled: migrations applied; using Postgres dual stores for \
-                 users/rooms/wallet/social/moderation/reports/chat"
-            );
-            (
-                AnyUserStore::postgres(pool.clone()),
-                AnyRoomStore::postgres(pool.clone()),
-                AnyWallet::postgres(pool.clone()),
-                AnyModeration::postgres(pool.clone()),
-                AnySocial::postgres(pool.clone()),
-                AnyReports::postgres(pool.clone()),
-                AnyChat::postgres(pool.clone()),
-                Some(pool),
-            )
-        } else {
-            if is_production_env(&app_env) {
-                // Fail closed: production must not silently run on volatile memory stores.
-                return Err(
-                    "production requires USE_POSTGRES=1 and DATABASE_URL (in-memory store forbidden)"
-                        .into(),
+        let (users, rooms, wallet, moderation, social, reports, chat, profile_extras, db) =
+            if postgres_enabled() {
+                let pool = anylive_db::connect_and_migrate_from_env()
+                    .await
+                    .map_err(|e| format!("postgres connect/migrate failed: {e}"))?;
+                tracing::info!(
+                    "postgres enabled: migrations applied; using Postgres dual stores for \
+                     users/rooms/wallet/social/moderation/reports/chat/profile_extras"
                 );
-            }
-            tracing::info!(
-                "postgres disabled (set USE_POSTGRES=1 and DATABASE_URL to enable)"
-            );
-            (
-                AnyUserStore::memory(),
-                AnyRoomStore::memory(),
-                AnyWallet::memory(),
-                AnyModeration::memory(),
-                AnySocial::memory(),
-                AnyReports::memory(),
-                AnyChat::memory(),
-                None,
-            )
-        };
+                (
+                    AnyUserStore::postgres(pool.clone()),
+                    AnyRoomStore::postgres(pool.clone()),
+                    AnyWallet::postgres(pool.clone()),
+                    AnyModeration::postgres(pool.clone()),
+                    AnySocial::postgres(pool.clone()),
+                    AnyReports::postgres(pool.clone()),
+                    AnyChat::postgres(pool.clone()),
+                    AnyProfileExtras::postgres(pool.clone()),
+                    Some(pool),
+                )
+            } else {
+                if is_production_env(&app_env) {
+                    // Fail closed: production must not silently run on volatile memory stores.
+                    return Err(
+                        "production requires USE_POSTGRES=1 and DATABASE_URL (in-memory store forbidden)"
+                            .into(),
+                    );
+                }
+                tracing::info!(
+                    "postgres disabled (set USE_POSTGRES=1 and DATABASE_URL to enable)"
+                );
+                (
+                    AnyUserStore::memory(),
+                    AnyRoomStore::memory(),
+                    AnyWallet::memory(),
+                    AnyModeration::memory(),
+                    AnySocial::memory(),
+                    AnyReports::memory(),
+                    AnyChat::memory(),
+                    AnyProfileExtras::memory(),
+                    None,
+                )
+            };
 
         let auth = AuthService::new(users, otp, InMemoryRefreshStore::default(), jwt);
 
@@ -211,7 +213,7 @@ impl AppState {
             social,
             reports,
             DeletedUsers::new(),
-            MemoryProfileExtras::new(),
+            profile_extras,
             db,
         ));
         state.wallet.seed_default_gifts().await;
