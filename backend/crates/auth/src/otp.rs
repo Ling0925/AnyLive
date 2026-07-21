@@ -2,15 +2,20 @@
 
 use anylive_common::{AppError, ErrorCode};
 use chrono::{Duration, Utc};
+use uuid::Uuid;
 
 use crate::store::{OtpChallenge, OtpStore};
 use crate::DEV_OTP_CODE;
+
+/// Max failed verify attempts before the challenge is burned.
+pub const OTP_MAX_ATTEMPTS: u32 = 5;
 
 #[derive(Debug, Clone)]
 pub struct OtpConfig {
     /// OTP lifetime.
     pub ttl_secs: i64,
     /// When true, always accept [`DEV_OTP_CODE`] and store that code on send.
+    /// Defaults to **false** (safe). Enable explicitly for local/dev only.
     pub dev_fixed_otp: bool,
 }
 
@@ -18,6 +23,17 @@ impl Default for OtpConfig {
     fn default() -> Self {
         Self {
             // 5-minute OTP lifetime.
+            ttl_secs: 5 * 60,
+            // Secure default: never accept a fixed OTP unless explicitly enabled.
+            dev_fixed_otp: false,
+        }
+    }
+}
+
+impl OtpConfig {
+    /// Local/dev convenience: fixed OTP `123456`, still 5 min TTL.
+    pub fn dev() -> Self {
+        Self {
             ttl_secs: 5 * 60,
             dev_fixed_otp: true,
         }
@@ -45,6 +61,23 @@ impl OtpCode {
     }
 }
 
+/// Constant-time equality for equal-length digit strings (mitigates timing leaks).
+fn constant_time_eq(a: &str, b: &str) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.bytes()
+        .zip(b.bytes())
+        .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+        == 0
+}
+
+/// Cryptographically random 6-digit OTP (000000–999999), via UUID v4 CSPRNG.
+fn generate_otp_code() -> String {
+    let n = (Uuid::new_v4().as_u128() % 1_000_000) as u32;
+    format!("{n:06}")
+}
+
 #[derive(Clone)]
 pub struct OtpService<S: OtpStore> {
     store: S,
@@ -61,13 +94,26 @@ impl<S: OtpStore> OtpService<S> {
     }
 
     /// Create/overwrite OTP for email. In dev mode the code is always `123456`.
+    ///
+    /// Returns the plaintext code for delivery (email/SMS). Callers must not log it.
+    /// Enforces a per-email resend cooldown to slow enumeration/spam.
     pub async fn send(&self, email: &str) -> Result<String, AppError> {
         let email = normalize_email(email)?;
+        // Resend throttle: reject if an unexpired challenge was issued too recently.
+        if let Some(existing) = self.store.get(&email).await? {
+            let issued_at = existing.expires_at - Duration::seconds(self.config.ttl_secs);
+            let elapsed = Utc::now().signed_duration_since(issued_at).num_seconds();
+            if elapsed >= 0 && elapsed < OTP_RESEND_COOLDOWN_SECS {
+                return Err(AppError::new(
+                    ErrorCode::RateLimited,
+                    format!("wait {OTP_RESEND_COOLDOWN_SECS}s before requesting another OTP"),
+                ));
+            }
+        }
         let code = if self.config.dev_fixed_otp {
             DEV_OTP_CODE.to_string()
         } else {
-            // Simple non-crypto OTP for future prod path; replace with CSPRNG.
-            format!("{:06}", (Utc::now().timestamp_subsec_nanos() % 1_000_000))
+            generate_otp_code()
         };
         let expires_at = Utc::now() + Duration::seconds(self.config.ttl_secs);
         self.store
@@ -80,6 +126,7 @@ impl<S: OtpStore> OtpService<S> {
                 },
             )
             .await?;
+        // Never log the OTP code itself.
         tracing::info!(%email, "otp issued (dev fixed={})", self.config.dev_fixed_otp);
         Ok(code)
     }
@@ -90,7 +137,8 @@ impl<S: OtpStore> OtpService<S> {
         let submitted = OtpCode::parse(code)?;
 
         // Dev convenience: fixed OTP always works even without prior send.
-        if self.config.dev_fixed_otp && submitted.as_str() == DEV_OTP_CODE {
+        // NEVER enable outside local/dev — this is a total auth bypass.
+        if self.config.dev_fixed_otp && constant_time_eq(submitted.as_str(), DEV_OTP_CODE) {
             let _ = self.store.take(&email).await;
             return Ok(email);
         }
@@ -106,7 +154,7 @@ impl<S: OtpStore> OtpService<S> {
             return Err(AppError::new(ErrorCode::AuthInvalidOtp, "OTP expired"));
         }
 
-        if challenge.attempts >= 5 {
+        if challenge.attempts >= OTP_MAX_ATTEMPTS {
             let _ = self.store.take(&email).await;
             return Err(AppError::new(
                 ErrorCode::AuthInvalidOtp,
@@ -114,9 +162,14 @@ impl<S: OtpStore> OtpService<S> {
             ));
         }
 
-        if challenge.code != submitted.as_str() {
+        if !constant_time_eq(&challenge.code, submitted.as_str()) {
             challenge.attempts += 1;
-            self.store.put(&email, challenge).await?;
+            // Burn after the failed attempt that hits the limit.
+            if challenge.attempts >= OTP_MAX_ATTEMPTS {
+                let _ = self.store.take(&email).await;
+            } else {
+                self.store.put(&email, challenge).await?;
+            }
             return Err(AppError::new(ErrorCode::AuthInvalidOtp, "invalid OTP"));
         }
 
@@ -136,6 +189,9 @@ pub fn normalize_email(email: &str) -> Result<String, AppError> {
     }
     Ok(email)
 }
+
+/// Minimum seconds between OTP sends for the same email (resend throttle).
+pub const OTP_RESEND_COOLDOWN_SECS: i64 = 30;
 
 #[cfg(test)]
 mod tests {
@@ -172,8 +228,52 @@ mod tests {
     async fn reject_wrong_otp_when_not_dev_fixed() {
         let s = svc(false);
         let code = s.send("a@b.co").await.unwrap();
-        assert_ne!(code, "000000");
-        let err = s.verify("a@b.co", "000000").await.unwrap_err();
+        // CSPRNG may theoretically hit 000000; still verify wrong code fails.
+        let wrong = if code == "000000" { "000001" } else { "000000" };
+        let err = s.verify("a@b.co", wrong).await.unwrap_err();
+        assert_eq!(err.code, ErrorCode::AuthInvalidOtp);
+    }
+
+    #[tokio::test]
+    async fn prod_otp_roundtrip() {
+        let s = svc(false);
+        let code = s.send("prod@example.com").await.unwrap();
+        assert_eq!(code.len(), 6);
+        assert!(code.chars().all(|c| c.is_ascii_digit()));
+        let email = s.verify("prod@example.com", &code).await.unwrap();
+        assert_eq!(email, "prod@example.com");
+        // Consumed — second use fails.
+        let err = s.verify("prod@example.com", &code).await.unwrap_err();
+        assert_eq!(err.code, ErrorCode::AuthInvalidOtp);
+    }
+
+    #[tokio::test]
+    async fn lockout_after_max_attempts() {
+        let s = svc(false);
+        let code = s.send("lock@example.com").await.unwrap();
+        let wrong = if code == "000000" { "111111" } else { "000000" };
+        for _ in 0..OTP_MAX_ATTEMPTS {
+            let err = s.verify("lock@example.com", wrong).await.unwrap_err();
+            assert_eq!(err.code, ErrorCode::AuthInvalidOtp);
+        }
+        // Even the correct code is rejected once burned.
+        let err = s.verify("lock@example.com", &code).await.unwrap_err();
+        assert_eq!(err.code, ErrorCode::AuthInvalidOtp);
+    }
+
+    #[tokio::test]
+    async fn expired_otp_rejected() {
+        let s = OtpService::new(
+            InMemoryOtpStore::default(),
+            OtpConfig {
+                ttl_secs: 0, // already expired on next tick
+                dev_fixed_otp: false,
+            },
+        );
+        let code = s.send("exp@example.com").await.unwrap();
+        // Ensure wall clock advanced past expiry without requiring tokio "time" feature.
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let err = s.verify("exp@example.com", &code).await.unwrap_err();
         assert_eq!(err.code, ErrorCode::AuthInvalidOtp);
     }
 
@@ -182,5 +282,18 @@ mod tests {
         let s = svc(true);
         let email = s.verify("solo@example.com", DEV_OTP_CODE).await.unwrap();
         assert_eq!(email, "solo@example.com");
+    }
+
+    #[tokio::test]
+    async fn default_config_disables_fixed_otp() {
+        assert!(!OtpConfig::default().dev_fixed_otp);
+        assert!(OtpConfig::dev().dev_fixed_otp);
+    }
+
+    #[test]
+    fn constant_time_eq_basic() {
+        assert!(constant_time_eq("123456", "123456"));
+        assert!(!constant_time_eq("123456", "123457"));
+        assert!(!constant_time_eq("1234", "12345"));
     }
 }

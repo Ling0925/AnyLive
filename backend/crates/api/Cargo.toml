@@ -13,6 +13,7 @@ anylive-common = { path = "../common" }
 anylive-domain = { path = "../domain" }
 anylive-db = { path = "../db" }
 anylive-auth = { path = "../auth" }
+anylive-media = { path = "../media" }
 anyhow = { workspace = true }
 axum = { workspace = true }
 serde = { workspace = true }

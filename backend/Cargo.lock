@@ -41,6 +41,7 @@ dependencies = [
  "anylive-common",
  "anylive-db",
  "anylive-domain",
+ "anylive-media",
  "axum",
  "chrono",
  "http-body-util",
@@ -104,6 +105,20 @@ dependencies = [
  "chrono",
  "serde",
  "thiserror",
+ "uuid",
+]
+
+[[package]]
+name = "anylive-media"
+version = "0.1.0"
+dependencies = [
+ "anylive-common",
+ "anylive-domain",
+ "async-trait",
+ "chrono",
+ "serde",
+ "thiserror",
+ "tokio",
  "uuid",
 ]
 

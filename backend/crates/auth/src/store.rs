@@ -85,8 +85,17 @@ impl UserStore for InMemoryUserStore {
     }
 
     async fn upsert_by_email(&self, email: &str) -> Result<User, AppError> {
-        if let Some(existing) = self.find_by_email(email).await? {
-            return Ok(existing);
+        // Hold both write locks for the check-and-insert to avoid duplicate users
+        // under concurrent first-login races.
+        let mut by_email = self.by_email.write().await;
+        if let Some(id) = by_email.get(email) {
+            return Ok(self
+                .by_id
+                .read()
+                .await
+                .get(id)
+                .cloned()
+                .expect("by_email/by_id consistency"));
         }
         let local = email.split('@').next().unwrap_or("user");
         let display = if local.is_empty() {
@@ -99,10 +108,7 @@ impl UserStore for InMemoryUserStore {
         let user = User::new(display, Some(email.to_string())).map_err(|e| {
             AppError::validation(format!("cannot create user: {e}"))
         })?;
-        self.by_email
-            .write()
-            .await
-            .insert(email.to_string(), user.id.0);
+        by_email.insert(email.to_string(), user.id.0);
         self.by_id.write().await.insert(user.id.0, user.clone());
         Ok(user)
     }

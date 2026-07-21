@@ -1,0 +1,152 @@
+//! In-memory room store (control plane). Enforces domain transitions.
+
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use anylive_common::{AppError, ErrorCode};
+use anylive_domain::room::RoomError;
+use anylive_domain::{Room, RoomId, RoomStatus, UserId};
+use tokio::sync::RwLock;
+
+/// Thread-safe in-memory room repository for local/dev and tests.
+#[derive(Clone, Default)]
+pub struct MemoryRoomStore {
+    inner: Arc<RwLock<HashMap<RoomId, Room>>>,
+}
+
+impl MemoryRoomStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub async fn create(&self, owner_id: UserId, title: impl Into<String>) -> Result<Room, AppError> {
+        let room = Room::new(owner_id, title).map_err(map_room_error)?;
+        let mut guard = self.inner.write().await;
+        guard.insert(room.id, room.clone());
+        Ok(room)
+    }
+
+    pub async fn get(&self, id: RoomId) -> Result<Room, AppError> {
+        self.inner
+            .read()
+            .await
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| AppError::not_found("room not found"))
+    }
+
+    pub async fn list(&self, status: Option<RoomStatus>) -> Vec<Room> {
+        let guard = self.inner.read().await;
+        let mut items: Vec<Room> = guard
+            .values()
+            .filter(|r| status.map(|s| r.status == s).unwrap_or(true))
+            .cloned()
+            .collect();
+        items.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        items
+    }
+
+    /// Owner-only: Idle -> Live.
+    pub async fn start(&self, id: RoomId, actor: UserId) -> Result<Room, AppError> {
+        self.mutate(id, actor, true, |room| room.transition(RoomStatus::Live))
+            .await
+    }
+
+    /// Owner-only: Live -> Idle.
+    pub async fn stop(&self, id: RoomId, actor: UserId) -> Result<Room, AppError> {
+        self.mutate(id, actor, true, |room| room.transition(RoomStatus::Idle))
+            .await
+    }
+
+    /// Force close (Idle|Live -> Closed). Owner check optional for admin use.
+    pub async fn force_close(
+        &self,
+        id: RoomId,
+        actor: Option<UserId>,
+    ) -> Result<Room, AppError> {
+        let mut guard = self.inner.write().await;
+        let room = guard
+            .get_mut(&id)
+            .ok_or_else(|| AppError::not_found("room not found"))?;
+        if let Some(uid) = actor {
+            if room.owner_id != uid {
+                return Err(AppError::new(ErrorCode::Forbidden, "not room owner"));
+            }
+        }
+        room.transition(RoomStatus::Closed)
+            .map_err(map_room_error)?;
+        Ok(room.clone())
+    }
+
+    async fn mutate<F>(
+        &self,
+        id: RoomId,
+        actor: UserId,
+        require_owner: bool,
+        f: F,
+    ) -> Result<Room, AppError>
+    where
+        F: FnOnce(&mut Room) -> Result<(), RoomError>,
+    {
+        let mut guard = self.inner.write().await;
+        let room = guard
+            .get_mut(&id)
+            .ok_or_else(|| AppError::not_found("room not found"))?;
+        if require_owner && room.owner_id != actor {
+            return Err(AppError::new(ErrorCode::Forbidden, "not room owner"));
+        }
+        f(room).map_err(map_room_error)?;
+        Ok(room.clone())
+    }
+}
+
+fn map_room_error(err: RoomError) -> AppError {
+    match err {
+        RoomError::InvalidTitle => AppError::validation("invalid title"),
+        RoomError::InvalidTransition { from, to } => AppError::new(
+            ErrorCode::Conflict,
+            format!(
+                "invalid room transition from {} to {}",
+                from.as_str(),
+                to.as_str()
+            ),
+        ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn create_get_list_start_stop() {
+        let store = MemoryRoomStore::new();
+        let owner = UserId::new();
+        let other = UserId::new();
+        let room = store.create(owner, " show ").await.unwrap();
+        assert_eq!(room.title, "show");
+        assert_eq!(room.status, RoomStatus::Idle);
+
+        let got = store.get(room.id).await.unwrap();
+        assert_eq!(got.id, room.id);
+
+        let listed = store.list(Some(RoomStatus::Idle)).await;
+        assert_eq!(listed.len(), 1);
+
+        let err = store.start(room.id, other).await.unwrap_err();
+        assert_eq!(err.code, ErrorCode::Forbidden);
+
+        let live = store.start(room.id, owner).await.unwrap();
+        assert_eq!(live.status, RoomStatus::Live);
+        assert_eq!(store.list(Some(RoomStatus::Live)).await.len(), 1);
+
+        let idle = store.stop(room.id, owner).await.unwrap();
+        assert_eq!(idle.status, RoomStatus::Idle);
+
+        let closed = store.force_close(room.id, Some(owner)).await.unwrap();
+        assert_eq!(closed.status, RoomStatus::Closed);
+
+        let err = store.start(room.id, owner).await.unwrap_err();
+        assert_eq!(err.code, ErrorCode::Conflict);
+    }
+}

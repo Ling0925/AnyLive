@@ -1,9 +1,16 @@
 //! JWT access + refresh token issue/verify.
+//!
+//! Hard requirements:
+//! - Algorithm pinned to **HS256 only** (no `none` / alg confusion).
+//! - Access and refresh use **separate secrets**.
+//! - Secrets must be ≥ 32 bytes when loaded from the environment.
 
 use anylive_common::{AppError, ErrorCode};
 use anylive_domain::UserId;
 use chrono::{Duration, Utc};
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{
+    decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation,
+};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -11,6 +18,11 @@ use uuid::Uuid;
 pub const ACCESS_TTL_SECS: i64 = 15 * 60;
 /// Refresh token lifetime (30 days).
 pub const REFRESH_TTL_SECS: i64 = 30 * 24 * 60 * 60;
+/// Minimum secret length accepted from environment / production config.
+pub const MIN_SECRET_LEN: usize = 32;
+
+/// Only algorithm we ever encode or accept.
+const JWT_ALG: Algorithm = Algorithm::HS256;
 
 #[derive(Debug, Clone)]
 pub struct JwtConfig {
@@ -23,9 +35,10 @@ pub struct JwtConfig {
 
 impl Default for JwtConfig {
     fn default() -> Self {
+        // Local/test defaults only — never ship with these in production.
         Self {
-            access_secret: "dev-access-secret-change-me-32chars".into(),
-            refresh_secret: "dev-refresh-secret-change-me-32chars".into(),
+            access_secret: "dev-access-secret-change-me-32chars!!".into(),
+            refresh_secret: "dev-refresh-secret-change-me-32chars!".into(),
             access_ttl_secs: ACCESS_TTL_SECS,
             refresh_ttl_secs: REFRESH_TTL_SECS,
             issuer: "anylive".into(),
@@ -34,15 +47,49 @@ impl Default for JwtConfig {
 }
 
 impl JwtConfig {
+    /// Load secrets from `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET`.
+    ///
+    /// Falls back to dev defaults when unset (with a warning). Rejects secrets
+    /// shorter than [`MIN_SECRET_LEN`]. Access and refresh secrets must differ.
     pub fn from_env() -> Self {
         let mut cfg = Self::default();
+        let mut from_env = false;
         if let Ok(s) = std::env::var("JWT_ACCESS_SECRET") {
             cfg.access_secret = s;
+            from_env = true;
         }
         if let Ok(s) = std::env::var("JWT_REFRESH_SECRET") {
             cfg.refresh_secret = s;
+            from_env = true;
+        }
+        if !from_env {
+            tracing::warn!(
+                "JWT_ACCESS_SECRET / JWT_REFRESH_SECRET unset; using insecure dev defaults"
+            );
+        }
+        if let Err(e) = cfg.validate() {
+            // Fail closed for misconfigured production secrets.
+            panic!("invalid JWT config: {e}");
         }
         cfg
+    }
+
+    /// Validate secret strength and separation.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.access_secret.len() < MIN_SECRET_LEN {
+            return Err(format!(
+                "JWT access secret must be at least {MIN_SECRET_LEN} bytes"
+            ));
+        }
+        if self.refresh_secret.len() < MIN_SECRET_LEN {
+            return Err(format!(
+                "JWT refresh secret must be at least {MIN_SECRET_LEN} bytes"
+            ));
+        }
+        if self.access_secret == self.refresh_secret {
+            return Err("JWT access and refresh secrets must be distinct".into());
+        }
+        Ok(())
     }
 }
 
@@ -90,6 +137,10 @@ pub struct JwtService {
 
 impl JwtService {
     pub fn new(config: JwtConfig) -> Self {
+        // Soft-check in constructor; from_env already panics on bad secrets.
+        if let Err(e) = config.validate() {
+            tracing::warn!(error = %e, "JWT config validation warning");
+        }
         let access_enc = EncodingKey::from_secret(config.access_secret.as_bytes());
         let access_dec = DecodingKey::from_secret(config.access_secret.as_bytes());
         let refresh_enc = EncodingKey::from_secret(config.refresh_secret.as_bytes());
@@ -105,6 +156,19 @@ impl JwtService {
 
     pub fn access_ttl_secs(&self) -> i64 {
         self.config.access_ttl_secs
+    }
+
+    fn hs256_header() -> Header {
+        Header::new(JWT_ALG)
+    }
+
+    fn hs256_validation(&self) -> Validation {
+        let mut validation = Validation::new(JWT_ALG);
+        validation.set_issuer(&[&self.config.issuer]);
+        validation.validate_exp = true;
+        // Explicit allow-list — never accept `none` or other algs.
+        validation.algorithms = vec![JWT_ALG];
+        validation
     }
 
     pub fn issue_pair(&self, user_id: UserId, email: Option<String>) -> Result<IssuedTokens, AppError> {
@@ -131,9 +195,9 @@ impl JwtService {
             typ: "refresh".into(),
         };
 
-        let access_token = encode(&Header::default(), &access_claims, &self.access_enc)
+        let access_token = encode(&Self::hs256_header(), &access_claims, &self.access_enc)
             .map_err(|e| AppError::new(ErrorCode::Internal, format!("encode access: {e}")))?;
-        let refresh_token = encode(&Header::default(), &refresh_claims, &self.refresh_enc)
+        let refresh_token = encode(&Self::hs256_header(), &refresh_claims, &self.refresh_enc)
             .map_err(|e| AppError::new(ErrorCode::Internal, format!("encode refresh: {e}")))?;
 
         Ok(IssuedTokens {
@@ -149,9 +213,7 @@ impl JwtService {
     }
 
     pub fn verify_access(&self, token: &str) -> Result<AccessClaims, AppError> {
-        let mut validation = Validation::default();
-        validation.set_issuer(&[&self.config.issuer]);
-        validation.validate_exp = true;
+        let validation = self.hs256_validation();
         let data = decode::<AccessClaims>(token, &self.access_dec, &validation).map_err(|e| {
             tracing::debug!(error = %e, "access token verify failed");
             AppError::unauthorized("invalid or expired access token")
@@ -163,9 +225,7 @@ impl JwtService {
     }
 
     pub fn verify_refresh(&self, token: &str) -> Result<RefreshClaims, AppError> {
-        let mut validation = Validation::default();
-        validation.set_issuer(&[&self.config.issuer]);
-        validation.validate_exp = true;
+        let validation = self.hs256_validation();
         let data = decode::<RefreshClaims>(token, &self.refresh_dec, &validation).map_err(|e| {
             tracing::debug!(error = %e, "refresh token verify failed");
             AppError::unauthorized("invalid or expired refresh token")
@@ -229,5 +289,48 @@ mod tests {
         let mut bad = issued.pair.access_token;
         bad.push('x');
         assert!(jwt.verify_access(&bad).is_err());
+    }
+
+    #[test]
+    fn reject_wrong_secret() {
+        let a = JwtService::new(JwtConfig::default());
+        let issued = a.issue_pair(UserId::new(), None).unwrap();
+        let mut other = JwtConfig::default();
+        other.access_secret = "other-access-secret-at-least-32b!!!!".into();
+        other.refresh_secret = "other-refresh-secret-at-least-32b!!!".into();
+        let b = JwtService::new(other);
+        assert!(b.verify_access(&issued.pair.access_token).is_err());
+    }
+
+    #[test]
+    fn reject_wrong_issuer() {
+        let mut cfg = JwtConfig::default();
+        cfg.issuer = "other-iss".into();
+        let foreign = JwtService::new(cfg);
+        let issued = foreign.issue_pair(UserId::new(), None).unwrap();
+        let local = JwtService::new(JwtConfig::default());
+        assert!(local.verify_access(&issued.pair.access_token).is_err());
+    }
+
+    #[test]
+    fn tokens_are_hs256() {
+        let jwt = JwtService::new(JwtConfig::default());
+        let issued = jwt.issue_pair(UserId::new(), None).unwrap();
+        // Standard HS256 JWT header `{"alg":"HS256","typ":"JWT"}` base64url-encodes to this.
+        let header = issued.pair.access_token.split('.').next().unwrap();
+        assert_eq!(header, "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9");
+        let refresh_header = issued.pair.refresh_token.split('.').next().unwrap();
+        assert_eq!(refresh_header, "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9");
+    }
+
+    #[test]
+    fn config_rejects_short_or_shared_secrets() {
+        let mut cfg = JwtConfig::default();
+        cfg.access_secret = "short".into();
+        assert!(cfg.validate().is_err());
+        cfg = JwtConfig::default();
+        cfg.refresh_secret = cfg.access_secret.clone();
+        assert!(cfg.validate().is_err());
+        assert!(JwtConfig::default().validate().is_ok());
     }
 }

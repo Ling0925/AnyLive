@@ -1,0 +1,17 @@
+[package]
+name = "anylive-media"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anylive-common = { path = "../common" }
+anylive-domain = { path = "../domain" }
+async-trait = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

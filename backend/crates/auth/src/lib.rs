@@ -21,7 +21,9 @@ pub use jwt::{
 };
 /// Alias matching the architecture name `TokenService`.
 pub use jwt::JwtService as TokenService;
-pub use otp::{normalize_email, OtpCode, OtpConfig, OtpService};
+pub use otp::{
+    normalize_email, OtpCode, OtpConfig, OtpService, OTP_MAX_ATTEMPTS, OTP_RESEND_COOLDOWN_SECS,
+};
 pub use service::{
     AuthService, AuthSession, LogoutRequest, MemoryAuthService, OtpSendRequest, OtpVerifyRequest,
     RefreshRequest,

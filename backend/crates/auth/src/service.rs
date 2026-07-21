@@ -93,14 +93,15 @@ where
 
     pub async fn refresh(&self, req: RefreshRequest) -> Result<TokenPair, AppError> {
         let claims = self.jwt.verify_refresh(&req.refresh_token)?;
-        if !self.refresh.is_active(claims.jti).await? {
+        // Atomic rotate: revoke-first so concurrent refresh of the same jti
+        // cannot both succeed (second revoke returns false → treated as reused).
+        let was_active = self.refresh.revoke(claims.jti).await?;
+        if !was_active {
             return Err(AppError::new(
                 ErrorCode::AuthTokenRevoked,
                 "refresh token revoked",
             ));
         }
-        // Rotate: revoke old jti.
-        let _ = self.refresh.revoke(claims.jti).await?;
         let user = self
             .users
             .find_by_id(UserId(claims.sub))
@@ -151,13 +152,15 @@ pub type MemoryAuthService = AuthService<
 >;
 
 impl MemoryAuthService {
+    /// In-memory auth for local dev + integration tests (fixed OTP `123456`).
     pub fn memory_dev() -> Self {
         use crate::jwt::JwtConfig;
         use crate::otp::OtpConfig;
         use crate::store::{InMemoryOtpStore, InMemoryRefreshStore, InMemoryUserStore};
 
         let jwt = JwtService::new(JwtConfig::from_env());
-        let otp = OtpService::new(InMemoryOtpStore::default(), OtpConfig::default());
+        // Explicit dev OTP — never use OtpConfig::default() here (defaults secure).
+        let otp = OtpService::new(InMemoryOtpStore::default(), OtpConfig::dev());
         Self::new(
             InMemoryUserStore::default(),
             otp,
@@ -177,7 +180,7 @@ mod tests {
 
     fn service() -> MemoryAuthService {
         let jwt = JwtService::new(JwtConfig::default());
-        let otp = OtpService::new(InMemoryOtpStore::default(), OtpConfig::default());
+        let otp = OtpService::new(InMemoryOtpStore::default(), OtpConfig::dev());
         AuthService::new(
             InMemoryUserStore::default(),
             otp,
@@ -272,5 +275,29 @@ mod tests {
             .unwrap_err();
         // In dev mode without send, only 123456 works; 999999 hits missing challenge path.
         assert_eq!(err.code, ErrorCode::AuthInvalidOtp);
+    }
+
+    #[tokio::test]
+    async fn refresh_reuse_rejected() {
+        let svc = service();
+        let session = svc
+            .verify_otp(OtpVerifyRequest {
+                email: "reuse@example.com".into(),
+                code: DEV_OTP_CODE.into(),
+            })
+            .await
+            .unwrap();
+        let rt = session.tokens.refresh_token.clone();
+        let _ = svc
+            .refresh(RefreshRequest {
+                refresh_token: rt.clone(),
+            })
+            .await
+            .unwrap();
+        let err = svc
+            .refresh(RefreshRequest { refresh_token: rt })
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, ErrorCode::AuthTokenRevoked);
     }
 }
