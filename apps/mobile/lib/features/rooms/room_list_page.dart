@@ -78,10 +78,13 @@ class _RoomListPageState extends State<RoomListPage> {
       }
       await _reload();
       if (!mounted) return;
-      await showDialog<void>(
+      final open = await showDialog<bool>(
         context: context,
         builder: (ctx) => _GoLiveDialog(room: started, publish: publish),
       );
+      if (open == true && mounted) {
+        _openRoom(started);
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -202,8 +205,12 @@ class _GoLiveDialog extends StatelessWidget {
           child: const Text('Copy stream key'),
         ),
         FilledButton(
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: () => Navigator.of(context).pop(true),
           child: const Text('Open room'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('Close'),
         ),
       ],
     );

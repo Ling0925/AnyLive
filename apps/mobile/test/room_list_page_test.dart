@@ -53,6 +53,22 @@ class FakeRoomsRepo extends RoomsRepository {
           streamKey: roomId,
         );
   }
+
+  @override
+  Future<Room> getRoom(String roomId) async {
+    return started ??
+        Room(id: roomId, ownerId: 'me', title: 'My Live', status: 'live');
+  }
+
+  @override
+  Future<List<ChatMessage>> listMessages(String roomId, {int limit = 50}) async {
+    return const [];
+  }
+
+  @override
+  Future<Map<String, dynamic>> playUrls(String roomId) async {
+    return {'hls': 'http://cdn/live/$roomId.m3u8'};
+  }
 }
 
 void main() {
@@ -118,5 +134,12 @@ void main() {
     expect(find.textContaining('rtmp://localhost:1935/live/r-host'), findsOneWidget);
     expect(find.text('Copy push URL'), findsOneWidget);
     expect(find.text('Copy stream key'), findsOneWidget);
+    expect(find.text('Open room'), findsOneWidget);
+
+    // Open room navigates to RoomPage (which will hit missing gift/social repos
+    // network — only assert dialog dismissal path is wired).
+    await tester.tap(find.text('Close'));
+    await tester.pumpAndSettle();
+    expect(find.text('You are live'), findsNothing);
   });
 }
