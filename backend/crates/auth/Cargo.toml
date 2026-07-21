@@ -1,0 +1,21 @@
+[package]
+name = "anylive-auth"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anylive-common = { path = "../common" }
+anylive-domain = { path = "../domain" }
+async-trait = { workspace = true }
+chrono = { workspace = true }
+jsonwebtoken = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

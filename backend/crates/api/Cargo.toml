@@ -12,6 +12,7 @@ path = "src/main.rs"
 anylive-common = { path = "../common" }
 anylive-domain = { path = "../domain" }
 anylive-db = { path = "../db" }
+anylive-auth = { path = "../auth" }
 anyhow = { workspace = true }
 axum = { workspace = true }
 serde = { workspace = true }

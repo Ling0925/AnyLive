@@ -18,7 +18,7 @@ async fn main() -> anyhow::Result<()> {
     let addr: SocketAddr = bind.parse()?;
     let app = build_app();
 
-    tracing::info!(%addr, "anylive-api listening");
+    tracing::info!(%addr, "anylive-api listening (auth: in-memory dev OTP=123456)");
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
     Ok(())

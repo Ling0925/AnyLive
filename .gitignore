@@ -61,3 +61,4 @@ coverage/
 .claude/settings.local.json
 **/local.properties
 **/.idea/
+output/

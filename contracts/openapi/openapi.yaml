@@ -84,11 +84,49 @@ paths:
               $ref: "#/components/schemas/OtpVerifyRequest"
       responses:
         "200":
-          description: Tokens issued
+          description: Tokens + user issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSession"
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/auth/token/refresh:
+    post:
+      tags: [auth]
+      operationId: authTokenRefresh
+      summary: Rotate refresh token (P1)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "200":
+          description: New token pair
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/TokenPair"
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/auth/logout:
+    post:
+      tags: [auth]
+      operationId: authLogout
+      summary: Revoke refresh token(s) (P1)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LogoutRequest"
+      responses:
+        "204":
+          description: Logged out
         "401":
           $ref: "#/components/responses/Error"
   /api/v1/me:
@@ -258,6 +296,29 @@ components:
         expires_in:
           type: integer
           description: Access token lifetime seconds
+    AuthSession:
+      type: object
+      required: [user, access_token, refresh_token, expires_in]
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        expires_in:
+          type: integer
+    RefreshRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token:
+          type: string
+    LogoutRequest:
+      type: object
+      properties:
+        refresh_token:
+          type: string
     User:
       type: object
       required: [id, display_name, created_at]

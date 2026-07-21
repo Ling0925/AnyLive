@@ -4,6 +4,7 @@ members = [
     "crates/common",
     "crates/domain",
     "crates/db",
+    "crates/auth",
     "crates/api",
 ]
 default-members = ["crates/api"]
@@ -22,7 +23,7 @@ chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "sync"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 tracing = "0.1"
@@ -31,3 +32,4 @@ uuid = { version = "1", features = ["v4", "serde"] }
 utoipa = { version = "5", features = ["chrono", "uuid"] }
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
 http = "1"
+jsonwebtoken = "9"
