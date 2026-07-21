@@ -510,6 +510,7 @@ mod tests {
         assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     }
 
+    #[tokio::test]
     async fn me_rejects_missing_bearer() {
         let app = build_app();
         let res = app
