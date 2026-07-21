@@ -29,6 +29,35 @@ class Room {
   bool get isLive => status == 'live';
 }
 
+class ChatMessage {
+  ChatMessage({
+    required this.id,
+    required this.roomId,
+    required this.senderId,
+    required this.senderName,
+    required this.body,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String roomId;
+  final String senderId;
+  final String senderName;
+  final String body;
+  final String createdAt;
+
+  factory ChatMessage.fromJson(Map<String, dynamic> json) {
+    return ChatMessage(
+      id: json['id'] as String? ?? '',
+      roomId: json['room_id'] as String? ?? '',
+      senderId: json['sender_id'] as String? ?? '',
+      senderName: json['sender_name'] as String? ?? '',
+      body: json['body'] as String? ?? '',
+      createdAt: json['created_at'] as String? ?? '',
+    );
+  }
+}
+
 class RoomsRepository {
   RoomsRepository({
     required this.client,
@@ -46,6 +75,17 @@ class RoomsRepository {
     );
     if (res.statusCode != 201) {
       throw RoomsException('create_failed', res.statusCode, res.body);
+    }
+    return Room.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+  }
+
+  Future<Room> getRoom(String roomId) async {
+    final res = await httpClient.get(
+      client.uri('/api/v1/rooms/$roomId'),
+      headers: client.jsonHeaders(),
+    );
+    if (res.statusCode != 200) {
+      throw RoomsException('get_failed', res.statusCode, res.body);
     }
     return Room.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
@@ -88,6 +128,33 @@ class RoomsRepository {
       throw RoomsException('play_failed', res.statusCode, res.body);
     }
     return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<List<ChatMessage>> listMessages(String roomId, {int limit = 50}) async {
+    final res = await httpClient.get(
+      client.uri('/api/v1/rooms/$roomId/messages?limit=$limit'),
+      headers: client.jsonHeaders(),
+    );
+    if (res.statusCode != 200) {
+      throw RoomsException('messages_list_failed', res.statusCode, res.body);
+    }
+    final map = jsonDecode(res.body) as Map<String, dynamic>;
+    final items = map['items'] as List<dynamic>? ?? [];
+    return items
+        .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<ChatMessage> postMessage(String roomId, String body) async {
+    final res = await httpClient.post(
+      client.uri('/api/v1/rooms/$roomId/messages'),
+      headers: client.jsonHeaders(auth: true),
+      body: jsonEncode({'body': body}),
+    );
+    if (res.statusCode != 201) {
+      throw RoomsException('messages_post_failed', res.statusCode, res.body);
+    }
+    return ChatMessage.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 }
 

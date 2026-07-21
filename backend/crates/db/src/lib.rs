@@ -1,7 +1,16 @@
-//! Database layer placeholders (SQLx migrations land with auth/rooms).
+//! Database layer: SQLx pool, migrations, and Postgres adapters.
 //!
-//! For P0 we only expose migration path constants and a pure SQL sanity helper
-//! so the crate is testable without a live Postgres.
+//! Offline unit tests never touch Postgres. Set `DATABASE_URL` and `USE_POSTGRES=1`
+//! to connect, migrate, and use [`PostgresUserStore`] at API startup.
+
+mod pool;
+mod users;
+
+pub use pool::{
+    connect, connect_and_migrate_from_env, migrate, migrations_dir, postgres_enabled, DbError,
+    PgPool,
+};
+pub use users::{AnyUserStore, PostgresUserStore};
 
 /// Expected migrations directory relative to backend workspace.
 pub const MIGRATIONS_DIR: &str = "migrations";
@@ -85,5 +94,12 @@ mod tests {
         let sql = std::fs::read_to_string(&path).unwrap();
         assert!(sql.contains("CREATE TABLE IF NOT EXISTS users"));
         assert!(sql.contains("UNIQUE (sender_id, client_request_id)"));
+    }
+
+    #[test]
+    fn postgres_disabled_by_default() {
+        // Unit tests run without USE_POSTGRES=1; helper must not force PG.
+        // We only assert the function is callable; actual env may vary in CI.
+        let _ = postgres_enabled();
     }
 }

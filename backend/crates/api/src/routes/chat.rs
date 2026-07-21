@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use anylive_domain::RoomId;
-use anylive_realtime::{issue_centrifugo_token, CentrifugoConfig, ChatMessage};
+use anylive_realtime::{issue_centrifugo_token, ChatMessage, MessageEnvelope};
 use axum::extract::{Path, Query, State};
 use axum::Json;
 use serde::{Deserialize, Serialize};
@@ -108,6 +108,20 @@ pub async fn post_message(
         .post(room_id, user.user_id, me.display_name, body.body)
         .await
         .map_err(ApiError::from)?;
+    // Fan-out via Centrifugo when configured; Noop otherwise (memory-only).
+    // Publish failures are logged but do not fail the REST write — history is source of truth.
+    let envelope = MessageEnvelope::chat_message(&msg);
+    let channel = MessageEnvelope::room_channel(room_id);
+    match envelope.to_value() {
+        Ok(data) => {
+            if let Err(e) = state.centrifugo_publisher.publish(&channel, data).await {
+                tracing::warn!(error = %e, %channel, "centrifugo publish failed");
+            }
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, %channel, "centrifugo envelope serialize failed");
+        }
+    }
     Ok((axum::http::StatusCode::CREATED, Json(msg.into())))
 }
 
@@ -126,10 +140,4 @@ pub async fn list_messages(
     Ok(Json(ChatListResponse {
         items: items.into_iter().map(ChatMessageDto::from).collect(),
     }))
-}
-
-// silence unused import if CentrifugoConfig only used via state
-#[allow(dead_code)]
-fn _cfg() -> CentrifugoConfig {
-    CentrifugoConfig::default()
 }

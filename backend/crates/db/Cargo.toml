@@ -5,8 +5,18 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+anylive-auth = { path = "../auth" }
 anylive-common = { path = "../common" }
 anylive-domain = { path = "../domain" }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+chrono = { workspace = true }
 serde = { workspace = true }
-uuid = { workspace = true }
+sqlx = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../api/api_client.dart';
 import '../../api/rooms_repository.dart';
 import '../../config/app_config.dart';
+import 'room_page.dart';
 
 /// Lists live rooms from the control-plane API.
 class RoomListPage extends StatefulWidget {
@@ -74,6 +75,18 @@ class _RoomListPageState extends State<RoomListPage> {
     }
   }
 
+  void _openRoom(Room room) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => RoomPage(
+          config: widget.config,
+          accessToken: widget.accessToken,
+          room: room,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -96,7 +109,7 @@ class _RoomListPageState extends State<RoomListPage> {
                   ? const Center(child: Text('No live rooms'))
                   : ListView.separated(
                       itemCount: _items.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      separatorBuilder: (_, _) => const Divider(height: 1),
                       itemBuilder: (context, i) {
                         final r = _items[i];
                         return ListTile(
@@ -105,6 +118,7 @@ class _RoomListPageState extends State<RoomListPage> {
                           trailing: r.isLive
                               ? const Icon(Icons.circle, color: Colors.red, size: 12)
                               : null,
+                          onTap: () => _openRoom(r),
                         );
                       },
                     ),

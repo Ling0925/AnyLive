@@ -17,6 +17,20 @@ tags:
     description: User profile (stub paths for freeze)
   - name: rooms
     description: Rooms (stub paths for freeze)
+  - name: webhooks
+    description: webhooks
+  - name: moderation
+    description: moderation
+  - name: social
+    description: social
+  - name: admin
+    description: admin
+  - name: realtime
+    description: realtime
+  - name: gifts
+    description: gifts
+  - name: wallet
+    description: wallet
 paths:
   /health:
     get:
@@ -206,6 +220,252 @@ paths:
                 $ref: "#/components/schemas/Room"
         "404":
           $ref: "#/components/responses/Error"
+  /api/v1/wallet:
+    get:
+      tags: [wallet]
+      operationId: getWallet
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: Balance
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [balance]
+                properties:
+                  balance: {type: integer, format: int64}
+  /api/v1/wallet/topups:
+    post:
+      tags: [wallet]
+      operationId: topupWallet
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount]
+              properties:
+                amount: {type: integer, format: int64}
+      responses:
+        "200": {description: Updated balance}
+  /api/v1/gifts:
+    get:
+      tags: [gifts]
+      operationId: listGifts
+      responses:
+        "200": {description: Gift catalog}
+  /api/v1/rooms/{roomId}/gifts:
+    post:
+      tags: [gifts]
+      operationId: sendGift
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/RoomId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [gift_id, receiver_id, client_request_id]
+              properties:
+                gift_id: {type: string, format: uuid}
+                receiver_id: {type: string, format: uuid}
+                count: {type: integer, default: 1}
+                client_request_id: {type: string}
+      responses:
+        "201": {description: Created}
+        "200": {description: Idempotent replay}
+  /api/v1/rooms/{roomId}/start:
+    post:
+      tags: [rooms]
+      operationId: startRoom
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/RoomId"
+      responses:
+        "200": {description: Live}
+  /api/v1/rooms/{roomId}/stop:
+    post:
+      tags: [rooms]
+      operationId: stopRoom
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/RoomId"
+      responses:
+        "200": {description: Idle}
+  /api/v1/rooms/{roomId}/media/publish:
+    post:
+      tags: [rooms]
+      operationId: mediaPublish
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/RoomId"
+      responses:
+        "200": {description: Publish info}
+  /api/v1/rooms/{roomId}/media/play:
+    get:
+      tags: [rooms]
+      operationId: mediaPlay
+      parameters:
+        - $ref: "#/components/parameters/RoomId"
+      responses:
+        "200": {description: Play URLs}
+  /api/v1/rooms/{roomId}/messages:
+    get:
+      tags: [realtime]
+      operationId: listMessages
+      parameters:
+        - $ref: "#/components/parameters/RoomId"
+      responses:
+        "200": {description: Chat history}
+    post:
+      tags: [realtime]
+      operationId: postMessage
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/RoomId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: {type: string}
+      responses:
+        "201": {description: Created}
+  /api/v1/realtime/token:
+    post:
+      tags: [realtime]
+      operationId: realtimeToken
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [room_id]
+              properties:
+                room_id: {type: string, format: uuid}
+      responses:
+        "200": {description: Centrifugo token}
+  /api/v1/admin/grant:
+    post:
+      tags: [admin]
+      operationId: adminGrant
+      security: [{bearerAuth: []}]
+      responses:
+        "204": {description: Granted}
+  /api/v1/admin/ban:
+    post:
+      tags: [admin]
+      operationId: adminBan
+      security: [{bearerAuth: []}]
+      responses:
+        "204": {description: Banned}
+  /api/v1/admin/rooms/force-close:
+    post:
+      tags: [admin]
+      operationId: adminForceClose
+      security: [{bearerAuth: []}]
+      responses:
+        "200": {description: Closed}
+  /api/v1/admin/audit:
+    get:
+      tags: [admin]
+      operationId: adminAudit
+      security: [{bearerAuth: []}]
+      responses:
+        "200": {description: Audit list}
+  /api/v1/admin/gifts:
+    get:
+      tags: [admin]
+      operationId: adminListGifts
+      security: [{bearerAuth: []}]
+      responses:
+        "200": {description: Gifts}
+    post:
+      tags: [admin]
+      operationId: adminUpsertGift
+      security: [{bearerAuth: []}]
+      responses:
+        "201": {description: Upserted}
+  /api/v1/admin/reports:
+    get:
+      tags: [admin]
+      operationId: adminListReports
+      security: [{bearerAuth: []}]
+      responses:
+        "200": {description: Reports}
+  /api/v1/users/{userId}/follow:
+    post:
+      tags: [social]
+      operationId: followUser
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "204": {description: Following}
+    delete:
+      tags: [social]
+      operationId: unfollowUser
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "204": {description: Unfollowed}
+  /api/v1/me/following:
+    get:
+      tags: [social]
+      operationId: listFollowing
+      security: [{bearerAuth: []}]
+      responses:
+        "200": {description: Following ids}
+  /api/v1/feed/hot:
+    get:
+      tags: [social]
+      operationId: feedHot
+      responses:
+        "200": {description: Live rooms}
+  /api/v1/feed/following:
+    get:
+      tags: [social]
+      operationId: feedFollowing
+      security: [{bearerAuth: []}]
+      responses:
+        "200": {description: Following live rooms}
+  /api/v1/reports:
+    post:
+      tags: [moderation]
+      operationId: createReport
+      security: [{bearerAuth: []}]
+      responses:
+        "201": {description: Report created}
+  /api/v1/webhooks/srs/on_publish:
+    post:
+      tags: [webhooks]
+      operationId: srsOnPublish
+      responses:
+        "200": {description: SRS code 0 allow / 1 deny}
+  /api/v1/webhooks/srs/on_unpublish:
+    post:
+      tags: [webhooks]
+      operationId: srsOnUnpublish
+      responses:
+        "200": {description: OK}
+
 components:
   securitySchemes:
     bearerAuth:

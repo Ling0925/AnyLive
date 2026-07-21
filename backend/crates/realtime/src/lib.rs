@@ -1,4 +1,4 @@
-//! Realtime plane helpers: chat messages + Centrifugo connection tokens.
+//! Realtime plane helpers: chat messages + Centrifugo connection tokens + publish.
 //!
 //! Actual WebSocket fan-out is Centrifugo (or in-memory bus for tests).
 
@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use anylive_common::{AppError, ErrorCode};
 use anylive_domain::{RoomId, UserId};
+use async_trait::async_trait;
 use chrono::{Duration, Utc};
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
@@ -16,6 +17,9 @@ use uuid::Uuid;
 /// Max chat body length.
 pub const MAX_CHAT_LEN: usize = 500;
 
+/// Realtime event type for chat messages on room channels.
+pub const EVENT_CHAT_MESSAGE: &str = "chat.message";
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChatMessage {
     pub id: Uuid,
@@ -24,6 +28,56 @@ pub struct ChatMessage {
     pub sender_name: String,
     pub body: String,
     pub created_at: chrono::DateTime<Utc>,
+}
+
+/// Envelope published to Centrifugo channels (and future event types).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MessageEnvelope {
+    #[serde(rename = "type")]
+    pub event_type: String,
+    pub payload: ChatMessagePayload,
+}
+
+/// JSON-stable chat payload (string ids for client compatibility).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChatMessagePayload {
+    pub id: String,
+    pub room_id: String,
+    pub sender_id: String,
+    pub sender_name: String,
+    pub body: String,
+    pub created_at: String,
+}
+
+impl From<&ChatMessage> for ChatMessagePayload {
+    fn from(m: &ChatMessage) -> Self {
+        Self {
+            id: m.id.to_string(),
+            room_id: m.room_id.0.to_string(),
+            sender_id: m.sender_id.0.to_string(),
+            sender_name: m.sender_name.clone(),
+            body: m.body.clone(),
+            created_at: m.created_at.to_rfc3339(),
+        }
+    }
+}
+
+impl MessageEnvelope {
+    pub fn chat_message(msg: &ChatMessage) -> Self {
+        Self {
+            event_type: EVENT_CHAT_MESSAGE.to_string(),
+            payload: ChatMessagePayload::from(msg),
+        }
+    }
+
+    pub fn room_channel(room_id: RoomId) -> String {
+        format!("room:{}", room_id.0)
+    }
+
+    pub fn to_value(&self) -> Result<serde_json::Value, AppError> {
+        serde_json::to_value(self)
+            .map_err(|e| AppError::new(ErrorCode::Internal, format!("envelope serialize: {e}")))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,7 +125,7 @@ pub fn issue_centrifugo_token(
     }
     let now = Utc::now();
     let exp = now + Duration::seconds(cfg.token_ttl_secs);
-    let channel = format!("room:{}", room_id.0);
+    let channel = MessageEnvelope::room_channel(room_id);
     let claims = CentrifugoClaims {
         sub: user_id.0.to_string(),
         exp: exp.timestamp(),
@@ -91,6 +145,127 @@ pub fn issue_centrifugo_token(
         expires_in: cfg.token_ttl_secs,
         channels: vec![channel],
     })
+}
+
+/// Port for publishing events into Centrifugo (or a no-op / test double).
+#[async_trait]
+pub trait CentrifugoPublisher: Send + Sync {
+    async fn publish(&self, channel: &str, data: serde_json::Value) -> Result<(), AppError>;
+}
+
+/// No-op publisher used when Centrifugo is not configured (memory/offline).
+#[derive(Debug, Clone, Default)]
+pub struct NoopCentrifugoPublisher;
+
+impl NoopCentrifugoPublisher {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl CentrifugoPublisher for NoopCentrifugoPublisher {
+    async fn publish(&self, _channel: &str, _data: serde_json::Value) -> Result<(), AppError> {
+        Ok(())
+    }
+}
+
+/// HTTP publisher against Centrifugo server API (`POST {url}/api`).
+#[derive(Debug, Clone)]
+pub struct HttpCentrifugoPublisher {
+    client: reqwest::Client,
+    api_url: String,
+    api_key: String,
+}
+
+impl HttpCentrifugoPublisher {
+    pub fn new(base_url: impl Into<String>, api_key: impl Into<String>) -> Self {
+        let base = base_url.into().trim_end_matches('/').to_string();
+        Self {
+            client: reqwest::Client::new(),
+            api_url: format!("{base}/api"),
+            api_key: api_key.into(),
+        }
+    }
+
+    /// Build from `CENTRIFUGO_URL` + `CENTRIFUGO_API_KEY` when both are set.
+    pub fn from_env() -> Option<Self> {
+        let url = std::env::var("CENTRIFUGO_URL").ok().filter(|s| !s.is_empty())?;
+        let key = std::env::var("CENTRIFUGO_API_KEY")
+            .ok()
+            .filter(|s| !s.is_empty())?;
+        Some(Self::new(url, key))
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct CentrifugoApiRequest<'a> {
+    method: &'static str,
+    params: CentrifugoPublishParams<'a>,
+}
+
+#[derive(Debug, Serialize)]
+struct CentrifugoPublishParams<'a> {
+    channel: &'a str,
+    data: serde_json::Value,
+}
+
+#[async_trait]
+impl CentrifugoPublisher for HttpCentrifugoPublisher {
+    async fn publish(&self, channel: &str, data: serde_json::Value) -> Result<(), AppError> {
+        let body = CentrifugoApiRequest {
+            method: "publish",
+            params: CentrifugoPublishParams { channel, data },
+        };
+        let res = self
+            .client
+            .post(&self.api_url)
+            .header("Authorization", format!("apikey {}", self.api_key))
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| {
+                AppError::new(
+                    ErrorCode::Internal,
+                    format!("centrifugo publish request: {e}"),
+                )
+            })?;
+        let status = res.status();
+        let text = res.text().await.unwrap_or_default();
+        // Centrifugo often returns HTTP 200 even on command errors; inspect body.
+        if !status.is_success() {
+            return Err(AppError::new(
+                ErrorCode::Internal,
+                format!("centrifugo publish HTTP {status}: {text}"),
+            ));
+        }
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+            if let Some(err) = v.get("error") {
+                if !err.is_null() {
+                    return Err(AppError::new(
+                        ErrorCode::Internal,
+                        format!("centrifugo publish error: {err}"),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Build the process-wide publisher: HTTP when env is set, otherwise no-op.
+pub fn publisher_from_env() -> Arc<dyn CentrifugoPublisher> {
+    match HttpCentrifugoPublisher::from_env() {
+        Some(http) => {
+            tracing::info!("centrifugo HTTP publisher enabled");
+            Arc::new(http)
+        }
+        None => {
+            tracing::info!("centrifugo HTTP publisher disabled (memory/noop)");
+            Arc::new(NoopCentrifugoPublisher::new())
+        }
+    }
 }
 
 /// In-memory chat log + recent messages (tests / offline).
@@ -142,7 +317,40 @@ impl MemoryChatBus {
         let g = self.inner.lock().await;
         let list = g.get(&room_id.0).cloned().unwrap_or_default();
         let limit = limit.clamp(1, 100);
-        list.into_iter().rev().take(limit).collect::<Vec<_>>().into_iter().rev().collect()
+        list.into_iter()
+            .rev()
+            .take(limit)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect()
+    }
+}
+
+/// Test double that records publish calls.
+#[derive(Clone, Default)]
+pub struct RecordingCentrifugoPublisher {
+    pub published: Arc<Mutex<Vec<(String, serde_json::Value)>>>,
+}
+
+impl RecordingCentrifugoPublisher {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub async fn snapshot(&self) -> Vec<(String, serde_json::Value)> {
+        self.published.lock().await.clone()
+    }
+}
+
+#[async_trait]
+impl CentrifugoPublisher for RecordingCentrifugoPublisher {
+    async fn publish(&self, channel: &str, data: serde_json::Value) -> Result<(), AppError> {
+        self.published
+            .lock()
+            .await
+            .push((channel.to_string(), data));
+        Ok(())
     }
 }
 
@@ -185,5 +393,98 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.code, ErrorCode::Validation);
+    }
+
+    #[test]
+    fn message_envelope_serializes_chat_type() {
+        let room = RoomId::new();
+        let user = UserId::new();
+        let id = Uuid::new_v4();
+        let created = Utc::now();
+        let msg = ChatMessage {
+            id,
+            room_id: room,
+            sender_id: user,
+            sender_name: "Alice".into(),
+            body: "hello live".into(),
+            created_at: created,
+        };
+        let env = MessageEnvelope::chat_message(&msg);
+        let json = serde_json::to_value(&env).unwrap();
+        assert_eq!(json["type"], "chat.message");
+        assert_eq!(json["payload"]["id"], id.to_string());
+        assert_eq!(json["payload"]["room_id"], room.0.to_string());
+        assert_eq!(json["payload"]["sender_id"], user.0.to_string());
+        assert_eq!(json["payload"]["sender_name"], "Alice");
+        assert_eq!(json["payload"]["body"], "hello live");
+        assert_eq!(json["payload"]["created_at"], created.to_rfc3339());
+        // round-trip
+        let back: MessageEnvelope = serde_json::from_value(json).unwrap();
+        assert_eq!(back.event_type, EVENT_CHAT_MESSAGE);
+        assert_eq!(back.payload.body, "hello live");
+    }
+
+    #[tokio::test]
+    async fn recording_publisher_captures_envelope() {
+        let pubr = RecordingCentrifugoPublisher::new();
+        let room = RoomId::new();
+        let msg = ChatMessage {
+            id: Uuid::new_v4(),
+            room_id: room,
+            sender_id: UserId::new(),
+            sender_name: "Bob".into(),
+            body: "hi".into(),
+            created_at: Utc::now(),
+        };
+        let env = MessageEnvelope::chat_message(&msg);
+        let channel = MessageEnvelope::room_channel(room);
+        pubr.publish(&channel, env.to_value().unwrap())
+            .await
+            .unwrap();
+        let snap = pubr.snapshot().await;
+        assert_eq!(snap.len(), 1);
+        assert_eq!(snap[0].0, format!("room:{}", room.0));
+        assert_eq!(snap[0].1["type"], "chat.message");
+        assert_eq!(snap[0].1["payload"]["body"], "hi");
+    }
+
+    #[tokio::test]
+    async fn noop_publisher_ok() {
+        let p = NoopCentrifugoPublisher::new();
+        p.publish("room:x", serde_json::json!({"ok": true}))
+            .await
+            .unwrap();
+    }
+
+    #[test]
+    fn http_publisher_from_env_none_without_vars() {
+        // Ensure missing env yields None (do not set vars in unit tests).
+        // If CI injects them, skip — production path still covered by Option.
+        let has_url = std::env::var("CENTRIFUGO_URL").ok().filter(|s| !s.is_empty());
+        let has_key = std::env::var("CENTRIFUGO_API_KEY")
+            .ok()
+            .filter(|s| !s.is_empty());
+        if has_url.is_none() || has_key.is_none() {
+            assert!(HttpCentrifugoPublisher::from_env().is_none());
+        }
+    }
+
+    #[test]
+    fn http_publisher_builds_api_url() {
+        let p = HttpCentrifugoPublisher::new("http://localhost:8001/", "secret-key");
+        assert_eq!(p.api_url, "http://localhost:8001/api");
+        assert_eq!(p.api_key, "secret-key");
+    }
+
+    #[test]
+    fn centrifugo_error_body_is_detected() {
+        // Mirrors the body check in HttpCentrifugoPublisher::publish.
+        let text = r#"{"error":{"code":108,"message":"not available"}}"#;
+        let v: serde_json::Value = serde_json::from_str(text).unwrap();
+        let err = v.get("error").unwrap();
+        assert!(!err.is_null());
+        let ok_text = r#"{"result":{}}"#;
+        let ok: serde_json::Value = serde_json::from_str(ok_text).unwrap();
+        assert!(ok.get("error").is_none() || ok.get("error").unwrap().is_null());
     }
 }

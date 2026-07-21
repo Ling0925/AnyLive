@@ -32,7 +32,7 @@ def main() -> int:
     doc = yaml.safe_load(openapi_path.read_text())
     assert doc["openapi"].startswith("3."), "openapi version"
     paths = doc["paths"]
-    for p in ("/health", "/ready", "/api/v1/meta", "/api/v1/rooms", "/api/v1/me"):
+    for p in ("/health", "/ready", "/api/v1/meta", "/api/v1/rooms", "/api/v1/me", "/api/v1/wallet", "/api/v1/gifts", "/api/v1/feed/hot", "/api/v1/reports", "/api/v1/webhooks/srs/on_publish"):
         assert p in paths, f"missing path {p}"
     schemas = doc["components"]["schemas"]
     for s in ("Room", "User", "TokenPair", "ApiError"):

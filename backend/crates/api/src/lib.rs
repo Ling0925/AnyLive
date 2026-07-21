@@ -2,6 +2,7 @@
 
 mod auth_user;
 mod error;
+pub mod guards;
 mod rooms;
 mod routes;
 mod state;
@@ -19,6 +20,11 @@ use utoipa::OpenApi;
 
 pub use auth_user::AuthUser;
 pub use error::ApiError;
+pub use guards::{
+    check_centrifugo_for_production, check_jwt_secrets_for_production, check_otp_for_production,
+    check_production_secrets, is_production_env, DEFAULT_CENTRIFUGO_TOKEN_SECRET,
+    DEFAULT_JWT_ACCESS_SECRET, DEFAULT_JWT_REFRESH_SECRET,
+};
 pub use state::AppState;
 
 /// Build the Axum router with in-memory auth (binary + integration tests).
@@ -70,6 +76,10 @@ pub fn build_app_with_state(state: Arc<AppState>) -> Router {
         .route("/api/v1/feed/following", get(routes::feed_following))
         .route("/api/v1/feed/hot", get(routes::feed_hot))
         .route("/api/v1/reports", post(routes::create_report))
+        .route("/api/v1/admin/gifts", get(routes::admin_list_gifts).post(routes::admin_upsert_gift))
+        .route("/api/v1/admin/reports", get(routes::admin_list_reports))
+        .route("/api/v1/webhooks/srs/on_publish", post(routes::srs_on_publish))
+        .route("/api/v1/webhooks/srs/on_unpublish", post(routes::srs_on_unpublish))
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
         .with_state(state)
@@ -770,6 +780,65 @@ mod tests {
             .as_str()
             .unwrap()
             .starts_with("room:"));
+    }
+
+    #[tokio::test]
+    async fn chat_post_publishes_centrifugo_envelope() {
+        use anylive_realtime::RecordingCentrifugoPublisher;
+        use std::sync::Arc;
+
+        let recorder = Arc::new(RecordingCentrifugoPublisher::new());
+        let base = AppState::dev();
+        let state = Arc::new(AppState::new(
+            base.auth.clone(),
+            base.rooms.clone(),
+            base.media.clone(),
+            base.wallet.clone(),
+            base.chat.clone(),
+            base.centrifugo.clone(),
+            recorder.clone(),
+            base.moderation.clone(),
+            base.social.clone(),
+            base.reports.clone(),
+            None,
+        ));
+        let app = build_app_with_state(state);
+        let token = login(&app, "chat-pub@example.com").await;
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/rooms")
+                    .header("authorization", format!("Bearer {token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"title":"Pub Room"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let room_id = body_json(res).await["id"].as_str().unwrap().to_string();
+
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/rooms/{room_id}/messages"))
+                    .header("authorization", format!("Bearer {token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"body":"fanout me"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::CREATED);
+
+        let snap = recorder.snapshot().await;
+        assert_eq!(snap.len(), 1);
+        assert_eq!(snap[0].0, format!("room:{room_id}"));
+        assert_eq!(snap[0].1["type"], "chat.message");
+        assert_eq!(snap[0].1["payload"]["body"], "fanout me");
+        assert_eq!(snap[0].1["payload"]["room_id"], room_id);
     }
 
     #[tokio::test]
