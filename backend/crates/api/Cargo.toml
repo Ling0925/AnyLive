@@ -14,6 +14,7 @@ anylive-domain = { path = "../domain" }
 anylive-db = { path = "../db" }
 anylive-auth = { path = "../auth" }
 anylive-media = { path = "../media" }
+anylive-wallet = { path = "../wallet" }
 anyhow = { workspace = true }
 axum = { workspace = true }
 serde = { workspace = true }

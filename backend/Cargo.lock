@@ -42,6 +42,7 @@ dependencies = [
  "anylive-db",
  "anylive-domain",
  "anylive-media",
+ "anylive-wallet",
  "axum",
  "chrono",
  "http-body-util",
@@ -115,6 +116,19 @@ dependencies = [
  "anylive-common",
  "anylive-domain",
  "async-trait",
+ "chrono",
+ "serde",
+ "thiserror",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "anylive-wallet"
+version = "0.1.0"
+dependencies = [
+ "anylive-common",
+ "anylive-domain",
  "chrono",
  "serde",
  "thiserror",

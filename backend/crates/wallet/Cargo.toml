@@ -1,0 +1,17 @@
+[package]
+name = "anylive-wallet"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anylive-common = { path = "../common" }
+anylive-domain = { path = "../domain" }
+chrono = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

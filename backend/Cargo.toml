@@ -6,6 +6,7 @@ members = [
     "crates/db",
     "crates/auth",
     "crates/media",
+    "crates/wallet",
     "crates/api",
 ]
 default-members = ["crates/api"]

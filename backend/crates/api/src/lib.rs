@@ -46,6 +46,10 @@ pub fn build_app_with_state(state: Arc<AppState>) -> Router {
             post(routes::media_publish),
         )
         .route("/api/v1/rooms/{id}/media/play", get(routes::media_play))
+        .route("/api/v1/wallet", get(routes::get_wallet))
+        .route("/api/v1/wallet/topups", post(routes::topup_wallet))
+        .route("/api/v1/gifts", get(routes::list_gifts))
+        .route("/api/v1/rooms/{id}/gifts", post(routes::send_gift))
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
         .with_state(state)
@@ -69,6 +73,10 @@ pub fn build_app_with_state(state: Arc<AppState>) -> Router {
         routes::stop_room,
         routes::media_publish,
         routes::media_play,
+        routes::get_wallet,
+        routes::topup_wallet,
+        routes::list_gifts,
+        routes::send_gift,
     ),
     components(schemas(
         routes::HealthResponse,
@@ -85,12 +93,20 @@ pub fn build_app_with_state(state: Arc<AppState>) -> Router {
         routes::RoomListResponse,
         routes::PublishInfoDto,
         routes::PlayUrlsDto,
+        routes::WalletDto,
+        routes::TopupBody,
+        routes::GiftDto,
+        routes::GiftListResponse,
+        routes::SendGiftBody,
+        routes::GiftOrderDto,
     )),
     tags(
         (name = "system", description = "Health and metadata"),
         (name = "auth", description = "Authentication"),
         (name = "users", description = "User profile"),
-        (name = "rooms", description = "Rooms and media control plane")
+        (name = "rooms", description = "Rooms and media control plane"),
+        (name = "wallet", description = "Virtual currency wallet"),
+        (name = "gifts", description = "Gift catalog and send")
     ),
     modifiers(&SecurityAddon),
     info(title = "AnyLive API", version = "0.1.0")
@@ -481,5 +497,115 @@ mod tests {
         let paths = doc.get("paths").unwrap();
         assert!(paths.get("/api/v1/rooms").is_some());
         assert!(paths.get("/api/v1/rooms/{id}/media/play").is_some());
+    }
+
+    #[tokio::test]
+    async fn gift_send_idempotent_http() {
+        let state = AppState::dev_ready().await;
+        let app = build_app_with_state(state);
+        let host_token = login(&app, "host2@example.com").await;
+        let fan_token = login(&app, "fan@example.com").await;
+
+        // create room as host
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/rooms")
+                    .header("authorization", format!("Bearer {host_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"title":"Gift Room"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let room = body_json(res).await;
+        let room_id = room["id"].as_str().unwrap().to_string();
+        let owner_id = room["owner_id"].as_str().unwrap().to_string();
+
+        // topup fan
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/wallet/topups")
+                    .header("authorization", format!("Bearer {fan_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"amount":50}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(body_json(res).await["balance"], 50);
+
+        // list gifts
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/gifts")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let gifts = body_json(res).await;
+        let gift_id = gifts["items"][0]["id"].as_str().unwrap().to_string();
+
+        let body = format!(
+            r#"{{"gift_id":"{gift_id}","receiver_id":"{owner_id}","count":2,"client_request_id":"idem-1"}}"#
+        );
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/rooms/{room_id}/gifts"))
+                    .header("authorization", format!("Bearer {fan_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.clone()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::CREATED);
+        let order = body_json(res).await;
+        assert_eq!(order["replayed"], false);
+        let order_id = order["id"].as_str().unwrap().to_string();
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/rooms/{room_id}/gifts"))
+                    .header("authorization", format!("Bearer {fan_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let order2 = body_json(res).await;
+        assert_eq!(order2["replayed"], true);
+        assert_eq!(order2["id"], order_id);
+
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/wallet")
+                    .header("authorization", format!("Bearer {fan_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        // 50 - 2*price(rose=1) = 48
+        assert_eq!(body_json(res).await["balance"], 48);
     }
 }
