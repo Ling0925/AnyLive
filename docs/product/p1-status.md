@@ -27,15 +27,16 @@ Scope: [mvp-scope.md](./mvp-scope.md). Status from `git log` + current tree (API
 | Hot + following live feeds | Done | `feat(feed)` |
 | User reports API | Done | `POST /api/v1/reports` |
 | Postgres schema `001_init.sql` | Done | `backend/migrations/` |
-| Postgres dual store (users/rooms/wallet via `USE_POSTGRES=1`) | Done | `anylive-db` + `Any*` stores |
+| Postgres dual store (users/rooms/wallet/social/moderation/reports) | Done | `USE_POSTGRES=1` + migrations 001–002 |
 | SRS on_publish / on_unpublish webhooks | Done | `routes/webhooks.rs` |
 | Production secret guards (OTP / JWT / etc.) | Done | API startup guards |
 | Compliance stubs: legal privacy/terms, account export, soft-delete | Done | API + Flutter `ComplianceRepository` |
-| Flutter login shell + privacy/terms URLs | Done | `login_page.dart` + widget test |
-| Flutter rooms repository, room list, room page (chat/gifts shell) | Done | control-plane UI |
-| Flutter gifts repository + wallet ledger client | Done | `listLedger()` |
-| H5 watch shell + hls.js attach (native HLS fallback) | Done | `hlsAttach.ts` |
-| Admin-web OTP login shell + ban/mute/force-close/gifts/reports | Done | `admin.ts` + `App.vue` |
+| Chat rate limit (5 / 10s) | Done | `ChatRateLimiter` |
+| Live-only gifts + public active gift catalog | Done | `ROOM_NOT_LIVE` / filter active |
+| Flutter login + privacy/terms URLs | Done | `login_page.dart` |
+| Flutter rooms / gifts / profile / feed / follow / report | Done | Discover + room ended banner |
+| H5 HLS watch + share deep-link + room-ended UI | Done | `hlsAttach` + `share` |
+| Admin-web OTP + moderation + gifts + reports + HLS preview | Done | `admin.ts` + `App.vue` |
 
 ---
 
@@ -43,13 +44,13 @@ Scope: [mvp-scope.md](./mvp-scope.md). Status from `git log` + current tree (API
 
 | Item | Gap |
 |---|---|
-| Account export / delete | Soft-delete + stub payload; no full DSAR package / hard purge |
-| Age / privacy profile extras | In-memory only (`MemoryProfileExtras`); not in PG migration |
-| Moderation / social / reports / chat bus | Process-local memory even when Postgres dual store is on |
+| Account export / delete | Soft-delete is process-local HashSet; not multi-replica |
+| Age / privacy profile extras | In-memory only (`MemoryProfileExtras`); not in PG |
+| Chat bus / refresh tokens | Process-local even when Postgres dual store is on |
 | Centrifugo publish | Wired; needs real Centrifugo URL/secret for live fan-out |
-| H5 | Watch-only; no login / chat / gifts |
+| H5 | Watch+share only; no login / chat / gifts |
 | Admin UI | Functional shell, not full Vben module suite |
-| Flutter player | Room page is control-plane (chat/gifts); no in-app HLS player |
+| Flutter player | Room page control-plane; HLS URL only (no media_kit embed) |
 | OTP delivery | Dev fixed code path; no real email provider |
 | Top-up | Mock topup only (no Stripe/payment provider) |
 
@@ -59,14 +60,10 @@ Scope: [mvp-scope.md](./mvp-scope.md). Status from `git log` + current tree (API
 
 1. End-to-end OBS → SRS → Flutter/H5 HLS play smoke on compose stack  
 2. Real email OTP (or documented test harness for dogfood)  
-3. Persist moderation / social / reports / chat when `USE_POSTGRES=1`  
-4. OpenAPI YAML sync with all mounted routes (compliance, mute, ledger, webhooks, feeds, PATCH me)  
-5. In-app Flutter player (or documented external player path for hosts)  
-6. H5 login + chat/gift optional path (MVP allows watch+share only)  
-7. Age declaration UI on registration (API extras exist; client field incomplete)  
-8. Report entry on Flutter room UI (API exists)  
-9. 1k WS room pressure report + device smoke matrix  
-10. Full Vben admin modules if required beyond current shell  
+3. Persist soft-delete + refresh tokens (or document single-process dogfood)  
+4. In-app Flutter player (or documented external player path for hosts)  
+5. 1k WS room pressure report + device smoke matrix  
+6. Full Vben admin modules if required beyond current shell  
 
 ---
 
@@ -74,11 +71,13 @@ Scope: [mvp-scope.md](./mvp-scope.md). Status from `git log` + current tree (API
 
 ### Function
 
-- [ ] New user 10 min: register → watch → chat → gift (test coins)  
-- [ ] Host OBS publish; Flutter + H5 can play  
-- [ ] Stop / force-close yields clear ended state on clients  
+- [x] Register/login OTP (dev) + browse feeds + room chat/gifts (API/Flutter)  
+- [x] H5 watch + share + ended state  
+- [x] Follow host + report room (Flutter)  
+- [x] Admin ban/mute/force-close/gifts/reports/preview  
 - [x] Same idempotency key gift does not double-charge (unit/API covered)  
-- [x] Admin ban / mute / force-close APIs with audit (enforcement wired)
+- [x] Gifts only when room is live  
+- [ ] Host OBS publish dogfood week with multi-client play  
 
 ### Quality
 
@@ -90,8 +89,8 @@ Scope: [mvp-scope.md](./mvp-scope.md). Status from `git log` + current tree (API
 ### Compliance hooks
 
 - [x] Privacy / terms visible on login (static URLs; legal API stubs available)  
-- [ ] Age declaration field in registration UI  
-- [x] Report API available (UI entry incomplete)  
+- [x] Age declaration on profile (API + profile UI checkboxes)  
+- [x] Report API + Flutter room report dialog  
 - [x] Account delete / export API stubs + mobile client + docs
 
 ---
