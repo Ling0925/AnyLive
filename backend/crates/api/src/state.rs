@@ -10,7 +10,7 @@ use anylive_db::{postgres_enabled, AnyUserStore, AnyWallet, PgPool};
 use anylive_media::SrsMediaProvider;
 use anylive_moderation::MemoryModeration;
 use anylive_realtime::{
-    publisher_from_env, CentrifugoConfig, CentrifugoPublisher, MemoryChatBus,
+    publisher_from_env, CentrifugoConfig, CentrifugoPublisher, ChatRateLimiter, MemoryChatBus,
     NoopCentrifugoPublisher,
 };
 use anylive_social::MemorySocial;
@@ -31,6 +31,8 @@ pub struct AppState {
     pub media: SrsMediaProvider,
     pub wallet: AnyWallet,
     pub chat: MemoryChatBus,
+    /// Per-user chat post rate limiter (in-memory sliding window).
+    pub chat_rate_limiter: ChatRateLimiter,
     pub centrifugo: CentrifugoConfig,
     /// Centrifugo HTTP API publisher (noop when env not set).
     pub centrifugo_publisher: Arc<dyn CentrifugoPublisher>,
@@ -52,6 +54,7 @@ impl AppState {
         media: SrsMediaProvider,
         wallet: AnyWallet,
         chat: MemoryChatBus,
+        chat_rate_limiter: ChatRateLimiter,
         centrifugo: CentrifugoConfig,
         centrifugo_publisher: Arc<dyn CentrifugoPublisher>,
         moderation: MemoryModeration,
@@ -67,6 +70,7 @@ impl AppState {
             media,
             wallet,
             chat,
+            chat_rate_limiter,
             centrifugo,
             centrifugo_publisher,
             moderation,
@@ -95,6 +99,7 @@ impl AppState {
             SrsMediaProvider::from_env(),
             AnyWallet::memory(),
             MemoryChatBus::new(),
+            ChatRateLimiter::default(),
             CentrifugoConfig::default(),
             // Tests/offline: never require a live Centrifugo.
             Arc::new(NoopCentrifugoPublisher::new()),
@@ -191,6 +196,7 @@ impl AppState {
             SrsMediaProvider::from_env(),
             wallet,
             MemoryChatBus::new(),
+            ChatRateLimiter::default(),
             centrifugo,
             publisher_from_env(),
             MemoryModeration::new(),

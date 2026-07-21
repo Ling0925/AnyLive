@@ -1004,6 +1004,67 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn chat_post_rate_limited_on_sixth_burst() {
+        let state = AppState::dev();
+        let app = build_app_with_state(state);
+        let token = login(&app, "chat-rate@example.com").await;
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/rooms")
+                    .header("authorization", format!("Bearer {token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"title":"Rate Room"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let room_id = body_json(res).await["id"].as_str().unwrap().to_string();
+
+        // Default limit: 5 messages per 10s. First five succeed.
+        for i in 0..5 {
+            let res = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(format!("/api/v1/rooms/{room_id}/messages"))
+                        .header("authorization", format!("Bearer {token}"))
+                        .header("content-type", "application/json")
+                        .body(Body::from(format!(r#"{{"body":"msg {i}"}}"#)))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                res.status(),
+                StatusCode::CREATED,
+                "message {i} should be allowed"
+            );
+        }
+
+        // Sixth in the same burst is rate limited.
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/rooms/{room_id}/messages"))
+                    .header("authorization", format!("Bearer {token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"body":"too many"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::TOO_MANY_REQUESTS);
+        let err = body_json(res).await;
+        assert_eq!(err["code"], "RATE_LIMITED");
+        assert_eq!(err["retryable"], true);
+    }
+
+    #[tokio::test]
     async fn chat_post_publishes_centrifugo_envelope() {
         use anylive_realtime::RecordingCentrifugoPublisher;
         use std::sync::Arc;
@@ -1016,6 +1077,7 @@ mod tests {
             base.media.clone(),
             base.wallet.clone(),
             base.chat.clone(),
+            base.chat_rate_limiter.clone(),
             base.centrifugo.clone(),
             recorder.clone(),
             base.moderation.clone(),
@@ -1077,6 +1139,7 @@ mod tests {
             base.media.clone(),
             base.wallet.clone(),
             base.chat.clone(),
+            base.chat_rate_limiter.clone(),
             base.centrifugo.clone(),
             recorder.clone(),
             base.moderation.clone(),

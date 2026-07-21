@@ -2,8 +2,9 @@
 //!
 //! Actual WebSocket fan-out is Centrifugo (or in-memory bus for tests).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use std::time::{Duration as StdDuration, Instant};
 
 use anylive_common::{AppError, ErrorCode};
 use anylive_domain::{RoomId, UserId};
@@ -16,6 +17,12 @@ use uuid::Uuid;
 
 /// Max chat body length.
 pub const MAX_CHAT_LEN: usize = 500;
+
+/// Default max messages per window for chat rate limiting.
+pub const DEFAULT_CHAT_RATE_LIMIT: usize = 5;
+
+/// Default sliding window for chat rate limiting.
+pub const DEFAULT_CHAT_RATE_WINDOW: StdDuration = StdDuration::from_secs(10);
 
 /// Realtime event type for chat messages on room channels.
 pub const EVENT_CHAT_MESSAGE: &str = "chat.message";
@@ -308,6 +315,75 @@ pub fn publisher_from_env() -> Arc<dyn CentrifugoPublisher> {
     }
 }
 
+/// Sliding-window rate limiter: max N events per user within a time window.
+///
+/// Pure in-memory; suitable for single-process API. Prunes expired timestamps
+/// on each check so the map does not grow unbounded per active user.
+#[derive(Debug, Clone)]
+pub struct ChatRateLimiter {
+    max: usize,
+    window: StdDuration,
+    hits: Arc<Mutex<HashMap<Uuid, VecDeque<Instant>>>>,
+}
+
+impl Default for ChatRateLimiter {
+    fn default() -> Self {
+        Self::new(DEFAULT_CHAT_RATE_LIMIT, DEFAULT_CHAT_RATE_WINDOW)
+    }
+}
+
+impl ChatRateLimiter {
+    pub fn new(max: usize, window: StdDuration) -> Self {
+        Self {
+            max: max.max(1),
+            window,
+            hits: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// Pure check/record against an arbitrary clock instant (unit-testable).
+    ///
+    /// Returns `true` if the event is allowed (and records it), `false` if
+    /// the user is over the limit.
+    pub fn try_acquire_at(
+        hits: &mut HashMap<Uuid, VecDeque<Instant>>,
+        user_id: Uuid,
+        max: usize,
+        window: StdDuration,
+        now: Instant,
+    ) -> bool {
+        let queue = hits.entry(user_id).or_default();
+        // Drop timestamps outside the sliding window.
+        while queue
+            .front()
+            .is_some_and(|t| now.duration_since(*t) >= window)
+        {
+            queue.pop_front();
+        }
+        if queue.len() >= max {
+            return false;
+        }
+        queue.push_back(now);
+        true
+    }
+
+    /// Check and record a message attempt for `user_id`.
+    ///
+    /// Returns `Ok(())` when allowed, or `Err(AppError)` with
+    /// [`ErrorCode::RateLimited`] when the limit is exceeded.
+    pub async fn check(&self, user_id: UserId) -> Result<(), AppError> {
+        let mut g = self.hits.lock().await;
+        if Self::try_acquire_at(&mut g, user_id.0, self.max, self.window, Instant::now()) {
+            Ok(())
+        } else {
+            Err(AppError::new(
+                ErrorCode::RateLimited,
+                "chat rate limit exceeded",
+            ))
+        }
+    }
+}
+
 /// In-memory chat log + recent messages (tests / offline).
 #[derive(Clone, Default)]
 pub struct MemoryChatBus {
@@ -397,6 +473,68 @@ impl CentrifugoPublisher for RecordingCentrifugoPublisher {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rate_limiter_allows_up_to_max_then_blocks() {
+        let mut hits: HashMap<Uuid, VecDeque<Instant>> = HashMap::new();
+        let user = Uuid::new_v4();
+        let other = Uuid::new_v4();
+        let max = 5;
+        let window = StdDuration::from_secs(10);
+        let t0 = Instant::now();
+
+        for i in 0..max {
+            assert!(
+                ChatRateLimiter::try_acquire_at(&mut hits, user, max, window, t0),
+                "message {i} should be allowed"
+            );
+        }
+        // 6th within window is blocked
+        assert!(!ChatRateLimiter::try_acquire_at(
+            &mut hits, user, max, window, t0
+        ));
+        // other users are independent
+        assert!(ChatRateLimiter::try_acquire_at(
+            &mut hits, other, max, window, t0
+        ));
+    }
+
+    #[test]
+    fn rate_limiter_prunes_old_entries_and_recovers() {
+        let mut hits: HashMap<Uuid, VecDeque<Instant>> = HashMap::new();
+        let user = Uuid::new_v4();
+        let max = 5;
+        let window = StdDuration::from_secs(10);
+        let t0 = Instant::now();
+
+        for _ in 0..max {
+            assert!(ChatRateLimiter::try_acquire_at(
+                &mut hits, user, max, window, t0
+            ));
+        }
+        assert!(!ChatRateLimiter::try_acquire_at(
+            &mut hits, user, max, window, t0
+        ));
+
+        // After window elapses, oldest entries prune and a new message is allowed.
+        let t1 = t0 + window + StdDuration::from_millis(1);
+        assert!(ChatRateLimiter::try_acquire_at(
+            &mut hits, user, max, window, t1
+        ));
+        // Queue should only hold the single fresh hit.
+        assert_eq!(hits.get(&user).map(|q| q.len()), Some(1));
+    }
+
+    #[tokio::test]
+    async fn rate_limiter_check_returns_rate_limited_code() {
+        let limiter = ChatRateLimiter::new(2, StdDuration::from_secs(10));
+        let user = UserId::new();
+        limiter.check(user).await.unwrap();
+        limiter.check(user).await.unwrap();
+        let err = limiter.check(user).await.unwrap_err();
+        assert_eq!(err.code, ErrorCode::RateLimited);
+        assert!(err.message.contains("rate limit"));
+    }
 
     #[test]
     fn centrifugo_token_has_room_channel() {

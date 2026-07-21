@@ -104,6 +104,12 @@ pub async fn post_message(
             "user is muted",
         )));
     }
+    // Per-user chat rate limit (default 5 messages / 10s).
+    state
+        .chat_rate_limiter
+        .check(user.user_id)
+        .await
+        .map_err(ApiError::from)?;
     let room_uuid = Uuid::parse_str(&id)
         .map_err(|_| ApiError(anylive_common::AppError::validation("invalid room id")))?;
     let room_id = RoomId(room_uuid);
