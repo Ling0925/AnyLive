@@ -40,6 +40,7 @@ Scope: [mvp-scope.md](./mvp-scope.md). Status from `git log` + current tree (API
 | Admin-web OTP + moderation + gifts + reports + HLS preview | Done | `admin.ts` + `App.vue` |
 | Production CORS restriction | Done | `CORS_ALLOWED_ORIGINS` required when `APP_ENV=production` |
 | 1k WS loadtest harness (dry-run) | Done | `scripts/loadtest/ws-1k-baseline.sh` + report stub (full Centrifugo run still operator) |
+| Docker test deploy (API + Admin) | Done | `./scripts/deploy-test.sh` → API `:8088`, Admin `:8090` |
 
 ---
 
