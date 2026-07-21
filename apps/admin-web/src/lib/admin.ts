@@ -5,9 +5,38 @@ export function adminTitle(env: string): string {
 export function canAccessModule(role: string, module: string): boolean {
   if (role === 'admin') return true
   if (role === 'moderator') {
-    return ['rooms', 'reports', 'users'].includes(module)
+    return ['dashboard', 'rooms', 'reports', 'users', 'moderation', 'audit'].includes(module)
   }
   return false
+}
+
+/** Sidebar nav keys used by the ops shell. */
+export type AdminNavKey =
+  | 'dashboard'
+  | 'rooms'
+  | 'reports'
+  | 'gifts'
+  | 'moderation'
+  | 'audit'
+
+export type AdminNavItem = {
+  key: AdminNavKey
+  label: string
+  /** Optional short description for dashboard cards. */
+  blurb?: string
+}
+
+export const ADMIN_NAV: AdminNavItem[] = [
+  { key: 'dashboard', label: '总览', blurb: '直播与运营概览' },
+  { key: 'rooms', label: '直播间', blurb: '房间列表 / 预览 / 强关' },
+  { key: 'reports', label: '举报队列', blurb: '用户举报处理' },
+  { key: 'gifts', label: '礼物配置', blurb: '礼物目录管理' },
+  { key: 'moderation', label: '处置中心', blurb: '封禁 / 禁言' },
+  { key: 'audit', label: '审计日志', blurb: '运营写操作记录' },
+]
+
+export function navLabel(key: AdminNavKey): string {
+  return ADMIN_NAV.find((n) => n.key === key)?.label ?? key
 }
 
 /** Normalize API base URL (strip trailing slash). */
@@ -25,13 +54,17 @@ export function apiUrl(base: string, path: string): string {
 export const API_PATHS = {
   otpSend: '/api/v1/auth/otp/send',
   otpVerify: '/api/v1/auth/otp/verify',
+  me: '/api/v1/me',
   rooms: '/api/v1/rooms',
   publicGifts: '/api/v1/gifts',
   adminGifts: '/api/v1/admin/gifts',
   adminBan: '/api/v1/admin/ban',
   adminMute: '/api/v1/admin/mute',
+  adminUnmute: '/api/v1/admin/unmute',
   adminForceClose: '/api/v1/admin/rooms/force-close',
   adminReports: '/api/v1/admin/reports',
+  adminAudit: '/api/v1/admin/audit',
+  adminGrant: '/api/v1/admin/grant',
 } as const
 
 /** Gifts list path: admin catalog when authed, else public catalog. */
@@ -39,7 +72,6 @@ export function giftsListPath(authed: boolean): string {
   return authed ? API_PATHS.adminGifts : API_PATHS.publicGifts
 }
 
-/** Admin gift upsert (POST) path. */
 export function adminGiftsPath(): string {
   return API_PATHS.adminGifts
 }
@@ -52,12 +84,20 @@ export function otpVerifyPath(): string {
   return API_PATHS.otpVerify
 }
 
+export function mePath(): string {
+  return API_PATHS.me
+}
+
 export function banUserPath(): string {
   return API_PATHS.adminBan
 }
 
 export function muteUserPath(): string {
   return API_PATHS.adminMute
+}
+
+export function unmuteUserPath(): string {
+  return API_PATHS.adminUnmute
 }
 
 export function forceCloseRoomPath(): string {
@@ -70,6 +110,14 @@ export function roomsPath(): string {
 
 export function reportsListPath(): string {
   return API_PATHS.adminReports
+}
+
+export function auditPath(): string {
+  return API_PATHS.adminAudit
+}
+
+export function grantAdminPath(): string {
+  return API_PATHS.adminGrant
 }
 
 /** PATCH resolve path for a report id: `/api/v1/admin/reports/{id}`. */
@@ -97,4 +145,40 @@ export function buildHls(
   const b = cdnBase.replace(/\/$/, '')
   const s = roomId.replace(/^\/+|\/+$/g, '')
   return `${b}/${s}.m3u8`
+}
+
+/** Room status badge class helper. */
+export function roomStatusTone(status: string): 'live' | 'idle' | 'closed' | 'unknown' {
+  switch (status) {
+    case 'live':
+      return 'live'
+    case 'idle':
+      return 'idle'
+    case 'closed':
+      return 'closed'
+    default:
+      return 'unknown'
+  }
+}
+
+/** Shorten UUID for table display. */
+export function shortId(id: string, head = 8): string {
+  if (!id) return '—'
+  if (id.length <= head + 4) return id
+  return `${id.slice(0, head)}…`
+}
+
+/** Dashboard KPI helpers (pure, unit-tested). */
+export function countByStatus(
+  rooms: Array<{ status: string }>,
+  status: string,
+): number {
+  return rooms.filter((r) => r.status === status).length
+}
+
+export function openReportCount(
+  reports: Array<{ status?: string }>,
+): number {
+  // Backend list is newest-first; unresolved items typically have status open or omit resolved.
+  return reports.filter((r) => !r.status || r.status === 'open').length
 }
