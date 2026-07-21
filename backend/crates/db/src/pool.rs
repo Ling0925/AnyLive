@@ -86,5 +86,10 @@ mod tests {
             "missing {}",
             dir.display()
         );
+        assert!(
+            dir.join("002_reports_mute.sql").exists(),
+            "missing 002 under {}",
+            dir.display()
+        );
     }
 }

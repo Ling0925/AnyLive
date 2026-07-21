@@ -104,6 +104,8 @@ dependencies = [
  "anylive-auth",
  "anylive-common",
  "anylive-domain",
+ "anylive-moderation",
+ "anylive-social",
  "anylive-wallet",
  "async-trait",
  "chrono",

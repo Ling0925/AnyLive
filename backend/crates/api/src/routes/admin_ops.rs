@@ -61,7 +61,7 @@ pub struct ResolveReportBody {
     pub note: Option<String>,
 }
 
-fn report_to_dto(r: crate::routes::reports::Report) -> AdminReportDto {
+fn report_to_dto(r: anylive_db::Report) -> AdminReportDto {
     AdminReportDto {
         id: r.id.to_string(),
         reporter_id: r.reporter_id.0.to_string(),

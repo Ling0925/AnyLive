@@ -6,20 +6,19 @@ use anylive_auth::{
     AuthService, InMemoryOtpStore, InMemoryRefreshStore, JwtConfig, JwtService, OtpConfig,
     OtpService,
 };
-use anylive_db::{postgres_enabled, AnyUserStore, AnyWallet, PgPool};
+use anylive_db::{
+    postgres_enabled, AnyModeration, AnyReports, AnySocial, AnyUserStore, AnyWallet, PgPool,
+};
 use anylive_media::SrsMediaProvider;
-use anylive_moderation::MemoryModeration;
 use anylive_realtime::{
     publisher_from_env, CentrifugoConfig, CentrifugoPublisher, ChatRateLimiter, MemoryChatBus,
     NoopCentrifugoPublisher,
 };
-use anylive_social::MemorySocial;
 
 use crate::guards::{check_production_secrets, is_production_env};
 use crate::profile::MemoryProfileExtras;
 use crate::rooms::AnyRoomStore;
 use crate::routes::compliance::DeletedUsers;
-use crate::routes::reports::MemoryReports;
 
 /// Auth service with pluggable user store (memory default, Postgres when enabled).
 pub type AppAuthService = AuthService<AnyUserStore, InMemoryOtpStore, InMemoryRefreshStore>;
@@ -36,9 +35,9 @@ pub struct AppState {
     pub centrifugo: CentrifugoConfig,
     /// Centrifugo HTTP API publisher (noop when env not set).
     pub centrifugo_publisher: Arc<dyn CentrifugoPublisher>,
-    pub moderation: MemoryModeration,
-    pub social: MemorySocial,
-    pub reports: MemoryReports,
+    pub moderation: AnyModeration,
+    pub social: AnySocial,
+    pub reports: AnyReports,
     /// Soft-deleted accounts (P1 compliance stub).
     pub deleted_users: DeletedUsers,
     /// Age/privacy declarations (in-memory dual store; no PG migration).
@@ -57,9 +56,9 @@ impl AppState {
         chat_rate_limiter: ChatRateLimiter,
         centrifugo: CentrifugoConfig,
         centrifugo_publisher: Arc<dyn CentrifugoPublisher>,
-        moderation: MemoryModeration,
-        social: MemorySocial,
-        reports: MemoryReports,
+        moderation: AnyModeration,
+        social: AnySocial,
+        reports: AnyReports,
         deleted_users: DeletedUsers,
         profile_extras: MemoryProfileExtras,
         db: Option<PgPool>,
@@ -103,9 +102,9 @@ impl AppState {
             CentrifugoConfig::default(),
             // Tests/offline: never require a live Centrifugo.
             Arc::new(NoopCentrifugoPublisher::new()),
-            MemoryModeration::new(),
-            MemorySocial::new(),
-            MemoryReports::new(),
+            AnyModeration::memory(),
+            AnySocial::memory(),
+            AnyReports::memory(),
             DeletedUsers::new(),
             MemoryProfileExtras::new(),
             None,
@@ -126,7 +125,7 @@ impl AppState {
     /// - `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` via [`JwtConfig::from_env`]
     /// - `CENTRIFUGO_TOKEN_SECRET` via [`CentrifugoConfig::default`]
     /// - OTP: fixed/dev OTP only when **not** production
-    /// - `USE_POSTGRES=1` + `DATABASE_URL` — optional Postgres users/rooms/wallet + migrations
+    /// - `USE_POSTGRES=1` + `DATABASE_URL` — optional Postgres dual stores + migrations
     ///
     /// Realtime routes are always mounted, so Centrifugo secret is always guarded
     /// in production.
@@ -155,18 +154,21 @@ impl AppState {
         let jwt = JwtService::new(jwt_cfg);
         let otp = OtpService::new(InMemoryOtpStore::default(), otp_cfg);
 
-        let (users, rooms, wallet, db) = if postgres_enabled() {
+        let (users, rooms, wallet, moderation, social, reports, db) = if postgres_enabled() {
             let pool = anylive_db::connect_and_migrate_from_env()
                 .await
                 .map_err(|e| format!("postgres connect/migrate failed: {e}"))?;
             tracing::info!(
-                "postgres enabled: migrations applied; using PostgresUserStore + \
-                 PostgresRoomStore + PostgresWallet"
+                "postgres enabled: migrations applied; using Postgres dual stores for \
+                 users/rooms/wallet/social/moderation/reports"
             );
             (
                 AnyUserStore::postgres(pool.clone()),
                 AnyRoomStore::postgres(pool.clone()),
                 AnyWallet::postgres(pool.clone()),
+                AnyModeration::postgres(pool.clone()),
+                AnySocial::postgres(pool.clone()),
+                AnyReports::postgres(pool.clone()),
                 Some(pool),
             )
         } else {
@@ -184,6 +186,9 @@ impl AppState {
                 AnyUserStore::memory(),
                 AnyRoomStore::memory(),
                 AnyWallet::memory(),
+                AnyModeration::memory(),
+                AnySocial::memory(),
+                AnyReports::memory(),
                 None,
             )
         };
@@ -199,9 +204,9 @@ impl AppState {
             ChatRateLimiter::default(),
             centrifugo,
             publisher_from_env(),
-            MemoryModeration::new(),
-            MemorySocial::new(),
-            MemoryReports::new(),
+            moderation,
+            social,
+            reports,
             DeletedUsers::new(),
             MemoryProfileExtras::new(),
             db,
