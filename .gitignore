@@ -1,0 +1,63 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.fleet/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# Rust
+backend/target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# Node
+node_modules/
+dist/
+.turbo/
+*.log
+.pnpm-store/
+
+# Flutter
+apps/mobile/.dart_tool/
+apps/mobile/.packages
+apps/mobile/.flutter-plugins
+apps/mobile/.flutter-plugins-dependencies
+apps/mobile/.pub-cache/
+apps/mobile/build/
+apps/mobile/**/Generated.xcconfig
+apps/mobile/**/flutter_export_environment.sh
+apps/mobile/**/Flutter.podspec
+**/*.iml
+.dart_tool/
+.packages
+build/
+
+# Generated clients (optional local)
+packages/api-client/src/generated/.cache/
+
+# Docker volumes / local data
+deploy/data/
+.tmp/
+coverage/
+*.lcov
+
+# Test artifacts
+*.profraw
+*.profdata
+
+# Claude / local
+.claude/settings.local.json
+**/local.properties
+**/.idea/
