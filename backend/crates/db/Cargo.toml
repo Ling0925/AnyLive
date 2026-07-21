@@ -1,0 +1,12 @@
+[package]
+name = "anylive-db"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anylive-common = { path = "../common" }
+anylive-domain = { path = "../domain" }
+serde = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }

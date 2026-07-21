@@ -1,0 +1,12 @@
+[package]
+name = "anylive-domain"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anylive-common = { path = "../common" }
+chrono = { workspace = true }
+serde = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
