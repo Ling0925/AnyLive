@@ -1,16 +1,31 @@
 //! Database layer: SQLx pool, migrations, and Postgres adapters.
 //!
 //! Offline unit tests never touch Postgres. Set `DATABASE_URL` and `USE_POSTGRES=1`
-//! to connect, migrate, and use [`PostgresUserStore`] at API startup.
+//! to connect, migrate, and use Postgres stores at API startup.
+//!
+//! ## Enable path
+//!
+//! ```text
+//! USE_POSTGRES=1 DATABASE_URL=postgres://anylive:anylive@127.0.0.1:5432/anylive \
+//!   cargo run -p anylive-api
+//! ```
+//!
+//! When enabled, API [`AppState::from_env`] wires
+//! [`PostgresUserStore`], [`PostgresRoomStore`], and [`PostgresWallet`].
+//! Default (no env) keeps in-memory stores so `cargo test --workspace` needs no live PG.
 
 mod pool;
+mod rooms;
 mod users;
+mod wallet;
 
 pub use pool::{
-    connect, connect_and_migrate_from_env, migrate, migrations_dir, postgres_enabled, DbError,
-    PgPool,
+    connect, connect_and_migrate_from_env, migrate, migrations_dir, ping, postgres_enabled,
+    DbError, PgPool,
 };
+pub use rooms::{map_room_error, PostgresRoomStore};
 pub use users::{AnyUserStore, PostgresUserStore};
+pub use wallet::{AnyWallet, PostgresWallet};
 
 /// Expected migrations directory relative to backend workspace.
 pub const MIGRATIONS_DIR: &str = "migrations";

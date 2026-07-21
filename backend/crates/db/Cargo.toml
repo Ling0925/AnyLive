@@ -8,6 +8,7 @@ license.workspace = true
 anylive-auth = { path = "../auth" }
 anylive-common = { path = "../common" }
 anylive-domain = { path = "../domain" }
+anylive-wallet = { path = "../wallet" }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 chrono = { workspace = true }

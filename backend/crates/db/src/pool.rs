@@ -1,6 +1,7 @@
 //! PgPool connect + migration apply.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use anylive_common::{AppError, ErrorCode};
 use sqlx::postgres::PgPoolOptions;
@@ -37,26 +38,24 @@ pub fn postgres_enabled() -> bool {
 pub async fn connect(database_url: &str) -> Result<PgPool, DbError> {
     let pool = PgPoolOptions::new()
         .max_connections(10)
+        .acquire_timeout(Duration::from_secs(5))
         .connect(database_url)
         .await?;
     Ok(pool)
 }
 
-/// Apply SQL migrations from the workspace `migrations/` directory.
+/// Apply embedded SQL migrations (compiled into the binary via `sqlx::migrate!`).
 ///
-/// Path is resolved relative to this crate's `CARGO_MANIFEST_DIR` so the binary
-/// works regardless of process cwd (as long as the source tree is present).
-/// For production packaging, prefer embedding via `sqlx::migrate!` once the
-/// layout is frozen; runtime path keeps offline unit tests free of compile-time
-/// DB requirements.
+/// Embedding avoids depending on a source-tree `migrations/` path at runtime,
+/// so packaged binaries still migrate correctly. Offline unit tests do not
+/// execute this path unless `USE_POSTGRES=1` is set.
 pub async fn migrate(pool: &PgPool) -> Result<(), DbError> {
-    let dir = migrations_dir();
-    let migrator = sqlx::migrate::Migrator::new(dir.as_path()).await?;
-    migrator.run(pool).await?;
+    // Path is relative to this crate's Cargo.toml (`crates/db` → `backend/migrations`).
+    sqlx::migrate!("../../migrations").run(pool).await?;
     Ok(())
 }
 
-/// Absolute path to `backend/migrations`.
+/// Absolute path to `backend/migrations` (for tests / tooling that inspect SQL on disk).
 pub fn migrations_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../migrations")
 }
@@ -67,6 +66,12 @@ pub async fn connect_and_migrate_from_env() -> Result<PgPool, DbError> {
     let pool = connect(&url).await?;
     migrate(&pool).await?;
     Ok(pool)
+}
+
+/// Cheap liveness check used by readiness probes when a pool is configured.
+pub async fn ping(pool: &PgPool) -> Result<(), DbError> {
+    sqlx::query("SELECT 1").execute(pool).await?;
+    Ok(())
 }
 
 #[cfg(test)]

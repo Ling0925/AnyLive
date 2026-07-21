@@ -59,9 +59,15 @@ fn display_name_from_email(email: &str) -> String {
     }
 }
 
+/// Lowercase + trim so UNIQUE(email) matches auth OTP normalization.
+fn normalize_email_key(email: &str) -> String {
+    email.trim().to_lowercase()
+}
+
 #[async_trait]
 impl UserStore for PostgresUserStore {
     async fn find_by_email(&self, email: &str) -> Result<Option<User>, AppError> {
+        let email = normalize_email_key(email);
         let row = sqlx::query_as::<_, UserRow>(
             r#"
             SELECT id, display_name, email, created_at
@@ -69,7 +75,7 @@ impl UserStore for PostgresUserStore {
             WHERE email = $1
             "#,
         )
-        .bind(email)
+        .bind(&email)
         .fetch_optional(&self.pool)
         .await
         .map_err(map_db)?;
@@ -92,8 +98,13 @@ impl UserStore for PostgresUserStore {
     }
 
     async fn upsert_by_email(&self, email: &str) -> Result<User, AppError> {
-        let display = display_name_from_email(email);
+        let email = normalize_email_key(email);
+        if email.is_empty() || !email.contains('@') {
+            return Err(AppError::validation("invalid email"));
+        }
+        let display = display_name_from_email(&email);
         // UNIQUE(email): concurrent first-login races collapse to one row.
+        // DO UPDATE is a no-op touch so RETURNING always yields the existing row.
         let row = sqlx::query_as::<_, UserRow>(
             r#"
             INSERT INTO users (display_name, email)
@@ -104,7 +115,7 @@ impl UserStore for PostgresUserStore {
             "#,
         )
         .bind(&display)
-        .bind(email)
+        .bind(&email)
         .fetch_one(&self.pool)
         .await
         .map_err(map_db)?;
@@ -169,6 +180,13 @@ mod tests {
         let b = store.upsert_by_email("a@example.com").await.unwrap();
         assert_eq!(a.id, b.id);
         assert!(!store.is_postgres());
+    }
+
+    #[test]
+    fn email_key_is_trimmed_and_lowercased() {
+        assert_eq!(normalize_email_key("  Alice@Example.COM "), "alice@example.com");
+        assert_eq!(display_name_from_email("alice@example.com"), "alice");
+        assert_eq!(display_name_from_email("@example.com"), "user");
     }
 
     /// Optional integration: runs only when `USE_POSTGRES=1` and `DATABASE_URL` are set.
