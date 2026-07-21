@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import Hls from 'hls.js'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   adminGiftsPath,
   adminTitle,
   apiUrl,
   banUserPath,
+  buildHls,
   canAccessModule,
   forceCloseRoomPath,
   giftsListPath,
@@ -13,6 +15,7 @@ import {
   otpVerifyPath,
   reportResolvePath,
   reportsListPath,
+  roomPlayPath,
   roomsPath,
 } from './lib/admin'
 
@@ -53,6 +56,14 @@ const reports = ref<
 const error = ref('')
 const notice = ref('')
 
+/** HLS preview state (play endpoint is public when room is live). */
+const previewRoomId = ref<string | null>(null)
+const previewHlsUrl = ref('')
+const previewBusy = ref(false)
+const previewError = ref('')
+const previewVideoEl = ref<HTMLVideoElement | null>(null)
+let previewDetach: (() => void) | null = null
+
 const isAuthed = computed(() => Boolean(accessToken.value))
 
 function authHeaders(json = true): HeadersInit {
@@ -60,6 +71,79 @@ function authHeaders(json = true): HeadersInit {
   if (json) h['Content-Type'] = 'application/json'
   if (accessToken.value) h.Authorization = `Bearer ${accessToken.value}`
   return h
+}
+
+function teardownPreviewPlayer() {
+  previewDetach?.()
+  previewDetach = null
+}
+
+function attachPreviewHls(video: HTMLVideoElement, src: string) {
+  teardownPreviewPlayer()
+  if (Hls.isSupported()) {
+    const hls = new Hls()
+    hls.loadSource(src)
+    hls.attachMedia(video)
+    previewDetach = () => {
+      hls.destroy()
+    }
+    return
+  }
+  if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    video.src = src
+    previewDetach = () => {
+      video.removeAttribute('src')
+      video.load()
+    }
+    return
+  }
+  previewError.value = 'HLS not supported in this browser — open the m3u8 URL directly.'
+}
+
+watch([previewVideoEl, previewHlsUrl], ([el, url]) => {
+  if (el && url) {
+    attachPreviewHls(el, url)
+  } else {
+    teardownPreviewPlayer()
+  }
+})
+
+onBeforeUnmount(() => teardownPreviewPlayer())
+
+async function previewRoom(room: { id: string; status: string }) {
+  previewError.value = ''
+  notice.value = ''
+  error.value = ''
+  if (room.status !== 'live') {
+    previewError.value = 'Room is not live'
+    previewRoomId.value = room.id
+    previewHlsUrl.value = ''
+    return
+  }
+  previewBusy.value = true
+  previewRoomId.value = room.id
+  previewHlsUrl.value = ''
+  try {
+    // media/play is public when the room is live (no auth required).
+    const res = await fetch(apiUrl(apiBase, roomPlayPath(room.id)))
+    if (!res.ok) {
+      throw new Error(`play ${res.status}`)
+    }
+    const play = await res.json()
+    previewHlsUrl.value = buildHls(play, room.id)
+    await nextTick()
+  } catch (e) {
+    previewError.value = String(e)
+  } finally {
+    previewBusy.value = false
+  }
+}
+
+function closePreview() {
+  teardownPreviewPlayer()
+  previewRoomId.value = null
+  previewHlsUrl.value = ''
+  previewError.value = ''
 }
 
 async function loadRooms() {
@@ -518,6 +602,7 @@ onMounted(() => {
             <th>Title</th>
             <th>Status</th>
             <th>Id</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
@@ -525,10 +610,38 @@ onMounted(() => {
             <td>{{ r.title }}</td>
             <td>{{ r.status }}</td>
             <td class="mono">{{ r.id }}</td>
+            <td>
+              <button
+                type="button"
+                class="btn primary"
+                :disabled="previewBusy"
+                @click="previewRoom(r)"
+              >
+                Preview
+              </button>
+            </td>
           </tr>
         </tbody>
       </table>
       <p v-else>No rooms (start API and create a room).</p>
+
+      <div v-if="previewRoomId" class="preview">
+        <div class="section-head">
+          <h3>HLS preview · {{ previewRoomId }}</h3>
+          <button type="button" class="btn ghost" @click="closePreview">Close</button>
+        </div>
+        <p v-if="previewError" class="err">{{ previewError }}</p>
+        <p v-if="previewHlsUrl" class="mono preview-url">
+          <a :href="previewHlsUrl" target="_blank" rel="noopener">{{ previewHlsUrl }}</a>
+        </p>
+        <video
+          v-if="previewHlsUrl"
+          ref="previewVideoEl"
+          controls
+          playsinline
+          class="preview-video"
+        />
+      </div>
     </section>
   </main>
 </template>
@@ -642,5 +755,27 @@ td {
 h2 {
   margin: 0 0 0.5rem;
   font-size: 1.1rem;
+}
+h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+.preview {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #ddd;
+}
+.preview-url {
+  word-break: break-all;
+  margin: 0.5rem 0;
+}
+.preview-url a {
+  color: #1a73e8;
+}
+.preview-video {
+  width: 100%;
+  max-width: 720px;
+  background: #000;
+  border-radius: 6px;
 }
 </style>

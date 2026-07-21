@@ -4,6 +4,7 @@ import {
   adminTitle,
   apiUrl,
   banUserPath,
+  buildHls,
   canAccessModule,
   forceCloseRoomPath,
   giftsListPath,
@@ -13,6 +14,7 @@ import {
   otpVerifyPath,
   reportResolvePath,
   reportsListPath,
+  roomPlayPath,
   roomsPath,
   API_PATHS,
 } from './admin'
@@ -77,5 +79,20 @@ describe('api path helpers', () => {
     expect(reportsListPath()).toBe(API_PATHS.adminReports)
     expect(reportResolvePath('abc-123')).toBe('/api/v1/admin/reports/abc-123')
     expect(reportResolvePath('/abc-123/')).toBe('/api/v1/admin/reports/abc-123')
+  })
+
+  it('exposes room play path', () => {
+    expect(roomPlayPath('room-1')).toBe('/api/v1/rooms/room-1/media/play')
+    expect(roomPlayPath('/room-1/')).toBe('/api/v1/rooms/room-1/media/play')
+    expect(roomPlayPath('a/b')).toBe('/api/v1/rooms/a%2Fb/media/play')
+  })
+
+  it('builds hls url from play response or cdn fallback', () => {
+    expect(buildHls({ hls: 'https://cdn.example/live/r1.m3u8' }, 'r1')).toBe(
+      'https://cdn.example/live/r1.m3u8',
+    )
+    expect(buildHls({}, 'room-99')).toBe('http://localhost:8080/live/room-99.m3u8')
+    expect(buildHls(null, 'room-99')).toBe('http://localhost:8080/live/room-99.m3u8')
+    expect(buildHls(undefined, 'x', 'https://edge/live/')).toBe('https://edge/live/x.m3u8')
   })
 })

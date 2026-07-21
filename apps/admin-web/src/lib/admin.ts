@@ -77,3 +77,24 @@ export function reportResolvePath(id: string): string {
   const clean = id.replace(/^\/+|\/+$/g, '')
   return `${API_PATHS.adminReports}/${encodeURIComponent(clean)}`
 }
+
+/** Public play URLs path: `/api/v1/rooms/{id}/media/play`. */
+export function roomPlayPath(id: string): string {
+  const clean = id.replace(/^\/+|\/+$/g, '')
+  return `${API_PATHS.rooms}/${encodeURIComponent(clean)}/media/play`
+}
+
+/**
+ * Build an HLS playlist URL from a play-API response body, or fall back to
+ * `{cdnBase}/{roomId}.m3u8` when the response has no `hls` field.
+ */
+export function buildHls(
+  play: { hls?: string | null } | null | undefined,
+  roomId: string,
+  cdnBase = 'http://localhost:8080/live',
+): string {
+  if (play?.hls) return play.hls
+  const b = cdnBase.replace(/\/$/, '')
+  const s = roomId.replace(/^\/+|\/+$/g, '')
+  return `${b}/${s}.m3u8`
+}
