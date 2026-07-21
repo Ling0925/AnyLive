@@ -18,16 +18,16 @@
 | Chat history + Centrifugo token + env-gated publish | ✅ |
 | Admin ban / mute / unmute / force-close / audit / gifts / reports | ✅ |
 | Follow / unfollow + hot / following feeds | ✅ |
-| Postgres dual store (users/rooms/wallet/social/moderation/reports/chat/profile_extras) | ✅ |
-| SRS on_publish / on_unpublish webhooks | ✅ |
-| Compliance stubs (legal + export + soft-delete) | ✅ |
+| Postgres dual store (users/rooms/wallet/social/moderation/reports/chat/profile_extras/deleted/refresh) | ✅ |
+| SRS on_publish / on_unpublish webhooks + local http_hooks | ✅ |
+| Compliance stubs (legal + export + soft-delete dual store) | ✅ |
 | Chat rate limit + live-only gifts | ✅ |
 | H5 HLS watch + share + room-ended | ✅ |
 | Admin ops shell (OTP, gifts, moderation, reports, HLS preview) | ✅ |
-| Flutter feed/follow/report/profile + room control-plane | ✅ |
+| Flutter feed/follow/report/profile + go-live OBS + copy HLS | ✅ |
 | Control-plane dogfood smoke (`scripts/dogfood-api-smoke.sh`) | ✅ |
 
-默认仍是 **内存后端**（`cargo test` / 本地 dogfood 无需 docker）。设 `USE_POSTGRES=1` + `DATABASE_URL` 时 users/rooms/wallet/social/moderation/reports/**chat**/profile_extras 切到 SQLx；**soft-delete** 与 **refresh token** 存储仍为进程内内存。媒体推流另需 SRS（见 `scripts/dogfood-media.md`）。
+默认仍是 **内存后端**（`cargo test` / 本地 dogfood 无需 docker）。设 `USE_POSTGRES=1` + `DATABASE_URL` 时 users/rooms/wallet/social/moderation/reports/chat/profile_extras/**deleted_users**/**refresh_tokens** 切到 SQLx；OTP 挑战仍为进程内内存。媒体推流另需 SRS（见 `scripts/dogfood-media.md`）。
 
 ## 文档
 

@@ -27,7 +27,7 @@ Scope: [mvp-scope.md](./mvp-scope.md). Status from `git log` + current tree (API
 | Hot + following live feeds | Done | `feat(feed)` |
 | User reports API | Done | `POST /api/v1/reports` |
 | Postgres schema 001–003 | Done | `backend/migrations/` (`001_init`, `002_reports_mute`, `003_profile_extras`) |
-| Postgres dual store (users/rooms/wallet/social/moderation/reports/**chat**/profile_extras) | Done | `USE_POSTGRES=1`; soft-delete + refresh tokens still process-local |
+| Postgres dual store (users/rooms/wallet/social/moderation/reports/chat/profile_extras/**deleted_users**/**refresh_tokens**) | Done | `USE_POSTGRES=1`; OTP store still process-local |
 | SRS on_publish / on_unpublish webhooks | Done | `routes/webhooks.rs` |
 | Production secret guards (OTP / JWT / etc.) | Done | API startup guards |
 | Compliance stubs: legal privacy/terms, account export, soft-delete | Done | API + Flutter `ComplianceRepository` |
@@ -47,8 +47,8 @@ Scope: [mvp-scope.md](./mvp-scope.md). Status from `git log` + current tree (API
 
 | Item | Gap |
 |---|---|
-| Account export / delete | Soft-delete is process-local `DeletedUsers` HashSet; not multi-replica / not PG |
-| Refresh tokens | `InMemoryRefreshStore` even when Postgres dual store is on |
+| Account export / delete | Soft-delete dual store (`AnyDeletedUsers` + `004_auth_sessions.sql`); export payload still a stub |
+| OTP delivery store | `InMemoryOtpStore` even when Postgres dual store is on (dev fixed code path) |
 | Centrifugo publish | Wired; needs real Centrifugo URL/secret for live fan-out |
 | H5 | Watch+share only; no login / chat / gifts |
 | Admin UI | Functional shell, not full Vben module suite |
@@ -61,12 +61,11 @@ Scope: [mvp-scope.md](./mvp-scope.md). Status from `git log` + current tree (API
 
 ## Remaining for full P1 dogfood exit
 
-1. End-to-end OBS → SRS → Flutter/H5 HLS play smoke on compose stack (control-plane script is ready; media path documented in `scripts/dogfood-media.md`)
-2. Real email OTP (or documented test harness for dogfood — dev code `123456` is the current harness)
-3. Persist soft-delete + refresh tokens (or document single-process dogfood)
-4. In-app Flutter player (external copy-URL path is shipped; media_kit embed still open)
-5. 1k WS room pressure report + device smoke matrix
-6. Full Vben admin modules if required beyond current shell
+1. End-to-end OBS → SRS → Flutter/H5 HLS play smoke on compose stack (control-plane script is ready; media path + SRS hooks documented)
+2. Real email OTP provider (dev fixed code `123456` is the current harness; OTP store still memory)
+3. In-app Flutter player (external copy-URL path is shipped; media_kit embed still open)
+4. 1k WS room pressure report + device smoke matrix
+5. Full Vben admin modules if required beyond current shell
 
 ---
 
