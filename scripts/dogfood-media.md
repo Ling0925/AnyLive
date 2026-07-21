@@ -55,7 +55,11 @@ When OBS stops, SRS should call the API webhook (configure callback URL to the A
 - `POST /api/v1/webhooks/srs/on_unpublish` → room leaves live
 - `POST /api/v1/webhooks/srs/on_publish` → optional gate / audit
 
-Wire SRS `http_hooks` to the API base if not already set in the local conf; until hooks are pointed at the API, stop the room with `POST .../stop` or admin force-close.
+Local `deploy/srs/srs.conf` enables `http_hooks` →
+`http://host.docker.internal:8088/api/v1/webhooks/srs/on_publish|on_unpublish`.
+On Linux Docker without that host alias, override the conf or add
+`extra_hosts: ["host.docker.internal:host-gateway"]` on the `srs` service.
+If hooks cannot reach the API, stop the room with `POST .../stop` or admin force-close.
 
 ## Smoke order
 

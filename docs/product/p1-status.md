@@ -55,7 +55,7 @@ Scope: [mvp-scope.md](./mvp-scope.md). Status from `git log` + current tree (API
 | Flutter player | Room page control-plane; HLS URL only (no media_kit embed) |
 | OTP delivery | Dev fixed code path; no real email provider |
 | Top-up | Mock topup only (no Stripe/payment provider) |
-| SRS webhooks in local conf | Handler exists; local `srs.conf` may still need `http_hooks` pointed at API |
+| SRS webhooks in local conf | `deploy/srs/srs.conf` has `http_hooks` → API `:8088` (host.docker.internal) |
 
 ---
 
