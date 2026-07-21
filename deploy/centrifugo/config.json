@@ -1,0 +1,22 @@
+{
+  "token_hmac_secret_key": "anylive-dev-token-secret-change-me",
+  "api_key": "anylive-dev-api-key",
+  "admin_password": "anylive-admin",
+  "admin_secret": "anylive-admin-secret",
+  "allowed_origins": ["*"],
+  "namespaces": [
+    {
+      "name": "room",
+      "presence": true,
+      "join_leave": true,
+      "history_size": 50,
+      "history_ttl": "300s"
+    },
+    {
+      "name": "user",
+      "presence": false,
+      "history_size": 10,
+      "history_ttl": "60s"
+    }
+  ]
+}
