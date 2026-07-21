@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../api/api_client.dart';
 import '../../api/gifts_repository.dart';
@@ -8,6 +9,10 @@ import '../../api/social_repository.dart';
 import '../../config/app_config.dart';
 
 /// Live room detail: title/status, HLS URL, chat, gifts, wallet, follow, report.
+///
+/// In-app video player is deferred (avoids heavy video_player dep in unit tests).
+/// P1 path: surface the HLS URL and let the user open it in an external player
+/// (VLC / browser) via "Copy stream URL".
 class RoomPage extends StatefulWidget {
   const RoomPage({
     super.key,
@@ -372,6 +377,20 @@ class _RoomHeader extends StatelessWidget {
   final VoidCallback onTopup;
   final bool roomEnded;
 
+  void _copyStreamUrl(BuildContext context) {
+    final url = hlsUrl;
+    if (url == null || url.isEmpty) return;
+    // Do not await Clipboard — the platform channel can hang under flutter_test
+    // when no clipboard plugin is wired; snackbar is the user-visible signal.
+    // ignore: unawaited_futures
+    Clipboard.setData(ClipboardData(text: url));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Copied - open in VLC / browser player'),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -424,6 +443,13 @@ class _RoomHeader extends StatelessWidget {
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
+                  ),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    key: const Key('copy-stream-url'),
+                    onPressed: () => _copyStreamUrl(context),
+                    icon: const Icon(Icons.copy, size: 16),
+                    label: const Text('Copy stream URL'),
                   ),
                 ],
               ),

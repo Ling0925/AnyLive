@@ -345,4 +345,36 @@ void main() {
     expect(find.text('Room ended'), findsOneWidget);
     expect(find.text('http://cdn/live/r1.m3u8'), findsNothing);
   });
+
+  testWidgets('room page copy stream url shows snackbar', (tester) async {
+    final httpClient = mockClient();
+    final (rooms, gifts, social, reports) = buildRepos(httpClient);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: RoomPage(
+          config: config,
+          accessToken: 'tok',
+          room: room,
+          roomsRepository: rooms,
+          giftsRepository: gifts,
+          socialRepository: social,
+          reportsRepository: reports,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final copyBtn = find.byKey(const Key('copy-stream-url'));
+    expect(copyBtn, findsOneWidget);
+    await tester.ensureVisible(copyBtn);
+    await tester.tap(copyBtn, warnIfMissed: true);
+    await tester.pump(); // schedule snackbar
+    await tester.pump(const Duration(milliseconds: 750));
+
+    expect(
+      find.text('Copied - open in VLC / browser player'),
+      findsOneWidget,
+    );
+  });
 }

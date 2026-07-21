@@ -2,13 +2,26 @@ import 'package:flutter/material.dart';
 
 import '../../api/api_client.dart';
 import '../../api/auth_repository.dart';
+import '../../api/profile_repository.dart';
 import '../../config/app_config.dart';
 import '../home/home_page.dart';
 
 class LoginPage extends StatefulWidget {
-  const LoginPage({super.key, required this.config});
+  const LoginPage({
+    super.key,
+    required this.config,
+    this.authRepository,
+    this.profileRepositoryFactory,
+  });
 
   final AppConfig config;
+
+  /// Injectable for tests; when null a real [AuthRepository] is created.
+  final AuthRepository? authRepository;
+
+  /// Builds a [ProfileRepository] after OTP verify (token already on [ApiClient]).
+  /// Injectable so tests can assert the best-effort age/privacy PATCH.
+  final ProfileRepository Function(ApiClient client)? profileRepositoryFactory;
 
   @override
   State<LoginPage> createState() => _LoginPageState();
@@ -22,12 +35,14 @@ class _LoginPageState extends State<LoginPage> {
   String? _error;
   bool _busy = false;
   bool _otpSent = false;
+  bool _ageConfirmed = false;
+  bool _privacyAccepted = false;
 
   @override
   void initState() {
     super.initState();
     _api = ApiClient(baseUrl: widget.config.normalizedApiBaseUrl);
-    _auth = AuthRepository(client: _api);
+    _auth = widget.authRepository ?? AuthRepository(client: _api);
   }
 
   @override
@@ -55,6 +70,7 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> _verify() async {
+    if (!_ageConfirmed) return;
     setState(() {
       _busy = true;
       _error = null;
@@ -64,6 +80,26 @@ class _LoginPageState extends State<LoginPage> {
         email: _email.text.trim(),
         code: _code.text.trim(),
       );
+
+      // Best-effort compliance PATCH — never block navigation on failure.
+      if (_ageConfirmed || _privacyAccepted) {
+        try {
+          final profileClient = ApiClient(
+            baseUrl: widget.config.normalizedApiBaseUrl,
+            accessToken: session.accessToken,
+          );
+          final profile = widget.profileRepositoryFactory != null
+              ? widget.profileRepositoryFactory!(profileClient)
+              : ProfileRepository(client: profileClient);
+          await profile.patchMe(
+            ageConfirmed: _ageConfirmed ? true : null,
+            privacyAccepted: _privacyAccepted ? true : null,
+          );
+        } catch (_) {
+          // Ignore — user can re-confirm on profile page.
+        }
+      }
+
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
@@ -87,6 +123,9 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
+    final canVerify = _otpSent && _ageConfirmed && !_busy;
+    final canSend = !_otpSent && !_busy;
+
     return Scaffold(
       appBar: AppBar(title: const Text('AnyLive Login')),
       body: Padding(
@@ -113,19 +152,32 @@ class _LoginPageState extends State<LoginPage> {
               ),
               const SizedBox(height: 12),
             ],
+            // MVP age declaration — required before Verify.
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('I confirm I am 18 or older'),
+              value: _ageConfirmed,
+              onChanged: _busy
+                  ? null
+                  : (v) => setState(() => _ageConfirmed = v ?? false),
+              controlAffinity: ListTileControlAffinity.leading,
+            ),
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('I accept the privacy policy'),
+              value: _privacyAccepted,
+              onChanged: _busy
+                  ? null
+                  : (v) => setState(() => _privacyAccepted = v ?? false),
+              controlAffinity: ListTileControlAffinity.leading,
+            ),
             if (_error != null)
               Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
             const SizedBox(height: 12),
             FilledButton(
-              onPressed: _busy
-                  ? null
-                  : () {
-                      if (_otpSent) {
-                        _verify();
-                      } else {
-                        _sendOtp();
-                      }
-                    },
+              onPressed: _otpSent
+                  ? (canVerify ? _verify : null)
+                  : (canSend ? _sendOtp : null),
               child: Text(_busy
                   ? 'Please wait…'
                   : (_otpSent ? 'Verify & continue' : 'Send OTP')),
