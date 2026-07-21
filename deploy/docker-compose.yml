@@ -71,6 +71,10 @@ services:
       - "1935:1935"   # RTMP
       - "1985:1985"   # API
       - "8080:8080"   # HTTP play
+    # So http_hooks can reach the host API at host.docker.internal:8088
+    # (Docker Desktop provides this; Linux needs the host-gateway mapping).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./srs/srs.conf:/usr/local/srs/conf/docker.conf:ro
     command: ["./objs/srs", "-c", "conf/docker.conf"]
