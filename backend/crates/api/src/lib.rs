@@ -9,7 +9,7 @@ mod state;
 use std::sync::Arc;
 
 use axum::{
-    routing::{delete, get, post},
+    routing::{get, post},
     Router,
 };
 use serde::Serialize;
@@ -101,6 +101,9 @@ pub fn build_app_with_state(state: Arc<AppState>) -> Router {
         routes::ban_user,
         routes::force_close_room,
         routes::list_audit,
+        routes::follow_user,
+        routes::unfollow_user,
+        routes::list_following,
     ),
     components(schemas(
         routes::HealthResponse,
@@ -133,6 +136,7 @@ pub fn build_app_with_state(state: Arc<AppState>) -> Router {
         routes::GrantAdminBody,
         routes::AuditEventDto,
         routes::AuditListResponse,
+        routes::FollowingListResponse,
     )),
     tags(
         (name = "system", description = "Health and metadata"),
@@ -142,7 +146,8 @@ pub fn build_app_with_state(state: Arc<AppState>) -> Router {
         (name = "wallet", description = "Virtual currency wallet"),
         (name = "gifts", description = "Gift catalog and send"),
         (name = "realtime", description = "Chat and Centrifugo tokens"),
-        (name = "admin", description = "Moderation")
+        (name = "admin", description = "Moderation"),
+        (name = "social", description = "Follow graph")
     ),
     modifiers(&SecurityAddon),
     info(title = "AnyLive API", version = "0.1.0")
