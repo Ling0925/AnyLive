@@ -7,11 +7,12 @@ use anylive_auth::{
     OtpService,
 };
 use anylive_db::{
-    postgres_enabled, AnyModeration, AnyReports, AnySocial, AnyUserStore, AnyWallet, PgPool,
+    postgres_enabled, AnyChat, AnyModeration, AnyReports, AnySocial, AnyUserStore, AnyWallet,
+    PgPool,
 };
 use anylive_media::SrsMediaProvider;
 use anylive_realtime::{
-    publisher_from_env, CentrifugoConfig, CentrifugoPublisher, ChatRateLimiter, MemoryChatBus,
+    publisher_from_env, CentrifugoConfig, CentrifugoPublisher, ChatRateLimiter,
     NoopCentrifugoPublisher,
 };
 
@@ -29,7 +30,7 @@ pub struct AppState {
     pub rooms: AnyRoomStore,
     pub media: SrsMediaProvider,
     pub wallet: AnyWallet,
-    pub chat: MemoryChatBus,
+    pub chat: AnyChat,
     /// Per-user chat post rate limiter (in-memory sliding window).
     pub chat_rate_limiter: ChatRateLimiter,
     pub centrifugo: CentrifugoConfig,
@@ -52,7 +53,7 @@ impl AppState {
         rooms: AnyRoomStore,
         media: SrsMediaProvider,
         wallet: AnyWallet,
-        chat: MemoryChatBus,
+        chat: AnyChat,
         chat_rate_limiter: ChatRateLimiter,
         centrifugo: CentrifugoConfig,
         centrifugo_publisher: Arc<dyn CentrifugoPublisher>,
@@ -97,7 +98,7 @@ impl AppState {
             AnyRoomStore::memory(),
             SrsMediaProvider::from_env(),
             AnyWallet::memory(),
-            MemoryChatBus::new(),
+            AnyChat::memory(),
             ChatRateLimiter::default(),
             CentrifugoConfig::default(),
             // Tests/offline: never require a live Centrifugo.
@@ -154,13 +155,13 @@ impl AppState {
         let jwt = JwtService::new(jwt_cfg);
         let otp = OtpService::new(InMemoryOtpStore::default(), otp_cfg);
 
-        let (users, rooms, wallet, moderation, social, reports, db) = if postgres_enabled() {
+        let (users, rooms, wallet, moderation, social, reports, chat, db) = if postgres_enabled() {
             let pool = anylive_db::connect_and_migrate_from_env()
                 .await
                 .map_err(|e| format!("postgres connect/migrate failed: {e}"))?;
             tracing::info!(
                 "postgres enabled: migrations applied; using Postgres dual stores for \
-                 users/rooms/wallet/social/moderation/reports"
+                 users/rooms/wallet/social/moderation/reports/chat"
             );
             (
                 AnyUserStore::postgres(pool.clone()),
@@ -169,6 +170,7 @@ impl AppState {
                 AnyModeration::postgres(pool.clone()),
                 AnySocial::postgres(pool.clone()),
                 AnyReports::postgres(pool.clone()),
+                AnyChat::postgres(pool.clone()),
                 Some(pool),
             )
         } else {
@@ -189,6 +191,7 @@ impl AppState {
                 AnyModeration::memory(),
                 AnySocial::memory(),
                 AnyReports::memory(),
+                AnyChat::memory(),
                 None,
             )
         };
@@ -200,7 +203,7 @@ impl AppState {
             rooms,
             SrsMediaProvider::from_env(),
             wallet,
-            MemoryChatBus::new(),
+            chat,
             ChatRateLimiter::default(),
             centrifugo,
             publisher_from_env(),

@@ -18,7 +18,7 @@
 | Chat history + Centrifugo token + env-gated publish | ✅ |
 | Admin ban / mute / unmute / force-close / audit / gifts / reports | ✅ |
 | Follow / unfollow + hot / following feeds | ✅ |
-| Postgres dual store (users/rooms/wallet/social/moderation/reports) | ✅ |
+| Postgres dual store (users/rooms/wallet/social/moderation/reports/chat) | ✅ |
 | SRS on_publish / on_unpublish webhooks | ✅ |
 | Compliance stubs (legal + export + soft-delete) | ✅ |
 | Chat rate limit + live-only gifts | ✅ |
@@ -26,7 +26,7 @@
 | Admin ops shell (OTP, gifts, moderation, reports, HLS preview) | ✅ |
 | Flutter feed/follow/report/profile + room control-plane | ✅ |
 
-默认仍是 **内存后端**（`cargo test` 无需 PG）。设 `USE_POSTGRES=1` + `DATABASE_URL` 时 users/rooms/wallet/social/moderation/reports 切到 SQLx；chat 历史与 soft-delete/age-privacy 仍为进程内内存。
+默认仍是 **内存后端**（`cargo test` 无需 PG）。设 `USE_POSTGRES=1` + `DATABASE_URL` 时 users/rooms/wallet/social/moderation/reports/chat 切到 SQLx；soft-delete/age-privacy 仍为进程内内存。
 
 ## 文档
 

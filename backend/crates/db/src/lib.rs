@@ -11,9 +11,10 @@
 //! ```
 //!
 //! When enabled, API [`AppState::from_env`] wires Postgres dual stores for
-//! users/rooms/wallet/social/moderation/reports. Default (no env) keeps
+//! users/rooms/wallet/social/moderation/reports/chat. Default (no env) keeps
 //! in-memory stores so `cargo test --workspace` needs no live PG.
 
+mod chat;
 mod moderation;
 mod pool;
 mod reports;
@@ -22,6 +23,7 @@ mod social;
 mod users;
 mod wallet;
 
+pub use chat::{validate_chat_body, AnyChat, PostgresChat};
 pub use moderation::{AnyModeration, PostgresModeration};
 pub use pool::{
     connect, connect_and_migrate_from_env, migrate, migrations_dir, ping, postgres_enabled,
