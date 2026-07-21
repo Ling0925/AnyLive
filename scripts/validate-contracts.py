@@ -32,10 +32,56 @@ def main() -> int:
     doc = yaml.safe_load(openapi_path.read_text())
     assert doc["openapi"].startswith("3."), "openapi version"
     paths = doc["paths"]
-    for p in ("/health", "/ready", "/api/v1/meta", "/api/v1/rooms", "/api/v1/me", "/api/v1/wallet", "/api/v1/gifts", "/api/v1/feed/hot", "/api/v1/reports", "/api/v1/webhooks/srs/on_publish"):
+    required_paths = (
+        "/health",
+        "/ready",
+        "/api/v1/meta",
+        "/api/v1/rooms",
+        "/api/v1/me",
+        "/api/v1/me/export",
+        "/api/v1/legal/privacy",
+        "/api/v1/legal/terms",
+        "/api/v1/wallet",
+        "/api/v1/wallet/ledger",
+        "/api/v1/gifts",
+        "/api/v1/feed/hot",
+        "/api/v1/reports",
+        "/api/v1/admin/mute",
+        "/api/v1/admin/unmute",
+        "/api/v1/admin/reports/{reportId}",
+        "/api/v1/webhooks/srs/on_publish",
+    )
+    for p in required_paths:
         assert p in paths, f"missing path {p}"
+
+    # Method coverage for multi-method / newly added routes
+    me_ops = paths["/api/v1/me"]
+    for method in ("get", "patch", "delete"):
+        assert method in me_ops, f"/api/v1/me missing {method}"
+    assert "get" in paths["/api/v1/me/export"]
+    assert "get" in paths["/api/v1/legal/privacy"]
+    assert "get" in paths["/api/v1/legal/terms"]
+    assert "get" in paths["/api/v1/wallet/ledger"]
+    assert "post" in paths["/api/v1/admin/mute"]
+    assert "post" in paths["/api/v1/admin/unmute"]
+    assert "patch" in paths["/api/v1/admin/reports/{reportId}"]
+
     schemas = doc["components"]["schemas"]
-    for s in ("Room", "User", "TokenPair", "ApiError"):
+    for s in (
+        "Room",
+        "User",
+        "TokenPair",
+        "ApiError",
+        "AccountExport",
+        "LegalDoc",
+        "LedgerList",
+        "LedgerEntry",
+        "PatchMeRequest",
+        "MuteUserRequest",
+        "UnmuteUserRequest",
+        "ResolveReportRequest",
+        "AdminReport",
+    ):
         assert s in schemas, f"missing schema {s}"
 
     print("OK: contracts validated with PyYAML")
@@ -50,9 +96,18 @@ def fallback_checks() -> int:
         "AUTH_INVALID_OTP",
         "/health",
         "/api/v1/rooms",
+        "/api/v1/me/export",
+        "/api/v1/legal/privacy",
+        "/api/v1/legal/terms",
+        "/api/v1/wallet/ledger",
+        "/api/v1/admin/mute",
+        "/api/v1/admin/unmute",
+        "/api/v1/admin/reports/{reportId}",
         "TokenPair",
+        "AccountExport",
+        "LegalDoc",
+        "LedgerList",
     ):
-        blob = codes if token.startswith("GIFT") or token.startswith("AUTH") else openapi
         # check both
         if token not in codes and token not in openapi:
             print(f"FAIL: missing {token}", file=sys.stderr)

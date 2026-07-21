@@ -31,6 +31,8 @@ tags:
     description: gifts
   - name: wallet
     description: wallet
+  - name: compliance
+    description: Account export/delete and legal documents
 paths:
   /health:
     get:
@@ -159,6 +161,80 @@ paths:
                 $ref: "#/components/schemas/User"
         "401":
           $ref: "#/components/responses/Error"
+    patch:
+      tags: [users]
+      operationId: patchMe
+      summary: Update display name and age/privacy declarations
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchMeRequest"
+      responses:
+        "200":
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+    delete:
+      tags: [compliance]
+      operationId: deleteMe
+      summary: Soft-delete account and revoke refresh tokens
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: Account deleted
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/me/export:
+    get:
+      tags: [compliance]
+      operationId: exportMe
+      summary: Export current account data (P1 stub)
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Account export payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountExport"
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/legal/privacy:
+    get:
+      tags: [compliance]
+      operationId: legalPrivacy
+      summary: Privacy policy link (public)
+      responses:
+        "200":
+          description: Privacy policy document metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LegalDoc"
+  /api/v1/legal/terms:
+    get:
+      tags: [compliance]
+      operationId: legalTerms
+      summary: Terms of service link (public)
+      responses:
+        "200":
+          description: Terms document metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LegalDoc"
   /api/v1/rooms:
     post:
       tags: [rooms]
@@ -235,6 +311,23 @@ paths:
                 required: [balance]
                 properties:
                   balance: {type: integer, format: int64}
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/wallet/ledger:
+    get:
+      tags: [wallet]
+      operationId: getWalletLedger
+      summary: List wallet ledger entries for current user
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: Ledger entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LedgerList"
+        "401":
+          $ref: "#/components/responses/Error"
   /api/v1/wallet/topups:
     post:
       tags: [wallet]
@@ -367,8 +460,52 @@ paths:
       tags: [admin]
       operationId: adminBan
       security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BanUserRequest"
       responses:
         "204": {description: Banned}
+  /api/v1/admin/mute:
+    post:
+      tags: [admin]
+      operationId: adminMute
+      summary: Mute a user (blocks chat and gifts)
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MuteUserRequest"
+      responses:
+        "204":
+          description: Muted
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/unmute:
+    post:
+      tags: [admin]
+      operationId: adminUnmute
+      summary: Unmute a user
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UnmuteUserRequest"
+      responses:
+        "204":
+          description: Unmuted
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
   /api/v1/admin/rooms/force-close:
     post:
       tags: [admin]
@@ -403,6 +540,40 @@ paths:
       security: [{bearerAuth: []}]
       responses:
         "200": {description: Reports}
+  /api/v1/admin/reports/{reportId}:
+    patch:
+      tags: [admin]
+      operationId: adminResolveReport
+      summary: Resolve a report (status must be resolved)
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: reportId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResolveReportRequest"
+      responses:
+        "200":
+          description: Resolved report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminReport"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
   /api/v1/users/{userId}/follow:
     post:
       tags: [social]
@@ -581,7 +752,7 @@ components:
           type: string
     User:
       type: object
-      required: [id, display_name, created_at]
+      required: [id, display_name, created_at, age_confirmed, privacy_accepted]
       properties:
         id:
           type: string
@@ -591,6 +762,131 @@ components:
         email:
           type: string
           format: email
+        created_at:
+          type: string
+          format: date-time
+        age_confirmed:
+          type: boolean
+        privacy_accepted:
+          type: boolean
+    PatchMeRequest:
+      type: object
+      properties:
+        display_name:
+          type: string
+        age_confirmed:
+          type: boolean
+        privacy_accepted:
+          type: boolean
+      description: At least one field is required
+    AccountExport:
+      type: object
+      required: [user, rooms_owned_count, note]
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+        rooms_owned_count:
+          type: integer
+          format: int64
+        note:
+          type: string
+    LegalDoc:
+      type: object
+      required: [url, version, title]
+      properties:
+        url:
+          type: string
+          format: uri
+        version:
+          type: string
+        title:
+          type: string
+    LedgerEntry:
+      type: object
+      required: [id, amount, balance_after, entry_type, reference, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          format: int64
+        balance_after:
+          type: integer
+          format: int64
+        entry_type:
+          type: string
+          enum: [topup, gift_debit, gift_credit, adjustment]
+        reference:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    LedgerList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/LedgerEntry"
+    BanUserRequest:
+      type: object
+      required: [user_id]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        reason:
+          type: string
+    MuteUserRequest:
+      type: object
+      required: [user_id]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        reason:
+          type: string
+    UnmuteUserRequest:
+      type: object
+      required: [user_id]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        reason:
+          type: string
+    ResolveReportRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [resolved]
+        note:
+          type: string
+    AdminReport:
+      type: object
+      required: [id, reporter_id, target_type, target_id, reason, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        reporter_id:
+          type: string
+          format: uuid
+        target_type:
+          type: string
+        target_id:
+          type: string
+        reason:
+          type: string
+        status:
+          type: string
+          enum: [open, resolved]
+        note:
+          type: string
         created_at:
           type: string
           format: date-time
