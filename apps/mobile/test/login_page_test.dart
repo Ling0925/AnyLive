@@ -15,5 +15,9 @@ void main() {
     expect(find.text('AnyLive Login'), findsOneWidget);
     expect(find.byType(TextField), findsOneWidget);
     expect(find.text('Send OTP'), findsOneWidget);
+    expect(find.text('Privacy Policy'), findsOneWidget);
+    expect(find.text('https://anylive.example/privacy'), findsOneWidget);
+    expect(find.text('Terms of Service'), findsOneWidget);
+    expect(find.text('https://anylive.example/terms'), findsOneWidget);
   });
 }

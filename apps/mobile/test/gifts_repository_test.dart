@@ -62,5 +62,35 @@ void main() {
       expect(order.id, 'o1');
       expect(order.replayed, isFalse);
     });
+
+    test('listLedger parses items', () async {
+      final mock = MockClient((request) async {
+        expect(request.url.path, '/api/v1/wallet/ledger');
+        expect(request.headers['Authorization'], 'Bearer t');
+        return http.Response(
+          jsonEncode({
+            'items': [
+              {
+                'id': 'le1',
+                'user_id': 'u1',
+                'amount': 100,
+                'balance_after': 100,
+                'entry_type': 'topup',
+                'reference': 'mock-topup',
+                'created_at': '2026-01-01T00:00:00Z',
+              },
+            ]
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+      final api = ApiClient(baseUrl: 'http://x', accessToken: 't');
+      final repo = GiftsRepository(client: api, httpClient: mock);
+      final entries = await repo.listLedger();
+      expect(entries.single.id, 'le1');
+      expect(entries.single.amount, 100);
+      expect(entries.single.entryType, 'topup');
+    });
   });
 }

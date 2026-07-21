@@ -40,6 +40,39 @@ class GiftOrder {
   }
 }
 
+/// Append-only wallet ledger row from `GET /api/v1/wallet/ledger`.
+class LedgerEntry {
+  LedgerEntry({
+    required this.id,
+    required this.userId,
+    required this.amount,
+    required this.balanceAfter,
+    required this.entryType,
+    required this.reference,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String userId;
+  final int amount;
+  final int balanceAfter;
+  final String entryType;
+  final String reference;
+  final String createdAt;
+
+  factory LedgerEntry.fromJson(Map<String, dynamic> json) {
+    return LedgerEntry(
+      id: json['id'] as String? ?? '',
+      userId: json['user_id'] as String? ?? '',
+      amount: json['amount'] as int? ?? 0,
+      balanceAfter: json['balance_after'] as int? ?? 0,
+      entryType: json['entry_type'] as String? ?? '',
+      reference: json['reference'] as String? ?? '',
+      createdAt: json['created_at'] as String? ?? '',
+    );
+  }
+}
+
 class GiftsRepository {
   GiftsRepository({
     required this.client,
@@ -87,6 +120,22 @@ class GiftsRepository {
     }
     final map = jsonDecode(res.body) as Map<String, dynamic>;
     return map['balance'] as int? ?? 0;
+  }
+
+  /// Planned endpoint: `GET /api/v1/wallet/ledger`.
+  Future<List<LedgerEntry>> listLedger() async {
+    final res = await httpClient.get(
+      client.uri('/api/v1/wallet/ledger'),
+      headers: client.jsonHeaders(auth: true),
+    );
+    if (res.statusCode != 200) {
+      throw GiftsException('ledger_failed', res.statusCode, res.body);
+    }
+    final map = jsonDecode(res.body) as Map<String, dynamic>;
+    final items = map['items'] as List<dynamic>? ?? [];
+    return items
+        .map((e) => LedgerEntry.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   Future<GiftOrder> sendGift({

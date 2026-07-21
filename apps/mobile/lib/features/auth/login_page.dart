@@ -130,6 +130,27 @@ class _LoginPageState extends State<LoginPage> {
                   ? 'Please wait…'
                   : (_otpSent ? 'Verify & continue' : 'Send OTP')),
             ),
+            const Spacer(),
+            // P1 compliance: show legal URLs (no url_launcher dep yet).
+            Text(
+              'Privacy Policy',
+              style: Theme.of(context).textTheme.labelLarge,
+              textAlign: TextAlign.center,
+            ),
+            const Text(
+              'https://anylive.example/privacy',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Terms of Service',
+              style: Theme.of(context).textTheme.labelLarge,
+              textAlign: TextAlign.center,
+            ),
+            const Text(
+              'https://anylive.example/terms',
+              textAlign: TextAlign.center,
+            ),
           ],
         ),
       ),
