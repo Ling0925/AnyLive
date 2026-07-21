@@ -4,6 +4,8 @@ use std::sync::Arc;
 
 use anylive_auth::MemoryAuthService;
 use anylive_media::SrsMediaProvider;
+use anylive_moderation::MemoryModeration;
+use anylive_realtime::{CentrifugoConfig, MemoryChatBus};
 use anylive_wallet::MemoryWallet;
 
 use crate::rooms::MemoryRoomStore;
@@ -14,6 +16,9 @@ pub struct AppState {
     pub rooms: MemoryRoomStore,
     pub media: SrsMediaProvider,
     pub wallet: MemoryWallet,
+    pub chat: MemoryChatBus,
+    pub centrifugo: CentrifugoConfig,
+    pub moderation: MemoryModeration,
 }
 
 impl AppState {
@@ -22,22 +27,30 @@ impl AppState {
         rooms: MemoryRoomStore,
         media: SrsMediaProvider,
         wallet: MemoryWallet,
+        chat: MemoryChatBus,
+        centrifugo: CentrifugoConfig,
+        moderation: MemoryModeration,
     ) -> Self {
         Self {
             auth,
             rooms,
             media,
             wallet,
+            chat,
+            centrifugo,
+            moderation,
         }
     }
 
     pub fn dev() -> Arc<Self> {
-        let wallet = MemoryWallet::new();
         Arc::new(Self::new(
             MemoryAuthService::memory_dev(),
             MemoryRoomStore::new(),
             SrsMediaProvider::from_env(),
-            wallet,
+            MemoryWallet::new(),
+            MemoryChatBus::new(),
+            CentrifugoConfig::default(),
+            MemoryModeration::new(),
         ))
     }
 

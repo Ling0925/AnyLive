@@ -42,6 +42,8 @@ dependencies = [
  "anylive-db",
  "anylive-domain",
  "anylive-media",
+ "anylive-moderation",
+ "anylive-realtime",
  "anylive-wallet",
  "axum",
  "chrono",
@@ -120,6 +122,34 @@ dependencies = [
  "serde",
  "thiserror",
  "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "anylive-moderation"
+version = "0.1.0"
+dependencies = [
+ "anylive-common",
+ "anylive-domain",
+ "chrono",
+ "serde",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "anylive-realtime"
+version = "0.1.0"
+dependencies = [
+ "anylive-common",
+ "anylive-domain",
+ "chrono",
+ "jsonwebtoken",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
  "uuid",
 ]
 

@@ -50,6 +50,18 @@ pub fn build_app_with_state(state: Arc<AppState>) -> Router {
         .route("/api/v1/wallet/topups", post(routes::topup_wallet))
         .route("/api/v1/gifts", get(routes::list_gifts))
         .route("/api/v1/rooms/{id}/gifts", post(routes::send_gift))
+        .route("/api/v1/realtime/token", post(routes::realtime_token))
+        .route(
+            "/api/v1/rooms/{id}/messages",
+            post(routes::post_message).get(routes::list_messages),
+        )
+        .route("/api/v1/admin/grant", post(routes::grant_admin))
+        .route("/api/v1/admin/ban", post(routes::ban_user))
+        .route(
+            "/api/v1/admin/rooms/force-close",
+            post(routes::force_close_room),
+        )
+        .route("/api/v1/admin/audit", get(routes::list_audit))
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
         .with_state(state)
@@ -77,6 +89,13 @@ pub fn build_app_with_state(state: Arc<AppState>) -> Router {
         routes::topup_wallet,
         routes::list_gifts,
         routes::send_gift,
+        routes::realtime_token,
+        routes::post_message,
+        routes::list_messages,
+        routes::grant_admin,
+        routes::ban_user,
+        routes::force_close_room,
+        routes::list_audit,
     ),
     components(schemas(
         routes::HealthResponse,
@@ -99,6 +118,16 @@ pub fn build_app_with_state(state: Arc<AppState>) -> Router {
         routes::GiftListResponse,
         routes::SendGiftBody,
         routes::GiftOrderDto,
+        routes::RealtimeTokenBody,
+        routes::RealtimeTokenResponse,
+        routes::PostMessageBody,
+        routes::ChatMessageDto,
+        routes::ChatListResponse,
+        routes::BanUserBody,
+        routes::ForceCloseBody,
+        routes::GrantAdminBody,
+        routes::AuditEventDto,
+        routes::AuditListResponse,
     )),
     tags(
         (name = "system", description = "Health and metadata"),
@@ -106,7 +135,9 @@ pub fn build_app_with_state(state: Arc<AppState>) -> Router {
         (name = "users", description = "User profile"),
         (name = "rooms", description = "Rooms and media control plane"),
         (name = "wallet", description = "Virtual currency wallet"),
-        (name = "gifts", description = "Gift catalog and send")
+        (name = "gifts", description = "Gift catalog and send"),
+        (name = "realtime", description = "Chat and Centrifugo tokens"),
+        (name = "admin", description = "Moderation")
     ),
     modifiers(&SecurityAddon),
     info(title = "AnyLive API", version = "0.1.0")
@@ -607,5 +638,191 @@ mod tests {
             .unwrap();
         // 50 - 2*price(rose=1) = 48
         assert_eq!(body_json(res).await["balance"], 48);
+    }
+
+    #[tokio::test]
+    async fn chat_post_and_history() {
+        let state = AppState::dev();
+        let app = build_app_with_state(state);
+        let token = login(&app, "chat@example.com").await;
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/rooms")
+                    .header("authorization", format!("Bearer {token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"title":"Chat Room"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let room_id = body_json(res).await["id"].as_str().unwrap().to_string();
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/rooms/{room_id}/messages"))
+                    .header("authorization", format!("Bearer {token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"body":"hello live"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::CREATED);
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/v1/rooms/{room_id}/messages"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let list = body_json(res).await;
+        assert_eq!(list["items"][0]["body"], "hello live");
+
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/realtime/token")
+                    .header("authorization", format!("Bearer {token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(r#"{{"room_id":"{room_id}"}}"#)))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let tok = body_json(res).await;
+        assert!(!tok["token"].as_str().unwrap().is_empty());
+        assert!(tok["channels"][0]
+            .as_str()
+            .unwrap()
+            .starts_with("room:"));
+    }
+
+    #[tokio::test]
+    async fn admin_ban_and_force_close() {
+        let state = AppState::dev();
+        let app = build_app_with_state(state);
+        let admin_token = login(&app, "admin@example.com").await;
+        let host_token = login(&app, "stream@example.com").await;
+
+        // bootstrap admin
+        let me = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/me")
+                    .header("authorization", format!("Bearer {admin_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let admin_id = body_json(me).await["id"].as_str().unwrap().to_string();
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/admin/grant")
+                    .header("authorization", format!("Bearer {admin_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(r#"{{"user_id":"{admin_id}"}}"#)))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/rooms")
+                    .header("authorization", format!("Bearer {host_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"title":"To Close"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let room = body_json(res).await;
+        let room_id = room["id"].as_str().unwrap().to_string();
+        let host_id = room["owner_id"].as_str().unwrap().to_string();
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/rooms/{room_id}/start"))
+                    .header("authorization", format!("Bearer {host_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/admin/rooms/force-close")
+                    .header("authorization", format!("Bearer {admin_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"room_id":"{room_id}","reason":"violation"}}"#
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(body_json(res).await["status"], "closed");
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/admin/ban")
+                    .header("authorization", format!("Bearer {admin_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"user_id":"{host_id}","reason":"spam"}}"#
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/admin/audit")
+                    .header("authorization", format!("Bearer {admin_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let audit = body_json(res).await;
+        assert!(audit["items"].as_array().unwrap().len() >= 2);
     }
 }
