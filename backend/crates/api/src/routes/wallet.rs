@@ -2,8 +2,9 @@
 
 use std::sync::Arc;
 
-use anylive_domain::UserId;
-use anylive_wallet::{GiftCatalogItem, GiftOrder, WalletSnapshot};
+use anylive_domain::{RoomId, UserId};
+use anylive_realtime::{gift_envelope, MessageEnvelope};
+use anylive_wallet::{GiftCatalogItem, GiftOrder, LedgerEntry, WalletSnapshot};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
@@ -111,6 +112,51 @@ pub async fn get_wallet(
     Ok(Json(WalletDto { balance: bal }))
 }
 
+#[derive(Debug, Serialize, ToSchema)]
+pub struct LedgerEntryDto {
+    pub id: String,
+    pub amount: i64,
+    pub balance_after: i64,
+    pub entry_type: String,
+    pub reference: String,
+    pub created_at: String,
+}
+
+impl From<LedgerEntry> for LedgerEntryDto {
+    fn from(e: LedgerEntry) -> Self {
+        Self {
+            id: e.id.to_string(),
+            amount: e.amount,
+            balance_after: e.balance_after,
+            entry_type: match e.entry_type {
+                anylive_wallet::LedgerType::Topup => "topup".into(),
+                anylive_wallet::LedgerType::GiftDebit => "gift_debit".into(),
+                anylive_wallet::LedgerType::GiftCredit => "gift_credit".into(),
+                anylive_wallet::LedgerType::Adjustment => "adjustment".into(),
+            },
+            reference: e.reference,
+            created_at: e.created_at.to_rfc3339(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct LedgerListResponse {
+    pub items: Vec<LedgerEntryDto>,
+}
+
+/// GET /api/v1/wallet/ledger
+#[utoipa::path(get, path = "/api/v1/wallet/ledger", tag = "wallet", security(("bearerAuth" = [])), responses((status = 200, body = LedgerListResponse)))]
+pub async fn get_wallet_ledger(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+) -> Result<Json<LedgerListResponse>, ApiError> {
+    let items = state.wallet.ledger_for(user.user_id).await;
+    Ok(Json(LedgerListResponse {
+        items: items.into_iter().map(LedgerEntryDto::from).collect(),
+    }))
+}
+
 /// POST /api/v1/wallet/topups — mock topup for P1 sandbox.
 #[utoipa::path(post, path = "/api/v1/wallet/topups", tag = "wallet", security(("bearerAuth" = [])), request_body = TopupBody, responses((status = 200, body = WalletDto)))]
 pub async fn topup_wallet(
@@ -149,6 +195,12 @@ pub async fn send_gift(
     Path(id): Path<String>,
     Json(body): Json<SendGiftBody>,
 ) -> Result<(StatusCode, Json<GiftOrderDto>), ApiError> {
+    if state.moderation.is_muted(user.user_id).await {
+        return Err(ApiError(anylive_common::AppError::new(
+            anylive_common::ErrorCode::Forbidden,
+            "user is muted",
+        )));
+    }
     let room_id = Uuid::parse_str(&id)
         .map_err(|_| ApiError(anylive_common::AppError::validation("invalid room id")))?;
     let room = state
@@ -182,6 +234,23 @@ pub async fn send_gift(
         )
         .await
         .map_err(ApiError::from)?;
+
+    // Fan-out only on first successful debit; idempotent replays must not re-broadcast.
+    if !replayed {
+        let channel = MessageEnvelope::room_channel(RoomId(room_id));
+        let data = gift_envelope(
+            order.id,
+            order.room_id,
+            order.sender_id,
+            order.receiver_id,
+            order.gift_id,
+            order.count,
+            order.total_coins,
+        );
+        if let Err(e) = state.centrifugo_publisher.publish(&channel, data).await {
+            tracing::warn!(error = %e, %channel, "centrifugo gift publish failed");
+        }
+    }
 
     let status = if replayed {
         StatusCode::OK

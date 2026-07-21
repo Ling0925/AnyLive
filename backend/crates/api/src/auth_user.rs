@@ -51,6 +51,10 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
         })?;
 
         let user_id = UserId(claims.sub);
+        // Soft-deleted accounts (P1 compliance stub).
+        if state.deleted_users.is_deleted(user_id).await {
+            return Err(ApiError(AppError::unauthorized("account deleted")));
+        }
         // Enforce bans on every authenticated request (chat/gift/room/admin).
         if state.moderation.is_banned(user_id).await {
             return Err(ApiError(AppError::new(

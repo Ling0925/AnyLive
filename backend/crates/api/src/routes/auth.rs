@@ -52,17 +52,39 @@ pub struct UserDto {
     pub display_name: String,
     pub email: Option<String>,
     pub created_at: String,
+    /// True when the user has confirmed age eligibility.
+    pub age_confirmed: bool,
+    /// True when the user has accepted the privacy policy.
+    pub privacy_accepted: bool,
 }
 
-impl From<User> for UserDto {
-    fn from(u: User) -> Self {
+impl UserDto {
+    pub fn from_user(u: User, age_confirmed: bool, privacy_accepted: bool) -> Self {
         Self {
             id: u.id.0.to_string(),
             display_name: u.display_name,
             email: u.email,
             created_at: u.created_at.to_rfc3339(),
+            age_confirmed,
+            privacy_accepted,
         }
     }
+}
+
+impl From<User> for UserDto {
+    fn from(u: User) -> Self {
+        Self::from_user(u, false, false)
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct PatchMeBody {
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub age_confirmed: Option<bool>,
+    #[serde(default)]
+    pub privacy_accepted: Option<bool>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -122,8 +144,13 @@ pub async fn otp_verify(
         })
         .await
         .map_err(ApiError::from)?;
+    let extras = state.profile_extras.get(session.user.id).await;
     Ok(Json(AuthSessionResponse {
-        user: session.user.into(),
+        user: UserDto::from_user(
+            session.user,
+            extras.age_confirmed(),
+            extras.privacy_accepted(),
+        ),
         access_token: session.tokens.access_token,
         refresh_token: session.tokens.refresh_token,
         expires_in: session.tokens.expires_in,
@@ -191,5 +218,55 @@ pub async fn me(
     user: AuthUser,
 ) -> Result<Json<UserDto>, ApiError> {
     let u = state.auth.me(user.user_id).await.map_err(ApiError::from)?;
-    Ok(Json(u.into()))
+    let extras = state.profile_extras.get(user.user_id).await;
+    Ok(Json(UserDto::from_user(
+        u,
+        extras.age_confirmed(),
+        extras.privacy_accepted(),
+    )))
+}
+
+/// Patch current user profile (display name, age/privacy declarations).
+#[utoipa::path(
+    patch,
+    path = "/api/v1/me",
+    tag = "users",
+    security(("bearerAuth" = [])),
+    request_body = PatchMeBody,
+    responses((status = 200, body = UserDto))
+)]
+pub async fn patch_me(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Json(body): Json<PatchMeBody>,
+) -> Result<Json<UserDto>, ApiError> {
+    if body.display_name.is_none()
+        && body.age_confirmed.is_none()
+        && body.privacy_accepted.is_none()
+    {
+        return Err(ApiError::from(anylive_common::AppError::validation(
+            "at least one field required",
+        )));
+    }
+
+    let u = if let Some(name) = body.display_name {
+        state
+            .auth
+            .update_display_name(user.user_id, name)
+            .await
+            .map_err(ApiError::from)?
+    } else {
+        state.auth.me(user.user_id).await.map_err(ApiError::from)?
+    };
+
+    let extras = state
+        .profile_extras
+        .patch(user.user_id, body.age_confirmed, body.privacy_accepted)
+        .await;
+
+    Ok(Json(UserDto::from_user(
+        u,
+        extras.age_confirmed(),
+        extras.privacy_accepted(),
+    )))
 }

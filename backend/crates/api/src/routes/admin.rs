@@ -23,6 +23,20 @@ pub struct BanUserBody {
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
+pub struct MuteUserBody {
+    pub user_id: String,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct UnmuteUserBody {
+    pub user_id: String,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct ForceCloseBody {
     pub room_id: String,
     #[serde(default)]
@@ -99,6 +113,48 @@ pub async fn ban_user(
     state
         .moderation
         .ban_user(
+            user.user_id,
+            UserId(target),
+            body.reason.unwrap_or_else(|| "policy".into()),
+        )
+        .await
+        .map_err(ApiError::from)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Mute a user (admin). Blocks chat + gifts while leaving account active.
+#[utoipa::path(post, path = "/api/v1/admin/mute", tag = "admin", security(("bearerAuth" = [])), request_body = MuteUserBody, responses((status = 204)))]
+pub async fn mute_user(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Json(body): Json<MuteUserBody>,
+) -> Result<StatusCode, ApiError> {
+    let target = Uuid::parse_str(&body.user_id)
+        .map_err(|_| ApiError(anylive_common::AppError::validation("invalid user_id")))?;
+    state
+        .moderation
+        .mute_user(
+            user.user_id,
+            UserId(target),
+            body.reason.unwrap_or_else(|| "policy".into()),
+        )
+        .await
+        .map_err(ApiError::from)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Unmute a user (admin).
+#[utoipa::path(post, path = "/api/v1/admin/unmute", tag = "admin", security(("bearerAuth" = [])), request_body = UnmuteUserBody, responses((status = 204)))]
+pub async fn unmute_user(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Json(body): Json<UnmuteUserBody>,
+) -> Result<StatusCode, ApiError> {
+    let target = Uuid::parse_str(&body.user_id)
+        .map_err(|_| ApiError(anylive_common::AppError::validation("invalid user_id")))?;
+    state
+        .moderation
+        .unmute_user(
             user.user_id,
             UserId(target),
             body.reason.unwrap_or_else(|| "policy".into()),

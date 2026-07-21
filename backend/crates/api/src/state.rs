@@ -16,7 +16,9 @@ use anylive_realtime::{
 use anylive_social::MemorySocial;
 
 use crate::guards::{check_production_secrets, is_production_env};
+use crate::profile::MemoryProfileExtras;
 use crate::rooms::AnyRoomStore;
+use crate::routes::compliance::DeletedUsers;
 use crate::routes::reports::MemoryReports;
 
 /// Auth service with pluggable user store (memory default, Postgres when enabled).
@@ -35,6 +37,10 @@ pub struct AppState {
     pub moderation: MemoryModeration,
     pub social: MemorySocial,
     pub reports: MemoryReports,
+    /// Soft-deleted accounts (P1 compliance stub).
+    pub deleted_users: DeletedUsers,
+    /// Age/privacy declarations (in-memory dual store; no PG migration).
+    pub profile_extras: MemoryProfileExtras,
     /// Present when `USE_POSTGRES=1` + `DATABASE_URL` were used at startup.
     pub db: Option<PgPool>,
 }
@@ -51,6 +57,8 @@ impl AppState {
         moderation: MemoryModeration,
         social: MemorySocial,
         reports: MemoryReports,
+        deleted_users: DeletedUsers,
+        profile_extras: MemoryProfileExtras,
         db: Option<PgPool>,
     ) -> Self {
         Self {
@@ -64,6 +72,8 @@ impl AppState {
             moderation,
             social,
             reports,
+            deleted_users,
+            profile_extras,
             db,
         }
     }
@@ -91,6 +101,8 @@ impl AppState {
             MemoryModeration::new(),
             MemorySocial::new(),
             MemoryReports::new(),
+            DeletedUsers::new(),
+            MemoryProfileExtras::new(),
             None,
         ))
     }
@@ -184,6 +196,8 @@ impl AppState {
             MemoryModeration::new(),
             MemorySocial::new(),
             MemoryReports::new(),
+            DeletedUsers::new(),
+            MemoryProfileExtras::new(),
             db,
         ));
         state.wallet.seed_default_gifts().await;

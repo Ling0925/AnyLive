@@ -3,6 +3,7 @@
 mod auth_user;
 mod error;
 pub mod guards;
+mod profile;
 mod rooms;
 mod routes;
 mod state;
@@ -10,7 +11,7 @@ mod state;
 use std::sync::Arc;
 
 use axum::{
-    routing::{get, post},
+    routing::{get, patch, post},
     Router,
 };
 use serde::Serialize;
@@ -42,7 +43,15 @@ pub fn build_app_with_state(state: Arc<AppState>) -> Router {
         .route("/api/v1/auth/otp/verify", post(routes::otp_verify))
         .route("/api/v1/auth/token/refresh", post(routes::token_refresh))
         .route("/api/v1/auth/logout", post(routes::logout))
-        .route("/api/v1/me", get(routes::me))
+        .route(
+            "/api/v1/me",
+            get(routes::me)
+                .patch(routes::patch_me)
+                .delete(routes::delete_me),
+        )
+        .route("/api/v1/me/export", get(routes::export_me))
+        .route("/api/v1/legal/privacy", get(routes::legal_privacy))
+        .route("/api/v1/legal/terms", get(routes::legal_terms))
         .route("/api/v1/rooms", post(routes::create_room).get(routes::list_rooms))
         .route("/api/v1/rooms/{id}", get(routes::get_room))
         .route("/api/v1/rooms/{id}/start", post(routes::start_room))
@@ -53,6 +62,7 @@ pub fn build_app_with_state(state: Arc<AppState>) -> Router {
         )
         .route("/api/v1/rooms/{id}/media/play", get(routes::media_play))
         .route("/api/v1/wallet", get(routes::get_wallet))
+        .route("/api/v1/wallet/ledger", get(routes::get_wallet_ledger))
         .route("/api/v1/wallet/topups", post(routes::topup_wallet))
         .route("/api/v1/gifts", get(routes::list_gifts))
         .route("/api/v1/rooms/{id}/gifts", post(routes::send_gift))
@@ -63,6 +73,8 @@ pub fn build_app_with_state(state: Arc<AppState>) -> Router {
         )
         .route("/api/v1/admin/grant", post(routes::grant_admin))
         .route("/api/v1/admin/ban", post(routes::ban_user))
+        .route("/api/v1/admin/mute", post(routes::mute_user))
+        .route("/api/v1/admin/unmute", post(routes::unmute_user))
         .route(
             "/api/v1/admin/rooms/force-close",
             post(routes::force_close_room),
@@ -78,6 +90,10 @@ pub fn build_app_with_state(state: Arc<AppState>) -> Router {
         .route("/api/v1/reports", post(routes::create_report))
         .route("/api/v1/admin/gifts", get(routes::admin_list_gifts).post(routes::admin_upsert_gift))
         .route("/api/v1/admin/reports", get(routes::admin_list_reports))
+        .route(
+            "/api/v1/admin/reports/{id}",
+            patch(routes::admin_resolve_report),
+        )
         .route("/api/v1/webhooks/srs/on_publish", post(routes::srs_on_publish))
         .route("/api/v1/webhooks/srs/on_unpublish", post(routes::srs_on_unpublish))
         .layer(TraceLayer::new_for_http())
@@ -96,6 +112,7 @@ pub fn build_app_with_state(state: Arc<AppState>) -> Router {
         routes::token_refresh,
         routes::logout,
         routes::me,
+        routes::patch_me,
         routes::create_room,
         routes::list_rooms,
         routes::get_room,
@@ -104,6 +121,7 @@ pub fn build_app_with_state(state: Arc<AppState>) -> Router {
         routes::media_publish,
         routes::media_play,
         routes::get_wallet,
+        routes::get_wallet_ledger,
         routes::topup_wallet,
         routes::list_gifts,
         routes::send_gift,
@@ -112,6 +130,8 @@ pub fn build_app_with_state(state: Arc<AppState>) -> Router {
         routes::list_messages,
         routes::grant_admin,
         routes::ban_user,
+        routes::mute_user,
+        routes::unmute_user,
         routes::force_close_room,
         routes::list_audit,
         routes::follow_user,
@@ -127,6 +147,7 @@ pub fn build_app_with_state(state: Arc<AppState>) -> Router {
         routes::LogoutBody,
         routes::TokenPairDto,
         routes::UserDto,
+        routes::PatchMeBody,
         routes::AuthSessionResponse,
         routes::CreateRoomBody,
         routes::RoomDto,
@@ -134,6 +155,8 @@ pub fn build_app_with_state(state: Arc<AppState>) -> Router {
         routes::PublishInfoDto,
         routes::PlayUrlsDto,
         routes::WalletDto,
+        routes::LedgerEntryDto,
+        routes::LedgerListResponse,
         routes::TopupBody,
         routes::GiftDto,
         routes::GiftListResponse,
@@ -145,6 +168,8 @@ pub fn build_app_with_state(state: Arc<AppState>) -> Router {
         routes::ChatMessageDto,
         routes::ChatListResponse,
         routes::BanUserBody,
+        routes::MuteUserBody,
+        routes::UnmuteUserBody,
         routes::ForceCloseBody,
         routes::GrantAdminBody,
         routes::AuditEventDto,
@@ -409,6 +434,82 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn patch_me_updates_display_name_and_declarations() {
+        let state = AppState::dev();
+        let app = build_app_with_state(state);
+        let token = login(&app, "patchme@example.com").await;
+
+        // defaults false
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/me")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let me = body_json(res).await;
+        assert_eq!(me["age_confirmed"], false);
+        assert_eq!(me["privacy_accepted"], false);
+        assert_eq!(me["display_name"], "patchme");
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri("/api/v1/me")
+                    .header("authorization", format!("Bearer {token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"display_name":"Patched","age_confirmed":true,"privacy_accepted":true}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let patched = body_json(res).await;
+        assert_eq!(patched["display_name"], "Patched");
+        assert_eq!(patched["age_confirmed"], true);
+        assert_eq!(patched["privacy_accepted"], true);
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/me")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let me2 = body_json(res).await;
+        assert_eq!(me2["display_name"], "Patched");
+        assert_eq!(me2["age_confirmed"], true);
+        assert_eq!(me2["privacy_accepted"], true);
+
+        // empty body rejected
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri("/api/v1/me")
+                    .header("authorization", format!("Bearer {token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    }
+
     async fn me_rejects_missing_bearer() {
         let app = build_app();
         let res = app
@@ -713,6 +814,125 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn wallet_ledger_lists_topup_and_gift_debit() {
+        let state = AppState::dev_ready().await;
+        let app = build_app_with_state(state);
+        let host_token = login(&app, "ledger-host@example.com").await;
+        let fan_token = login(&app, "ledger-fan@example.com").await;
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/rooms")
+                    .header("authorization", format!("Bearer {host_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"title":"Ledger Room"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let room = body_json(res).await;
+        let room_id = room["id"].as_str().unwrap().to_string();
+        let owner_id = room["owner_id"].as_str().unwrap().to_string();
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/wallet/topups")
+                    .header("authorization", format!("Bearer {fan_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"amount":100}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(body_json(res).await["balance"], 100);
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/gifts")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let gifts = body_json(res).await;
+        let gift = gifts["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|g| g["name"] == "Rose")
+            .expect("rose gift");
+        let gift_id = gift["id"].as_str().unwrap().to_string();
+        assert_eq!(gift["active"], true);
+
+        let body = format!(
+            r#"{{"gift_id":"{gift_id}","receiver_id":"{owner_id}","count":3,"client_request_id":"ledger-1"}}"#
+        );
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/rooms/{room_id}/gifts"))
+                    .header("authorization", format!("Bearer {fan_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::CREATED);
+
+        // Fan ledger: topup credit + gift debit
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/wallet/ledger")
+                    .header("authorization", format!("Bearer {fan_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let fan_ledger = body_json(res).await;
+        let fan_items = fan_ledger["items"].as_array().unwrap();
+        assert!(fan_items.iter().any(|e| {
+            e["entry_type"] == "topup" && e["amount"] == 100 && e["balance_after"] == 100
+        }));
+        assert!(fan_items.iter().any(|e| {
+            e["entry_type"] == "gift_debit" && e["amount"] == -3 && e["balance_after"] == 97
+        }));
+
+        // Host ledger: gift credit
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/wallet/ledger")
+                    .header("authorization", format!("Bearer {host_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let host_ledger = body_json(res).await;
+        let host_items = host_ledger["items"].as_array().unwrap();
+        assert!(host_items.iter().any(|e| {
+            e["entry_type"] == "gift_credit" && e["amount"] == 3 && e["balance_after"] == 3
+        }));
+    }
+
+    #[tokio::test]
     async fn chat_post_and_history() {
         let state = AppState::dev();
         let app = build_app_with_state(state);
@@ -800,6 +1020,8 @@ mod tests {
             base.moderation.clone(),
             base.social.clone(),
             base.reports.clone(),
+            base.deleted_users.clone(),
+            base.profile_extras.clone(),
             None,
         ));
         let app = build_app_with_state(state);
@@ -839,6 +1061,126 @@ mod tests {
         assert_eq!(snap[0].1["type"], "chat.message");
         assert_eq!(snap[0].1["payload"]["body"], "fanout me");
         assert_eq!(snap[0].1["payload"]["room_id"], room_id);
+    }
+
+    #[tokio::test]
+    async fn gift_send_publishes_centrifugo_envelope_once() {
+        use anylive_realtime::RecordingCentrifugoPublisher;
+        use std::sync::Arc;
+
+        let recorder = Arc::new(RecordingCentrifugoPublisher::new());
+        let base = AppState::dev_ready().await;
+        let state = Arc::new(AppState::new(
+            base.auth.clone(),
+            base.rooms.clone(),
+            base.media.clone(),
+            base.wallet.clone(),
+            base.chat.clone(),
+            base.centrifugo.clone(),
+            recorder.clone(),
+            base.moderation.clone(),
+            base.social.clone(),
+            base.reports.clone(),
+            base.deleted_users.clone(),
+            base.profile_extras.clone(),
+            None,
+        ));
+        let app = build_app_with_state(state);
+        let host_token = login(&app, "gift-pub-host@example.com").await;
+        let fan_token = login(&app, "gift-pub-fan@example.com").await;
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/rooms")
+                    .header("authorization", format!("Bearer {host_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"title":"Gift Pub Room"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let room = body_json(res).await;
+        let room_id = room["id"].as_str().unwrap().to_string();
+        let owner_id = room["owner_id"].as_str().unwrap().to_string();
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/wallet/topups")
+                    .header("authorization", format!("Bearer {fan_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"amount":50}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/gifts")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let gifts = body_json(res).await;
+        let gift_id = gifts["items"][0]["id"].as_str().unwrap().to_string();
+
+        let body = format!(
+            r#"{{"gift_id":"{gift_id}","receiver_id":"{owner_id}","count":2,"client_request_id":"gift-pub-1"}}"#
+        );
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/rooms/{room_id}/gifts"))
+                    .header("authorization", format!("Bearer {fan_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.clone()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::CREATED);
+        let order = body_json(res).await;
+        let order_id = order["id"].as_str().unwrap().to_string();
+        let total_coins = order["total_coins"].as_i64().unwrap();
+
+        // Idempotent replay must not re-publish.
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/rooms/{room_id}/gifts"))
+                    .header("authorization", format!("Bearer {fan_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(body_json(res).await["replayed"], true);
+
+        let snap = recorder.snapshot().await;
+        assert_eq!(snap.len(), 1);
+        assert_eq!(snap[0].0, format!("room:{room_id}"));
+        assert_eq!(snap[0].1["type"], "gift.sent");
+        assert_eq!(snap[0].1["payload"]["order_id"], order_id);
+        assert_eq!(snap[0].1["payload"]["room_id"], room_id);
+        assert_eq!(snap[0].1["payload"]["receiver_id"], owner_id);
+        assert_eq!(snap[0].1["payload"]["gift_id"], gift_id);
+        assert_eq!(snap[0].1["payload"]["count"], 2);
+        assert_eq!(snap[0].1["payload"]["total_coins"], total_coins);
     }
 
     #[tokio::test]
@@ -987,6 +1329,161 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn admin_mute_blocks_chat_and_gifts() {
+        let state = AppState::dev_ready().await;
+        let app = build_app_with_state(state);
+        let admin_token = login(&app, "mute-admin@example.com").await;
+        let host_token = login(&app, "mute-host@example.com").await;
+        let fan_token = login(&app, "mute-fan@example.com").await;
+        bootstrap_admin(&app, &admin_token).await;
+
+        // host creates room
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/rooms")
+                    .header("authorization", format!("Bearer {host_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"title":"Mute Room"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let room = body_json(res).await;
+        let room_id = room["id"].as_str().unwrap().to_string();
+        let owner_id = room["owner_id"].as_str().unwrap().to_string();
+
+        // resolve fan id
+        let me = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/me")
+                    .header("authorization", format!("Bearer {fan_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let fan_id = body_json(me).await["id"].as_str().unwrap().to_string();
+
+        // topup + gift catalog
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/wallet/topups")
+                    .header("authorization", format!("Bearer {fan_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"amount":50}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/gifts")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let gifts = body_json(res).await;
+        let gift_id = gifts["items"][0]["id"].as_str().unwrap().to_string();
+
+        // mute fan
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/admin/mute")
+                    .header("authorization", format!("Bearer {admin_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"user_id":"{fan_id}","reason":"spam"}}"#
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+        // chat blocked
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/rooms/{room_id}/messages"))
+                    .header("authorization", format!("Bearer {fan_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"body":"should fail"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+        let err = body_json(res).await;
+        assert_eq!(err["code"], "FORBIDDEN");
+
+        // gift blocked
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/rooms/{room_id}/gifts"))
+                    .header("authorization", format!("Bearer {fan_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"gift_id":"{gift_id}","receiver_id":"{owner_id}","count":1,"client_request_id":"mute-1"}}"#
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+        // unmute restores chat
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/admin/unmute")
+                    .header("authorization", format!("Bearer {admin_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(r#"{{"user_id":"{fan_id}"}}"#)))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/rooms/{room_id}/messages"))
+                    .header("authorization", format!("Bearer {fan_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"body":"ok after unmute"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::CREATED);
+    }
+
+    #[tokio::test]
     async fn admin_upsert_gift_and_list() {
         let state = AppState::dev();
         let app = build_app_with_state(state);
@@ -1059,6 +1556,7 @@ mod tests {
         let report_id = report["id"].as_str().unwrap().to_string();
         assert_eq!(report["target_type"], "user");
         assert_eq!(report["reason"], "harassment");
+        assert_eq!(report["status"], "open");
 
         let res = app
             .oneshot(
@@ -1072,11 +1570,73 @@ mod tests {
             .unwrap();
         assert_eq!(res.status(), StatusCode::OK);
         let list = body_json(res).await;
-        assert!(list["items"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|r| r["id"] == report_id && r["reason"] == "harassment"));
+        assert!(list["items"].as_array().unwrap().iter().any(|r| {
+            r["id"] == report_id && r["reason"] == "harassment" && r["status"] == "open"
+        }));
+    }
+
+    #[tokio::test]
+    async fn admin_resolve_report() {
+        let state = AppState::dev();
+        let app = build_app_with_state(state);
+        let admin_token = login(&app, "resolve-admin@example.com").await;
+        let reporter_token = login(&app, "resolve-reporter@example.com").await;
+        bootstrap_admin(&app, &admin_token).await;
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/reports")
+                    .header("authorization", format!("Bearer {reporter_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"target_type":"room","target_id":"room-1","reason":"scam"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::CREATED);
+        let report_id = body_json(res).await["id"].as_str().unwrap().to_string();
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!("/api/v1/admin/reports/{report_id}"))
+                    .header("authorization", format!("Bearer {admin_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"status":"resolved","note":"banned host"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let resolved = body_json(res).await;
+        assert_eq!(resolved["id"], report_id);
+        assert_eq!(resolved["status"], "resolved");
+        assert_eq!(resolved["note"], "banned host");
+
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/admin/reports")
+                    .header("authorization", format!("Bearer {admin_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let list = body_json(res).await;
+        assert!(list["items"].as_array().unwrap().iter().any(|r| {
+            r["id"] == report_id && r["status"] == "resolved" && r["note"] == "banned host"
+        }));
     }
 
     #[tokio::test]

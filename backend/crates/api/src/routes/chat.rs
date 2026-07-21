@@ -98,6 +98,12 @@ pub async fn post_message(
     Path(id): Path<String>,
     Json(body): Json<PostMessageBody>,
 ) -> Result<(axum::http::StatusCode, Json<ChatMessageDto>), ApiError> {
+    if state.moderation.is_muted(user.user_id).await {
+        return Err(ApiError(anylive_common::AppError::new(
+            anylive_common::ErrorCode::Forbidden,
+            "user is muted",
+        )));
+    }
     let room_uuid = Uuid::parse_str(&id)
         .map_err(|_| ApiError(anylive_common::AppError::validation("invalid room id")))?;
     let room_id = RoomId(room_uuid);
