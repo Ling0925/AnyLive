@@ -21,7 +21,9 @@ pub struct SrsPublishHook {
     pub stream: String,
     #[serde(default)]
     pub app: String,
+    /// SRS query string (kept for payload compatibility; unused in P1).
     #[serde(default)]
+    #[allow(dead_code)]
     pub param: String,
 }
 
