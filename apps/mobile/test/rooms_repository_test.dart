@@ -145,5 +145,50 @@ void main() {
       final play = await repo.playUrls('r1');
       expect(play['hls'], 'http://cdn/live/r1.m3u8');
     });
+
+    test('publishInfo returns push url and stream key', () async {
+      final mock = MockClient((request) async {
+        expect(request.method, 'POST');
+        expect(request.url.path, '/api/v1/rooms/r1/media/publish');
+        expect(request.headers['Authorization'], 'Bearer tok');
+        return http.Response(
+          jsonEncode({
+            'push_url': 'rtmp://localhost:1935/live/r1',
+            'stream_key': 'r1',
+            'expires_at': '2026-01-01T06:00:00Z',
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+      final api = ApiClient(baseUrl: 'http://x', accessToken: 'tok');
+      final repo = RoomsRepository(client: api, httpClient: mock);
+      final info = await repo.publishInfo('r1');
+      expect(info.pushUrl, 'rtmp://localhost:1935/live/r1');
+      expect(info.streamKey, 'r1');
+      expect(info.expiresAt, '2026-01-01T06:00:00Z');
+    });
+
+    test('stopRoom posts stop path', () async {
+      final mock = MockClient((request) async {
+        expect(request.method, 'POST');
+        expect(request.url.path, '/api/v1/rooms/r1/stop');
+        expect(request.headers['Authorization'], 'Bearer tok');
+        return http.Response(
+          jsonEncode({
+            'id': 'r1',
+            'owner_id': 'u1',
+            'title': 'Show',
+            'status': 'closed',
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+      final api = ApiClient(baseUrl: 'http://x', accessToken: 'tok');
+      final repo = RoomsRepository(client: api, httpClient: mock);
+      final room = await repo.stopRoom('r1');
+      expect(room.status, 'closed');
+    });
   });
 }

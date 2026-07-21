@@ -29,6 +29,27 @@ class Room {
   bool get isLive => status == 'live';
 }
 
+/// Owner publish credentials from `POST /api/v1/rooms/{id}/media/publish`.
+class PublishInfo {
+  PublishInfo({
+    required this.pushUrl,
+    required this.streamKey,
+    this.expiresAt,
+  });
+
+  final String pushUrl;
+  final String streamKey;
+  final String? expiresAt;
+
+  factory PublishInfo.fromJson(Map<String, dynamic> json) {
+    return PublishInfo(
+      pushUrl: json['push_url'] as String? ?? '',
+      streamKey: json['stream_key'] as String? ?? '',
+      expiresAt: json['expires_at'] as String?,
+    );
+  }
+}
+
 class ChatMessage {
   ChatMessage({
     required this.id,
@@ -117,6 +138,29 @@ class RoomsRepository {
       throw RoomsException('start_failed', res.statusCode, res.body);
     }
     return Room.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+  }
+
+  Future<Room> stopRoom(String roomId) async {
+    final res = await httpClient.post(
+      client.uri('/api/v1/rooms/$roomId/stop'),
+      headers: client.jsonHeaders(auth: true),
+    );
+    if (res.statusCode != 200) {
+      throw RoomsException('stop_failed', res.statusCode, res.body);
+    }
+    return Room.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+  }
+
+  /// Owner-only OBS/RTMP credentials from `POST .../media/publish`.
+  Future<PublishInfo> publishInfo(String roomId) async {
+    final res = await httpClient.post(
+      client.uri('/api/v1/rooms/$roomId/media/publish'),
+      headers: client.jsonHeaders(auth: true),
+    );
+    if (res.statusCode != 200) {
+      throw RoomsException('publish_failed', res.statusCode, res.body);
+    }
+    return PublishInfo.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
   Future<Map<String, dynamic>> playUrls(String roomId) async {
