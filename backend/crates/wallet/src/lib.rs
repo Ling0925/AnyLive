@@ -175,6 +175,15 @@ impl MemoryWallet {
 
         let mut g = self.inner.lock().await;
         if let Some(existing) = g.gift_orders_by_key.get(&idem_key) {
+            if existing.gift_id != gift_id
+                || existing.count != count
+                || existing.receiver_id != receiver
+                || existing.room_id != room_id
+            {
+                return Err(AppError::validation(
+                    "idempotency key reused with different gift parameters",
+                ));
+            }
             return Ok((existing.clone(), true));
         }
 
@@ -331,6 +340,28 @@ mod tests {
         assert!(r_led
             .iter()
             .any(|e| e.entry_type == LedgerType::GiftCredit));
+    }
+
+    #[tokio::test]
+    async fn idempotency_key_rejects_param_mismatch() {
+        let w = MemoryWallet::new();
+        w.seed_default_gifts().await;
+        let gifts = w.list_gifts().await;
+        let rose = gifts.iter().find(|g| g.name == "Rose").unwrap().clone();
+        let rocket = gifts.iter().find(|g| g.name == "Rocket").unwrap().clone();
+        let sender = UserId::new();
+        let receiver = UserId::new();
+        w.credit_topup(sender, 500, "t").await.unwrap();
+        let room = Uuid::new_v4();
+        w.send_gift(room, sender, receiver, rose.id, 1, "same-key")
+            .await
+            .unwrap();
+        let err = w
+            .send_gift(room, sender, receiver, rocket.id, 1, "same-key")
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, ErrorCode::Validation);
+        assert_eq!(w.balance(sender).await, 499);
     }
 
     #[tokio::test]
