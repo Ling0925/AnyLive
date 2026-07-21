@@ -29,12 +29,20 @@ export const API_PATHS = {
   publicGifts: '/api/v1/gifts',
   adminGifts: '/api/v1/admin/gifts',
   adminBan: '/api/v1/admin/ban',
+  adminMute: '/api/v1/admin/mute',
   adminForceClose: '/api/v1/admin/rooms/force-close',
+  adminReports: '/api/v1/admin/reports',
+  adminReportResolve: '/api/v1/admin/reports/resolve',
 } as const
 
 /** Gifts list path: admin catalog when authed, else public catalog. */
 export function giftsListPath(authed: boolean): string {
   return authed ? API_PATHS.adminGifts : API_PATHS.publicGifts
+}
+
+/** Admin gift upsert (POST) path. */
+export function adminGiftsPath(): string {
+  return API_PATHS.adminGifts
 }
 
 export function otpSendPath(): string {
@@ -49,10 +57,22 @@ export function banUserPath(): string {
   return API_PATHS.adminBan
 }
 
+export function muteUserPath(): string {
+  return API_PATHS.adminMute
+}
+
 export function forceCloseRoomPath(): string {
   return API_PATHS.adminForceClose
 }
 
 export function roomsPath(): string {
   return API_PATHS.rooms
+}
+
+export function reportsListPath(): string {
+  return API_PATHS.adminReports
+}
+
+export function reportResolvePath(): string {
+  return API_PATHS.adminReportResolve
 }

@@ -1,14 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import {
+  adminGiftsPath,
   adminTitle,
   apiUrl,
   banUserPath,
   canAccessModule,
   forceCloseRoomPath,
   giftsListPath,
+  muteUserPath,
   otpSendPath,
   otpVerifyPath,
+  reportResolvePath,
+  reportsListPath,
   roomsPath,
 } from './lib/admin'
 
@@ -26,11 +30,26 @@ const loginBusy = ref(false)
 
 const roomIdInput = ref('')
 const userIdInput = ref('')
+const muteUserIdInput = ref('')
 const actionReason = ref('')
 const actionBusy = ref(false)
 
+const giftName = ref('')
+const giftPrice = ref('')
+const giftBusy = ref(false)
+
 const rooms = ref<Array<{ id: string; title: string; status: string }>>([])
 const gifts = ref<Array<{ id: string; name: string; price: number; active?: boolean }>>([])
+const reports = ref<
+  Array<{
+    id: string
+    reporter_id: string
+    target_type: string
+    target_id: string
+    reason: string
+    created_at: string
+  }>
+>([])
 const error = ref('')
 const notice = ref('')
 
@@ -64,10 +83,28 @@ async function loadGifts() {
   gifts.value = data.items ?? []
 }
 
+async function loadReports() {
+  if (!accessToken.value) {
+    reports.value = []
+    return
+  }
+  const res = await fetch(apiUrl(apiBase, reportsListPath()), {
+    headers: authHeaders(false),
+  })
+  if (!res.ok) {
+    throw new Error(`reports ${res.status}`)
+  }
+  const data = await res.json()
+  reports.value = data.items ?? []
+}
+
 async function refreshLists() {
   error.value = ''
   try {
-    await Promise.all([loadRooms(), loadGifts()])
+    const tasks: Promise<void>[] = [loadRooms(), loadGifts()]
+    if (isAuthed.value) tasks.push(loadReports())
+    else reports.value = []
+    await Promise.all(tasks)
   } catch (e) {
     error.value = String(e)
   }
@@ -188,6 +225,95 @@ async function banUser() {
   }
 }
 
+async function muteUser() {
+  if (!accessToken.value) {
+    error.value = 'Login required'
+    return
+  }
+  notice.value = ''
+  error.value = ''
+  actionBusy.value = true
+  try {
+    const res = await fetch(apiUrl(apiBase, muteUserPath()), {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        user_id: muteUserIdInput.value.trim(),
+        reason: actionReason.value.trim() || undefined,
+      }),
+    })
+    if (res.status !== 204) {
+      throw new Error(`mute ${res.status}`)
+    }
+    notice.value = `Muted user ${muteUserIdInput.value.trim()}`
+    muteUserIdInput.value = ''
+  } catch (e) {
+    error.value = String(e)
+  } finally {
+    actionBusy.value = false
+  }
+}
+
+async function createGift() {
+  if (!accessToken.value) {
+    error.value = 'Login required'
+    return
+  }
+  const name = giftName.value.trim()
+  const price = Number(giftPrice.value)
+  if (!name || !Number.isFinite(price) || price <= 0) {
+    error.value = 'Gift name and positive price required'
+    return
+  }
+  notice.value = ''
+  error.value = ''
+  giftBusy.value = true
+  try {
+    const res = await fetch(apiUrl(apiBase, adminGiftsPath()), {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ name, price, active: true }),
+    })
+    if (res.status !== 201 && !res.ok) {
+      throw new Error(`create gift ${res.status}`)
+    }
+    notice.value = `Created gift "${name}"`
+    giftName.value = ''
+    giftPrice.value = ''
+    await loadGifts()
+  } catch (e) {
+    error.value = String(e)
+  } finally {
+    giftBusy.value = false
+  }
+}
+
+async function resolveReport(reportId: string) {
+  if (!accessToken.value) {
+    error.value = 'Login required'
+    return
+  }
+  notice.value = ''
+  error.value = ''
+  actionBusy.value = true
+  try {
+    const res = await fetch(apiUrl(apiBase, reportResolvePath()), {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ report_id: reportId }),
+    })
+    if (res.status !== 204 && !res.ok) {
+      throw new Error(`resolve report ${res.status}`)
+    }
+    notice.value = `Resolved report ${reportId}`
+    await loadReports()
+  } catch (e) {
+    error.value = String(e)
+  } finally {
+    actionBusy.value = false
+  }
+}
+
 onMounted(() => {
   void refreshLists()
 })
@@ -280,6 +406,60 @@ onMounted(() => {
           Ban user
         </button>
       </div>
+      <div class="row">
+        <label>
+          Mute user id
+          <input v-model="muteUserIdInput" type="text" class="mono-input" placeholder="uuid" />
+        </label>
+        <button
+          type="button"
+          class="btn danger"
+          :disabled="actionBusy || !muteUserIdInput.trim()"
+          @click="muteUser"
+        >
+          Mute user
+        </button>
+      </div>
+    </section>
+
+    <section class="card" v-if="isAuthed">
+      <div class="section-head">
+        <h2>Reports queue</h2>
+        <button type="button" class="btn ghost" @click="loadReports">Refresh</button>
+      </div>
+      <p class="muted">Source: GET {{ reportsListPath() }}</p>
+      <table v-if="reports.length">
+        <thead>
+          <tr>
+            <th>Target</th>
+            <th>Reason</th>
+            <th>Reporter</th>
+            <th>Created</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="r in reports" :key="r.id">
+            <td>
+              <span class="mono">{{ r.target_type }}:{{ r.target_id }}</span>
+            </td>
+            <td>{{ r.reason }}</td>
+            <td class="mono">{{ r.reporter_id }}</td>
+            <td class="mono">{{ r.created_at }}</td>
+            <td>
+              <button
+                type="button"
+                class="btn primary"
+                :disabled="actionBusy"
+                @click="resolveReport(r.id)"
+              >
+                Resolve
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-else>No open reports.</p>
     </section>
 
     <section class="card">
@@ -290,6 +470,24 @@ onMounted(() => {
       <p class="muted">
         Source: {{ isAuthed ? 'GET /api/v1/admin/gifts' : 'GET /api/v1/gifts' }}
       </p>
+      <div v-if="isAuthed" class="row">
+        <label>
+          Name
+          <input v-model="giftName" type="text" placeholder="Rose" />
+        </label>
+        <label>
+          Price
+          <input v-model="giftPrice" type="number" min="1" step="1" placeholder="10" />
+        </label>
+        <button
+          type="button"
+          class="btn primary"
+          :disabled="giftBusy || !giftName.trim() || !giftPrice"
+          @click="createGift"
+        >
+          Create gift
+        </button>
+      </div>
       <table v-if="gifts.length">
         <thead>
           <tr>

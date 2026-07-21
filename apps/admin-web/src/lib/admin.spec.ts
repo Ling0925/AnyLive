@@ -1,14 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import {
+  adminGiftsPath,
   adminTitle,
   apiUrl,
   banUserPath,
   canAccessModule,
   forceCloseRoomPath,
   giftsListPath,
+  muteUserPath,
   normalizeApiBase,
   otpSendPath,
   otpVerifyPath,
+  reportResolvePath,
+  reportsListPath,
   roomsPath,
   API_PATHS,
 } from './admin'
@@ -51,6 +55,7 @@ describe('api path helpers', () => {
 
   it('exposes admin action paths', () => {
     expect(banUserPath()).toBe('/api/v1/admin/ban')
+    expect(muteUserPath()).toBe('/api/v1/admin/mute')
     expect(forceCloseRoomPath()).toBe('/api/v1/admin/rooms/force-close')
     expect(roomsPath()).toBe('/api/v1/rooms')
   })
@@ -60,5 +65,17 @@ describe('api path helpers', () => {
     expect(giftsListPath(true)).toBe('/api/v1/admin/gifts')
     expect(giftsListPath(true)).toBe(API_PATHS.adminGifts)
     expect(giftsListPath(false)).toBe(API_PATHS.publicGifts)
+  })
+
+  it('exposes admin gifts POST path', () => {
+    expect(adminGiftsPath()).toBe('/api/v1/admin/gifts')
+    expect(adminGiftsPath()).toBe(API_PATHS.adminGifts)
+  })
+
+  it('exposes reports list and resolve paths', () => {
+    expect(reportsListPath()).toBe('/api/v1/admin/reports')
+    expect(reportResolvePath()).toBe('/api/v1/admin/reports/resolve')
+    expect(reportsListPath()).toBe(API_PATHS.adminReports)
+    expect(reportResolvePath()).toBe(API_PATHS.adminReportResolve)
   })
 })
