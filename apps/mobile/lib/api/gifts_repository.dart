@@ -41,10 +41,12 @@ class GiftOrder {
 }
 
 /// Append-only wallet ledger row from `GET /api/v1/wallet/ledger`.
+///
+/// `user_id` is optional — the API ledger DTO omits it (scoped to the auth user).
 class LedgerEntry {
   LedgerEntry({
     required this.id,
-    required this.userId,
+    this.userId,
     required this.amount,
     required this.balanceAfter,
     required this.entryType,
@@ -53,7 +55,7 @@ class LedgerEntry {
   });
 
   final String id;
-  final String userId;
+  final String? userId;
   final int amount;
   final int balanceAfter;
   final String entryType;
@@ -63,7 +65,7 @@ class LedgerEntry {
   factory LedgerEntry.fromJson(Map<String, dynamic> json) {
     return LedgerEntry(
       id: json['id'] as String? ?? '',
-      userId: json['user_id'] as String? ?? '',
+      userId: json['user_id'] as String?,
       amount: json['amount'] as int? ?? 0,
       balanceAfter: json['balance_after'] as int? ?? 0,
       entryType: json['entry_type'] as String? ?? '',

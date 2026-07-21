@@ -63,7 +63,7 @@ void main() {
       expect(order.replayed, isFalse);
     });
 
-    test('listLedger parses items', () async {
+    test('listLedger parses items with optional user_id', () async {
       final mock = MockClient((request) async {
         expect(request.url.path, '/api/v1/wallet/ledger');
         expect(request.headers['Authorization'], 'Bearer t');
@@ -79,6 +79,15 @@ void main() {
                 'reference': 'mock-topup',
                 'created_at': '2026-01-01T00:00:00Z',
               },
+              {
+                // API LedgerEntryDto omits user_id (scoped to auth user).
+                'id': 'le2',
+                'amount': -1,
+                'balance_after': 99,
+                'entry_type': 'gift_debit',
+                'reference': 'gift-o1',
+                'created_at': '2026-01-01T00:01:00Z',
+              },
             ]
           }),
           200,
@@ -88,9 +97,15 @@ void main() {
       final api = ApiClient(baseUrl: 'http://x', accessToken: 't');
       final repo = GiftsRepository(client: api, httpClient: mock);
       final entries = await repo.listLedger();
-      expect(entries.single.id, 'le1');
-      expect(entries.single.amount, 100);
-      expect(entries.single.entryType, 'topup');
+      expect(entries.length, 2);
+      expect(entries[0].id, 'le1');
+      expect(entries[0].userId, 'u1');
+      expect(entries[0].amount, 100);
+      expect(entries[0].entryType, 'topup');
+      expect(entries[1].id, 'le2');
+      expect(entries[1].userId, isNull);
+      expect(entries[1].amount, -1);
+      expect(entries[1].entryType, 'gift_debit');
     });
   });
 }

@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../../api/api_client.dart';
 import '../../api/gifts_repository.dart';
+import '../../api/reports_repository.dart';
 import '../../api/rooms_repository.dart';
+import '../../api/social_repository.dart';
 import '../../config/app_config.dart';
 
-/// Live room detail: title/status, HLS URL, chat, gifts, wallet.
+/// Live room detail: title/status, HLS URL, chat, gifts, wallet, follow, report.
 class RoomPage extends StatefulWidget {
   const RoomPage({
     super.key,
@@ -14,6 +16,8 @@ class RoomPage extends StatefulWidget {
     required this.room,
     this.roomsRepository,
     this.giftsRepository,
+    this.socialRepository,
+    this.reportsRepository,
   });
 
   final AppConfig config;
@@ -23,6 +27,8 @@ class RoomPage extends StatefulWidget {
   /// Optional injectable repos for tests.
   final RoomsRepository? roomsRepository;
   final GiftsRepository? giftsRepository;
+  final SocialRepository? socialRepository;
+  final ReportsRepository? reportsRepository;
 
   @override
   State<RoomPage> createState() => _RoomPageState();
@@ -31,6 +37,8 @@ class RoomPage extends StatefulWidget {
 class _RoomPageState extends State<RoomPage> {
   late RoomsRepository _rooms;
   late GiftsRepository _gifts;
+  late SocialRepository _social;
+  late ReportsRepository _reports;
   late Room _room;
 
   final _chatController = TextEditingController();
@@ -41,6 +49,14 @@ class _RoomPageState extends State<RoomPage> {
   String? _error;
   bool _loading = true;
   bool _sending = false;
+  bool _followingHost = false;
+  bool _followBusy = false;
+
+  bool get _roomEnded =>
+      !_room.isLive &&
+      (_room.status == 'closed' ||
+          _room.status == 'idle' ||
+          _room.status == 'ended');
 
   @override
   void initState() {
@@ -52,6 +68,8 @@ class _RoomPageState extends State<RoomPage> {
     );
     _rooms = widget.roomsRepository ?? RoomsRepository(client: api);
     _gifts = widget.giftsRepository ?? GiftsRepository(client: api);
+    _social = widget.socialRepository ?? SocialRepository(client: api);
+    _reports = widget.reportsRepository ?? ReportsRepository(client: api);
     _load();
   }
 
@@ -72,8 +90,20 @@ class _RoomPageState extends State<RoomPage> {
       final gifts = await _gifts.listGifts();
       final balance = await _gifts.walletBalance();
 
+      bool following = false;
+      try {
+        final ids = await _social.listFollowing();
+        following = ids.contains(room.ownerId);
+      } catch (_) {
+        // Follow state is best-effort.
+      }
+
       String? hls;
-      if (room.isLive) {
+      final ended = !room.isLive &&
+          (room.status == 'closed' ||
+              room.status == 'idle' ||
+              room.status == 'ended');
+      if (room.isLive && !ended) {
         try {
           final play = await _rooms.playUrls(_room.id);
           hls = play['hls'] as String?;
@@ -89,6 +119,7 @@ class _RoomPageState extends State<RoomPage> {
         _giftsCatalog = gifts;
         _balance = balance;
         _hlsUrl = hls;
+        _followingHost = following;
         _loading = false;
       });
     } catch (e) {
@@ -97,6 +128,60 @@ class _RoomPageState extends State<RoomPage> {
         _error = e.toString();
         _loading = false;
       });
+    }
+  }
+
+  Future<void> _toggleFollow() async {
+    if (_followBusy || _room.ownerId.isEmpty) return;
+    setState(() => _followBusy = true);
+    try {
+      if (_followingHost) {
+        await _social.unfollow(_room.ownerId);
+        if (!mounted) return;
+        setState(() => _followingHost = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unfollowed host')),
+        );
+      } else {
+        await _social.follow(_room.ownerId);
+        if (!mounted) return;
+        setState(() => _followingHost = true);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Following host')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('follow failed: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _followBusy = false);
+    }
+  }
+
+  Future<void> _reportRoom() async {
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (ctx) => const _ReportRoomDialog(),
+    );
+    if (reason == null || reason.isEmpty || !mounted) return;
+
+    try {
+      await _reports.createReport(
+        targetType: 'room',
+        targetId: _room.id,
+        reason: reason,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Report submitted')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('report failed: $e')),
+      );
     }
   }
 
@@ -171,6 +256,15 @@ class _RoomPageState extends State<RoomPage> {
       appBar: AppBar(
         title: Text(_room.title),
         actions: [
+          TextButton(
+            onPressed: _followBusy ? null : _toggleFollow,
+            child: Text(_followingHost ? 'Unfollow' : 'Follow'),
+          ),
+          IconButton(
+            onPressed: _reportRoom,
+            icon: const Icon(Icons.flag_outlined),
+            tooltip: 'Report room',
+          ),
           IconButton(onPressed: _load, icon: const Icon(Icons.refresh)),
         ],
       ),
@@ -181,26 +275,84 @@ class _RoomPageState extends State<RoomPage> {
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    if (_roomEnded)
+                      Material(
+                        color: Theme.of(context).colorScheme.errorContainer,
+                        child: const Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                          child: Text('Room ended'),
+                        ),
+                      ),
                     _RoomHeader(
                       room: _room,
-                      hlsUrl: _hlsUrl,
+                      hlsUrl: _roomEnded ? null : _hlsUrl,
                       balance: _balance,
                       onTopup: _topup,
+                      roomEnded: _roomEnded,
                     ),
                     const Divider(height: 1),
                     Expanded(child: _ChatList(messages: _messages)),
                     _GiftBar(
                       gifts: _giftsCatalog,
                       onSend: _sendGift,
-                      enabled: !_sending,
+                      enabled: !_sending && !_roomEnded,
                     ),
                     _ChatInput(
                       controller: _chatController,
                       onSend: _sendChat,
-                      enabled: !_sending,
+                      enabled: !_sending && !_roomEnded,
                     ),
                   ],
                 ),
+    );
+  }
+}
+
+/// Owns its [TextEditingController] so dispose is tied to dialog lifecycle
+/// (avoids use-after-dispose while the route animates closed).
+class _ReportRoomDialog extends StatefulWidget {
+  const _ReportRoomDialog();
+
+  @override
+  State<_ReportRoomDialog> createState() => _ReportRoomDialogState();
+}
+
+class _ReportRoomDialogState extends State<_ReportRoomDialog> {
+  final _reasonController = TextEditingController();
+
+  @override
+  void dispose() {
+    _reasonController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Report room'),
+      content: TextField(
+        controller: _reasonController,
+        decoration: const InputDecoration(
+          labelText: 'Reason',
+          border: OutlineInputBorder(),
+        ),
+        maxLines: 3,
+        autofocus: true,
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () =>
+              Navigator.of(context).pop(_reasonController.text.trim()),
+          child: const Text('Submit'),
+        ),
+      ],
     );
   }
 }
@@ -211,12 +363,14 @@ class _RoomHeader extends StatelessWidget {
     required this.hlsUrl,
     required this.balance,
     required this.onTopup,
+    required this.roomEnded,
   });
 
   final Room room;
   final String? hlsUrl;
   final int balance;
   final VoidCallback onTopup;
+  final bool roomEnded;
 
   @override
   Widget build(BuildContext context) {
@@ -238,7 +392,7 @@ class _RoomHeader extends StatelessWidget {
                 avatar: Icon(
                   Icons.circle,
                   size: 10,
-                  color: room.isLive ? Colors.red : Colors.grey,
+                  color: room.isLive && !roomEnded ? Colors.red : Colors.grey,
                 ),
                 label: Text(room.status),
               ),
@@ -246,7 +400,7 @@ class _RoomHeader extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text('Owner: ${room.ownerId}', style: theme.textTheme.bodySmall),
-          if (room.isLive && hlsUrl != null) ...[
+          if (!roomEnded && room.isLive && hlsUrl != null) ...[
             const SizedBox(height: 8),
             Container(
               width: double.infinity,
@@ -274,7 +428,7 @@ class _RoomHeader extends StatelessWidget {
                 ],
               ),
             ),
-          ] else if (room.isLive) ...[
+          ] else if (!roomEnded && room.isLive) ...[
             const SizedBox(height: 8),
             Text(
               'Live — play URL unavailable',

@@ -17,6 +17,8 @@ class FakeProfileRepo extends ProfileRepository {
   ProfileException? loadError;
   ProfileException? saveError;
   String? lastPatchedName;
+  bool? lastAgeConfirmed;
+  bool? lastPrivacyAccepted;
   int getMeCalls = 0;
   int patchMeCalls = 0;
 
@@ -43,6 +45,8 @@ class FakeProfileRepo extends ProfileRepository {
   }) async {
     patchMeCalls++;
     lastPatchedName = displayName;
+    lastAgeConfirmed = ageConfirmed;
+    lastPrivacyAccepted = privacyAccepted;
     if (saveError != null) throw saveError!;
     final base = initial ??
         UserProfile(
@@ -100,13 +104,19 @@ void main() {
     expect(find.text('Edit profile'), findsOneWidget);
     expect(find.text('ada@example.com'), findsOneWidget);
     expect(find.widgetWithText(TextField, 'Ada'), findsOneWidget);
+    expect(find.text('I confirm I am 18 or older'), findsOneWidget);
+    expect(find.text('I accept the privacy policy'), findsOneWidget);
 
     await tester.enterText(find.byType(TextField), 'Patched');
+    await tester.tap(find.text('I confirm I am 18 or older'));
+    await tester.tap(find.text('I accept the privacy policy'));
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
     expect(fake.patchMeCalls, 1);
     expect(fake.lastPatchedName, 'Patched');
+    expect(fake.lastAgeConfirmed, isTrue);
+    expect(fake.lastPrivacyAccepted, isTrue);
     expect(saved, 'Patched');
     expect(find.text('Profile saved'), findsOneWidget);
   });

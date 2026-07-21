@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../config/app_config.dart';
 import '../auth/login_page.dart';
+import '../feed/feed_page.dart';
 import '../profile/profile_page.dart';
 import '../rooms/room_list_page.dart';
 
@@ -80,7 +81,7 @@ class _HomePageState extends State<HomePage> {
                 Text('signed in as $_sessionLabel'),
               ],
               const SizedBox(height: 24),
-              if (loggedIn)
+              if (loggedIn) ...[
                 FilledButton(
                   onPressed: () {
                     Navigator.of(context).push(
@@ -93,8 +94,22 @@ class _HomePageState extends State<HomePage> {
                     );
                   },
                   child: const Text('Browse live rooms'),
-                )
-              else
+                ),
+                const SizedBox(height: 12),
+                FilledButton.tonal(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => FeedPage(
+                          config: widget.config,
+                          accessToken: widget.accessToken!,
+                        ),
+                      ),
+                    );
+                  },
+                  child: const Text('Discover'),
+                ),
+              ] else
                 Text(
                   'Sign in with email OTP (dev code 123456).',
                   style: Theme.of(context).textTheme.bodyMedium,

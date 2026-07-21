@@ -4,7 +4,7 @@ import '../../api/api_client.dart';
 import '../../api/profile_repository.dart';
 import '../../config/app_config.dart';
 
-/// Simple profile editor: load GET /me, save display name via PATCH /me.
+/// Simple profile editor: load GET /me, save display name + age/privacy via PATCH /me.
 class ProfilePage extends StatefulWidget {
   const ProfilePage({
     super.key,
@@ -34,6 +34,8 @@ class _ProfilePageState extends State<ProfilePage> {
   String? _error;
   bool _loading = true;
   bool _saving = false;
+  bool _ageConfirmed = false;
+  bool _privacyAccepted = false;
 
   @override
   void initState() {
@@ -67,6 +69,8 @@ class _ProfilePageState extends State<ProfilePage> {
       setState(() {
         _name.text = me.displayName;
         _email = me.email;
+        _ageConfirmed = me.ageConfirmed;
+        _privacyAccepted = me.privacyAccepted;
         _loading = false;
       });
     } on ProfileException catch (e) {
@@ -95,7 +99,11 @@ class _ProfilePageState extends State<ProfilePage> {
       _error = null;
     });
     try {
-      final updated = await _repo.patchMe(displayName: trimmed);
+      final updated = await _repo.patchMe(
+        displayName: trimmed,
+        ageConfirmed: _ageConfirmed,
+        privacyAccepted: _privacyAccepted,
+      );
       if (!mounted) return;
       widget.onDisplayNameChanged?.call(updated.displayName);
       ScaffoldMessenger.of(context).showSnackBar(
@@ -103,6 +111,8 @@ class _ProfilePageState extends State<ProfilePage> {
       );
       setState(() {
         _name.text = updated.displayName;
+        _ageConfirmed = updated.ageConfirmed;
+        _privacyAccepted = updated.privacyAccepted;
         _saving = false;
       });
     } on ProfileException catch (e) {
@@ -147,6 +157,25 @@ class _ProfilePageState extends State<ProfilePage> {
                       border: OutlineInputBorder(),
                     ),
                     enabled: !_saving,
+                  ),
+                  const SizedBox(height: 8),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('I confirm I am 18 or older'),
+                    value: _ageConfirmed,
+                    onChanged: _saving
+                        ? null
+                        : (v) => setState(() => _ageConfirmed = v ?? false),
+                    controlAffinity: ListTileControlAffinity.leading,
+                  ),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('I accept the privacy policy'),
+                    value: _privacyAccepted,
+                    onChanged: _saving
+                        ? null
+                        : (v) => setState(() => _privacyAccepted = v ?? false),
+                    controlAffinity: ListTileControlAffinity.leading,
                   ),
                   if (_error != null) ...[
                     const SizedBox(height: 12),
