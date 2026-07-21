@@ -2,9 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../../config/app_config.dart';
 import '../auth/login_page.dart';
+import '../profile/profile_page.dart';
 import '../rooms/room_list_page.dart';
 
-class HomePage extends StatelessWidget {
+class HomePage extends StatefulWidget {
   const HomePage({
     super.key,
     required this.config,
@@ -17,18 +18,43 @@ class HomePage extends StatelessWidget {
   final String? accessToken;
 
   @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  late String? _sessionLabel = widget.sessionLabel;
+
+  @override
   Widget build(BuildContext context) {
-    final loggedIn = accessToken != null && accessToken!.isNotEmpty;
+    final loggedIn =
+        widget.accessToken != null && widget.accessToken!.isNotEmpty;
     return Scaffold(
       appBar: AppBar(
         title: const Text('AnyLive'),
         actions: [
-          if (!loggedIn)
+          if (loggedIn)
+            TextButton(
+              onPressed: () async {
+                await Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => ProfilePage(
+                      config: widget.config,
+                      accessToken: widget.accessToken!,
+                      onDisplayNameChanged: (name) {
+                        setState(() => _sessionLabel = name);
+                      },
+                    ),
+                  ),
+                );
+              },
+              child: const Text('Profile'),
+            )
+          else
             TextButton(
               onPressed: () {
                 Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) => LoginPage(config: config),
+                    builder: (_) => LoginPage(config: widget.config),
                   ),
                 );
               },
@@ -47,11 +73,11 @@ class HomePage extends StatelessWidget {
                 style: Theme.of(context).textTheme.headlineMedium,
               ),
               const SizedBox(height: 12),
-              Text('env: ${config.environment}'),
-              Text('api: ${config.normalizedApiBaseUrl}'),
-              if (sessionLabel != null) ...[
+              Text('env: ${widget.config.environment}'),
+              Text('api: ${widget.config.normalizedApiBaseUrl}'),
+              if (_sessionLabel != null) ...[
                 const SizedBox(height: 12),
-                Text('signed in as $sessionLabel'),
+                Text('signed in as $_sessionLabel'),
               ],
               const SizedBox(height: 24),
               if (loggedIn)
@@ -60,8 +86,8 @@ class HomePage extends StatelessWidget {
                     Navigator.of(context).push(
                       MaterialPageRoute(
                         builder: (_) => RoomListPage(
-                          config: config,
-                          accessToken: accessToken!,
+                          config: widget.config,
+                          accessToken: widget.accessToken!,
                         ),
                       ),
                     );
