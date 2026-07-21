@@ -67,6 +67,8 @@ pub fn build_app_with_state(state: Arc<AppState>) -> Router {
             post(routes::follow_user).delete(routes::unfollow_user),
         )
         .route("/api/v1/me/following", get(routes::list_following))
+        .route("/api/v1/feed/following", get(routes::feed_following))
+        .route("/api/v1/feed/hot", get(routes::feed_hot))
         .route("/api/v1/reports", post(routes::create_report))
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
@@ -539,6 +541,55 @@ mod tests {
         let paths = doc.get("paths").unwrap();
         assert!(paths.get("/api/v1/rooms").is_some());
         assert!(paths.get("/api/v1/rooms/{id}/media/play").is_some());
+    }
+
+    #[tokio::test]
+    async fn feed_hot_lists_live_rooms() {
+        let state = AppState::dev();
+        let app = build_app_with_state(state);
+        let token = login(&app, "hot@example.com").await;
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/rooms")
+                    .header("authorization", format!("Bearer {token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"title":"Hot Show"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let room_id = body_json(res).await["id"].as_str().unwrap().to_string();
+        let _ = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/rooms/{room_id}/start"))
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/feed/hot")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let feed = body_json(res).await;
+        assert!(feed["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["id"] == room_id));
     }
 
     #[tokio::test]

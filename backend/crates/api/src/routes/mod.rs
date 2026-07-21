@@ -3,6 +3,7 @@
 pub mod admin;
 pub mod auth;
 pub mod chat;
+pub mod feed;
 pub mod reports;
 pub mod rooms;
 pub mod social;
@@ -12,7 +13,8 @@ pub mod wallet;
 pub use admin::*;
 pub use auth::*;
 pub use chat::*;
-pub use reports::{create_report, CreateReportBody, ReportDto};
+pub use feed::*;
+pub use reports::create_report;
 pub use rooms::*;
 pub use social::*;
 pub use system::*;
