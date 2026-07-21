@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { buildPlayUrl, isLiveStatus } from './lib/player'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { attachHls, buildPlayUrl, isLiveStatus } from './lib/hlsAttach'
 
 const apiBase = import.meta.env.VITE_API_BASE ?? 'http://localhost:8088'
 const roomId = ref('')
@@ -8,8 +8,28 @@ const status = ref('idle')
 const hlsUrl = ref('')
 const error = ref('')
 const loading = ref(false)
+const videoEl = ref<HTMLVideoElement | null>(null)
+let detach: (() => void) | null = null
 
 const canWatch = computed(() => isLiveStatus(status.value) && !!hlsUrl.value)
+
+function teardownPlayer() {
+  detach?.()
+  detach = null
+}
+
+watch([videoEl, hlsUrl], ([el, url]) => {
+  teardownPlayer()
+  if (el && url) {
+    const handle = attachHls(el, url)
+    detach = handle.destroy
+    if (handle.mode === 'unsupported') {
+      error.value = 'HLS not supported in this browser'
+    }
+  }
+})
+
+onBeforeUnmount(() => teardownPlayer())
 
 async function loadRoom() {
   error.value = ''
@@ -50,7 +70,7 @@ async function loadRoom() {
 <template>
   <main class="page">
     <h1>AnyLive Watch</h1>
-    <p class="muted">Public H5 player shell (P1). API: {{ apiBase }}</p>
+    <p class="muted">Public H5 player (hls.js / native). API: {{ apiBase }}</p>
     <div class="row">
       <input v-model="roomId" placeholder="Room UUID" />
       <button :disabled="loading" @click="loadRoom">Load</button>
@@ -58,8 +78,8 @@ async function loadRoom() {
     <p v-if="error" class="err">{{ error }}</p>
     <p v-if="status">status: {{ status }}</p>
     <section v-if="canWatch" class="player">
-      <p>HLS: {{ hlsUrl }}</p>
-      <video controls playsinline :src="hlsUrl" style="width: 100%; max-width: 720px; background: #000" />
+      <p class="mono">{{ hlsUrl }}</p>
+      <video ref="videoEl" controls playsinline style="width: 100%; max-width: 720px; background: #000" />
     </section>
   </main>
 </template>
@@ -88,5 +108,10 @@ button {
 }
 .err {
   color: #b00020;
+}
+.mono {
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  word-break: break-all;
 }
 </style>
