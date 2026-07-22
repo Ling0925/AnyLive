@@ -47,7 +47,9 @@ Scope: [mvp-scope.md](./mvp-scope.md). Status from `git log` + current tree (API
 | Production CORS restriction | Done | `CORS_ALLOWED_ORIGINS` required when `APP_ENV=production` |
 | 1k WS loadtest harness (dry-run) | Done | `scripts/loadtest/ws-1k-baseline.sh` + report stub (full Centrifugo run still operator) |
 | Docker test deploy (API + Admin) | Done | `./scripts/deploy-test.sh` → API `:8088`, Admin `:8090` |
-| Media dogfood smoke automation | Done | `dogfood-media-smoke.sh` + `media_smoke_lib.py` (21 unit tests) |
+| Media dogfood smoke automation | Done | `dogfood-media-smoke.sh` + `media_smoke_lib.py` (22 unit tests) |
+| Local go-live stack (compose + dogfood flags + runbook) | Done | `./scripts/deploy-test.sh` + `docs/runbooks/go-live-local.md`; dogfood env flags in compose |
+| Signed publish stream key → matching HLS play path | Done | `SrsMediaProvider` active stream map; clear on stop / force-close / on_unpublish |
 
 ---
 
@@ -68,14 +70,13 @@ Scope: [mvp-scope.md](./mvp-scope.md). Status from `git log` + current tree (API
 
 ## Remaining for full P1 dogfood exit
 
-1. Live OBS push week on operator machines (stack + smoke + runbook ready: `./scripts/deploy-test.sh`, `docs/runbooks/go-live-local.md`; play URLs track signed stream keys)
+1. Live OBS push week on operator machines (stack + smoke + runbook ready: `./scripts/deploy-test.sh`, `docs/runbooks/go-live-local.md`; play URLs track signed stream keys). Control-plane dogfood is green; multi-client byte-plane still manual.
 2. Real email OTP provider (notifier port exists; wire SMTP/HTTP; dual store + hash done)
-
 3. Flutter media_kit / video_player embed (StreamPreview scaffolding + external copy-URL path shipped)
 4. Full Centrifugo 1k WS run with filled report numbers + device smoke matrix
 5. Full Vben admin modules if required beyond current dark ops shell
 
-Harness for (1): `./scripts/dogfood-media-smoke.sh` + notes in `scripts/dogfood-media.md`.  
+Harness for (1): `docs/runbooks/go-live-local.md`, `./scripts/dogfood-media-smoke.sh`, `scripts/dogfood-media.md`.  
 Harness for (4): `./scripts/loadtest/ws-1k-baseline.sh` (dry-run) and README under `scripts/loadtest/`.
 
 ---
@@ -113,6 +114,11 @@ Harness for (4): `./scripts/loadtest/ws-1k-baseline.sh` (dry-run) and README und
 ## How to run
 
 ```bash
+# Full local go-live stack (API :8088, Admin :8090, SRS, dogfood smokes)
+./scripts/deploy-test.sh
+# Guide: docs/runbooks/go-live-local.md
+# SKIP_DOGFOOD_SMOKE=1 to skip smokes after up
+
 cp .env.example .env
 # docker is optional for memory-mode API dogfood
 docker compose -f deploy/docker-compose.yml up -d   # optional deps (PG/Redis/…)
