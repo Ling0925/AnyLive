@@ -172,6 +172,62 @@ REPORT_STATUS="$(json_get "$HTTP_BODY" "obj['status']")"
 echo "report_id=${REPORT_ID} status=${REPORT_STATUS}"
 
 # ---------------------------------------------------------------------------
+label "Fan pay products + mock order + sandbox-complete"
+# Mock channel is enabled when PAY_CHANNELS=mock / PAY_ENABLE_MOCK=1 /
+# or ALLOW_MOCK_TOPUP=1 with empty PAY_CHANNELS (dogfood default).
+api GET /api/v1/pay/channels
+PAY_CH_COUNT="$(json_get "$HTTP_BODY" "len(obj.get('items') or [])")"
+echo "pay_channels=${PAY_CH_COUNT} body=${HTTP_BODY}"
+api GET /api/v1/pay/products
+PAY_PROD_COUNT="$(json_get "$HTTP_BODY" "len(obj.get('items') or [])")"
+if [[ "$PAY_PROD_COUNT" -lt 1 ]]; then
+  echo "FAIL: expected pay products catalog" >&2
+  exit 1
+fi
+PRODUCT_ID="$(json_get "$HTTP_BODY" "obj['items'][0]['id']")"
+PRODUCT_COINS="$(json_get "$HTTP_BODY" "obj['items'][0]['coins']")"
+echo "product_id=${PRODUCT_ID} coins=${PRODUCT_COINS}"
+# Record balance before pay mint
+api GET /api/v1/wallet "" "$FAN_TOKEN"
+BAL_BEFORE="$(json_get "$HTTP_BODY" "obj['balance']")"
+CLIENT_PAY="dogfood-pay-$(date +%s)-$$"
+api POST /api/v1/pay/orders \
+  "{\"product_id\":\"${PRODUCT_ID}\",\"channel\":\"mock\",\"client_request_id\":\"${CLIENT_PAY}\"}" \
+  "$FAN_TOKEN"
+PAY_ORDER_ID="$(json_get "$HTTP_BODY" "obj['id']")"
+PAY_STATUS="$(json_get "$HTTP_BODY" "obj['status']")"
+echo "pay_order=${PAY_ORDER_ID} status=${PAY_STATUS}"
+api POST "/api/v1/pay/orders/${PAY_ORDER_ID}/sandbox-complete" "" "$FAN_TOKEN"
+PAY_STATUS="$(json_get "$HTTP_BODY" "obj['status']")"
+echo "after sandbox-complete: status=${PAY_STATUS}"
+if [[ "$PAY_STATUS" != "credited" ]]; then
+  echo "FAIL: expected pay order credited, got ${PAY_STATUS}" >&2
+  exit 1
+fi
+api GET /api/v1/wallet "" "$FAN_TOKEN"
+BAL_AFTER="$(json_get "$HTTP_BODY" "obj['balance']")"
+echo "fan balance before=${BAL_BEFORE} after=${BAL_AFTER}"
+# Coins must increase (integer compare)
+python3 -c "import sys; b=int(sys.argv[1]); a=int(sys.argv[2]); c=int(sys.argv[3]);
+assert a >= b + c, (b,a,c)" "$BAL_BEFORE" "$BAL_AFTER" "$PRODUCT_COINS"
+
+# ---------------------------------------------------------------------------
+label "Fan account export payload"
+api GET /api/v1/me/export "" "$FAN_TOKEN"
+EXPORT_VER="$(json_get "$HTTP_BODY" "obj.get('schema_version','')")"
+EXPORT_BAL="$(json_get "$HTTP_BODY" "obj['wallet']['balance']")"
+EXPORT_USER="$(json_get "$HTTP_BODY" "obj['user']['id']")"
+echo "export schema=${EXPORT_VER} user=${EXPORT_USER} wallet_balance=${EXPORT_BAL}"
+if [[ -z "$EXPORT_VER" ]]; then
+  echo "FAIL: export missing schema_version" >&2
+  exit 1
+fi
+if [[ "$EXPORT_USER" != "$FAN_ID" ]]; then
+  echo "FAIL: export user id mismatch" >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
 label "Host stops room; GET room shows non-live"
 api POST "/api/v1/rooms/${ROOM_ID}/stop" "" "$HOST_TOKEN"
 ROOM_STATUS="$(json_get "$HTTP_BODY" "obj['status']")"

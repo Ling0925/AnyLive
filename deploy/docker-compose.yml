@@ -106,6 +106,10 @@ services:
       OTP_NOTIFIER: "${OTP_NOTIFIER:-noop}"
       SRS_PUBLISH_SECRET: "${SRS_PUBLISH_SECRET:-test-srs-publish-secret-change-me}"
       SRS_WEBHOOK_SECRET: "${SRS_WEBHOOK_SECRET:-test-srs-webhook-secret}"
+      PAY_CHANNELS: "${PAY_CHANNELS:-mock}"
+      PAY_ENABLE_MOCK: "${PAY_ENABLE_MOCK:-1}"
+      PAY_MOCK_SECRET: "${PAY_MOCK_SECRET:-test-pay-mock-secret-change-me}"
+      PAY_PUBLIC_BASE_URL: "${PAY_PUBLIC_BASE_URL:-http://localhost:8088}"
     depends_on:
       postgres:
         condition: service_healthy
