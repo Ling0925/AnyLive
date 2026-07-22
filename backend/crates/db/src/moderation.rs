@@ -35,6 +35,56 @@ impl PostgresModeration {
         .await;
     }
 
+    /// Grant admin with audit event. Fails closed on DB errors.
+    pub async fn grant_admin_audited(
+        &self,
+        actor: UserId,
+        target: UserId,
+        detail: impl Into<String>,
+    ) -> Result<(), AppError> {
+        let detail = detail.into();
+        let mut tx = self.pool.begin().await.map_err(map_db)?;
+        sqlx::query(
+            r#"
+            INSERT INTO admin_users (user_id)
+            VALUES ($1)
+            ON CONFLICT (user_id) DO NOTHING
+            "#,
+        )
+        .bind(target.0)
+        .execute(&mut *tx)
+        .await
+        .map_err(map_db)?;
+        push_audit(
+            &mut tx,
+            actor,
+            "grant_admin",
+            target.0.to_string(),
+            detail,
+        )
+        .await?;
+        tx.commit().await.map_err(map_db)?;
+        Ok(())
+    }
+
+    /// Atomic bootstrap: insert only when no admins exist.
+    /// Uses a single statement so concurrent bootstraps cannot both succeed.
+    pub async fn try_bootstrap_admin(&self, user_id: UserId) -> Result<bool, AppError> {
+        let res = sqlx::query(
+            r#"
+            INSERT INTO admin_users (user_id)
+            SELECT $1
+            WHERE (SELECT COUNT(*) FROM admin_users) = 0
+            ON CONFLICT (user_id) DO NOTHING
+            "#,
+        )
+        .bind(user_id.0)
+        .execute(&self.pool)
+        .await
+        .map_err(map_db)?;
+        Ok(res.rows_affected() > 0)
+    }
+
     pub async fn is_admin(&self, user_id: UserId) -> bool {
         match self.try_is_admin(user_id).await {
             Ok(v) => v,
@@ -339,6 +389,30 @@ impl AnyModeration {
         match self {
             Self::Memory(m) => m.grant_admin(user_id).await,
             Self::Postgres(m) => m.grant_admin(user_id).await,
+        }
+    }
+
+    pub async fn grant_admin_audited(
+        &self,
+        actor: UserId,
+        target: UserId,
+        detail: impl Into<String>,
+    ) -> Result<(), AppError> {
+        let detail = detail.into();
+        match self {
+            Self::Memory(m) => {
+                m.grant_admin_audited(actor, target, detail).await;
+                Ok(())
+            }
+            Self::Postgres(m) => m.grant_admin_audited(actor, target, detail).await,
+        }
+    }
+
+    /// Atomic bootstrap grant. Returns true if this call created the first admin.
+    pub async fn try_bootstrap_admin(&self, user_id: UserId) -> Result<bool, AppError> {
+        match self {
+            Self::Memory(m) => Ok(m.try_bootstrap_admin(user_id).await),
+            Self::Postgres(m) => m.try_bootstrap_admin(user_id).await,
         }
     }
 

@@ -44,6 +44,35 @@ impl MemoryModeration {
         self.inner.lock().await.admins.insert(user_id.0);
     }
 
+    /// Grant admin and write an audit event (actor, target, bootstrap vs admin path).
+    pub async fn grant_admin_audited(
+        &self,
+        actor: UserId,
+        target: UserId,
+        detail: impl Into<String>,
+    ) {
+        let mut g = self.inner.lock().await;
+        g.admins.insert(target.0);
+        g.audit.push(AuditEvent {
+            id: Uuid::new_v4(),
+            actor_id: actor,
+            action: "grant_admin".into(),
+            target: target.0.to_string(),
+            detail: detail.into(),
+            created_at: Utc::now(),
+        });
+    }
+
+    /// Atomic bootstrap: insert only when admin set is empty. Returns true if granted.
+    pub async fn try_bootstrap_admin(&self, user_id: UserId) -> bool {
+        let mut g = self.inner.lock().await;
+        if !g.admins.is_empty() {
+            return false;
+        }
+        g.admins.insert(user_id.0);
+        true
+    }
+
     pub async fn is_admin(&self, user_id: UserId) -> bool {
         self.inner.lock().await.admins.contains(&user_id.0)
     }

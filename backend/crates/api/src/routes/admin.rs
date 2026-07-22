@@ -67,8 +67,8 @@ pub struct AuditListResponse {
 /// Bootstrap/grant admin role.
 ///
 /// First-boot only: any authenticated user may grant **themselves** while the
-/// admin set is empty. After that, only existing admins may grant others (or
-/// re-grant themselves). Arbitrary self-promotion is rejected once any admin exists.
+/// admin set is empty (atomic insert). After that, only existing admins may grant
+/// others. Every grant is audited.
 #[utoipa::path(post, path = "/api/v1/admin/grant", tag = "admin", security(("bearerAuth" = [])), request_body = GrantAdminBody, responses((status = 204)))]
 pub async fn grant_admin(
     State(state): State<Arc<AppState>>,
@@ -99,6 +99,25 @@ pub async fn grant_admin(
                 "bootstrap may only grant the caller",
             )));
         }
+        // Atomic check-and-insert so concurrent true-zero bootstraps cannot both win.
+        let granted = state
+            .moderation
+            .try_bootstrap_admin(UserId(target))
+            .await
+            .map_err(ApiError)?;
+        if !granted {
+            return Err(ApiError(anylive_common::AppError::new(
+                anylive_common::ErrorCode::Conflict,
+                "admin bootstrap already claimed",
+            )));
+        }
+        state
+            .moderation
+            .grant_admin_audited(user.user_id, UserId(target), "bootstrap")
+            .await
+            .map_err(ApiError)?;
+        // grant_admin_audited re-inserts (idempotent) + audits.
+        return Ok(StatusCode::NO_CONTENT);
     } else if !caller_is_admin {
         return Err(ApiError(anylive_common::AppError::new(
             anylive_common::ErrorCode::Forbidden,
@@ -106,7 +125,11 @@ pub async fn grant_admin(
         )));
     }
 
-    state.moderation.grant_admin(UserId(target)).await;
+    state
+        .moderation
+        .grant_admin_audited(user.user_id, UserId(target), "admin_grant")
+        .await
+        .map_err(ApiError)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
