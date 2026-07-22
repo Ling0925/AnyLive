@@ -115,7 +115,19 @@ impl MemoryWallet {
         if amount <= 0 {
             return Err(AppError::validation("topup amount must be positive"));
         }
+        let reference = reference.into();
         let mut g = self.inner.lock().await;
+        // Idempotent: same (user_id, reference) returns existing balance snapshot.
+        if let Some(existing) = g.ledger.iter().find(|e| {
+            e.user_id == user_id
+                && e.reference == reference
+                && e.entry_type == LedgerType::Topup
+        }) {
+            return Ok(WalletSnapshot {
+                user_id,
+                balance: *g.balances.get(&user_id.0).unwrap_or(&existing.balance_after),
+            });
+        }
         let bal = g.balances.entry(user_id.0).or_insert(0);
         *bal = bal.checked_add(amount).ok_or_else(|| {
             AppError::new(ErrorCode::WalletConflict, "balance overflow")
@@ -127,7 +139,7 @@ impl MemoryWallet {
             amount,
             balance_after,
             entry_type: LedgerType::Topup,
-            reference: reference.into(),
+            reference,
             created_at: Utc::now(),
         };
         g.ledger.push(entry);
@@ -388,5 +400,18 @@ mod tests {
         assert_eq!(w.balance(a).await, 9);
         assert_eq!(w.balance(b).await, 9);
         assert_eq!(w.balance(recv).await, 2);
+    }
+
+    #[tokio::test]
+    async fn topup_is_idempotent_on_reference() {
+        let w = MemoryWallet::new();
+        let u = UserId::new();
+        let a = w.credit_topup(u, 10, "same-ref").await.unwrap();
+        let b = w.credit_topup(u, 10, "same-ref").await.unwrap();
+        assert_eq!(a.balance, 10);
+        assert_eq!(b.balance, 10);
+        assert_eq!(w.balance(u).await, 10);
+        let c = w.credit_topup(u, 5, "other-ref").await.unwrap();
+        assert_eq!(c.balance, 15);
     }
 }

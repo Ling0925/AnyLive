@@ -80,6 +80,27 @@ impl PostgresWallet {
 
         ensure_balance_row(&mut tx, user_id).await?;
 
+        // Idempotent replay: same (user_id, reference) topup returns existing snapshot.
+        if let Some((balance_after,)) = sqlx::query_as::<_, (i64,)>(
+            r#"
+            SELECT balance_after FROM wallet_ledger
+            WHERE user_id = $1 AND reference = $2 AND entry_type = 'topup'
+            LIMIT 1
+            "#,
+        )
+        .bind(user_id.0)
+        .bind(&reference)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(map_db)?
+        {
+            tx.commit().await.map_err(map_db)?;
+            return Ok(WalletSnapshot {
+                user_id,
+                balance: balance_after,
+            });
+        }
+
         let bal: i64 = sqlx::query_scalar(
             r#"
             SELECT balance FROM wallet_balances WHERE user_id = $1 FOR UPDATE
@@ -105,7 +126,7 @@ impl PostgresWallet {
         .await
         .map_err(map_db)?;
 
-        sqlx::query(
+        let insert = sqlx::query(
             r#"
             INSERT INTO wallet_ledger (user_id, amount, balance_after, entry_type, reference)
             VALUES ($1, $2, $3, $4, $5)
@@ -117,14 +138,40 @@ impl PostgresWallet {
         .bind(ledger_type_str(LedgerType::Topup))
         .bind(&reference)
         .execute(&mut *tx)
-        .await
-        .map_err(map_db)?;
+        .await;
 
-        tx.commit().await.map_err(map_db)?;
-        Ok(WalletSnapshot {
-            user_id,
-            balance: balance_after,
-        })
+        match insert {
+            Ok(_) => {
+                tx.commit().await.map_err(map_db)?;
+                Ok(WalletSnapshot {
+                    user_id,
+                    balance: balance_after,
+                })
+            }
+            Err(sqlx::Error::Database(ref db))
+                if db.constraint() == Some("wallet_ledger_user_id_reference_key") =>
+            {
+                // Concurrent insert of same reference — return existing.
+                tx.rollback().await.map_err(map_db)?;
+                let bal: i64 = sqlx::query_scalar(
+                    r#"
+                    SELECT balance_after FROM wallet_ledger
+                    WHERE user_id = $1 AND reference = $2 AND entry_type = 'topup'
+                    LIMIT 1
+                    "#,
+                )
+                .bind(user_id.0)
+                .bind(&reference)
+                .fetch_one(&self.pool)
+                .await
+                .map_err(map_db)?;
+                Ok(WalletSnapshot {
+                    user_id,
+                    balance: bal,
+                })
+            }
+            Err(e) => Err(map_db(e)),
+        }
     }
 
     pub async fn list_gifts(&self) -> Vec<GiftCatalogItem> {
