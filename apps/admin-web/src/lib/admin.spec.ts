@@ -120,7 +120,7 @@ describe('api path helpers', () => {
   })
 
   it('derives OBS server from push_url and stream_key', () => {
-    const key = 'uuid_exp_sig'
+    const key = '11111111-1111-1111-1111-111111111111?exp=99&sig=abc'
     expect(
       obsServerFromPushUrl(`rtmp://localhost:1935/live/${key}`, key),
     ).toBe('rtmp://localhost:1935/live')
@@ -131,7 +131,7 @@ describe('api path helpers', () => {
   })
 
   it('parses publish response for OBS fields', () => {
-    const key = '11111111-1111-1111-1111-111111111111_99_abc'
+    const key = '11111111-1111-1111-1111-111111111111?exp=99&sig=abc'
     const info = parsePublishInfo({
       push_url: `rtmp://localhost:1935/live/${key}`,
       stream_key: key,

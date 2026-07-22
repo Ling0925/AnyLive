@@ -95,10 +95,10 @@ def parse_play_response(data: Mapping[str, Any], room_id: str) -> str:
 
 
 def assert_stream_key_matches_room(stream_key: str, room_id: str) -> None:
-    """Stream key must be a signed publish token for the room (not a bare UUID).
+    """Stream key must authorize the room (not a bare UUID alone).
 
-    Format: `{room_id}_{exp}_{sig}` issued by the media control plane. Bare
-    room UUIDs are rejected so knowing a room id alone is not enough to push.
+    Format: `{room_id}?exp={unix}&sig={hex}` so RTMP stream name is the room
+    UUID (stable HLS path) while HMAC lives in the query string.
     """
     if not isinstance(stream_key, str) or not stream_key.strip():
         raise MediaSmokeError("stream_key must be a non-empty string")
@@ -108,18 +108,20 @@ def assert_stream_key_matches_room(stream_key: str, room_id: str) -> None:
     rid = room_id.strip()
     if sk == rid:
         raise MediaSmokeError(
-            f"stream_key must be a signed token, not bare room_id {rid!r}"
+            f"stream_key must include exp+sig query, not bare room_id {rid!r}"
         )
-    if not sk.startswith(f"{rid}_"):
-        raise MediaSmokeError(
-            f"stream_key {sk!r} does not start with room_id {rid!r}_"
-        )
-    # room_id_exp_sig — at least two separators after the room uuid.
-    rest = sk[len(rid) + 1 :]
-    if "_" not in rest or not rest.split("_", 1)[0].isdigit():
-        raise MediaSmokeError(
-            f"stream_key {sk!r} is not room_exp_sig form for room_id {rid!r}"
-        )
+    # Preferred: uuid?exp=&sig=
+    if sk.startswith(f"{rid}?") and "exp=" in sk and "sig=" in sk:
+        return
+    # Legacy underscore form room_exp_sig
+    if sk.startswith(f"{rid}_") and sk.count("_") >= 2:
+        rest = sk[len(rid) + 1 :]
+        if rest.split("_", 1)[0].isdigit():
+            return
+    raise MediaSmokeError(
+        f"stream_key {sk!r} is not a signed token for room_id {rid!r}"
+    )
+
 
 
 def srs_http_ok_url(base: str) -> str:

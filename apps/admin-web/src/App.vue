@@ -970,7 +970,7 @@ onMounted(() => {
                 复制串流密钥
               </button>
               <p class="dim" style="margin-top: 0.5rem; font-size: 0.8rem">
-                格式为签名 key（room_exp_sig），不要填裸 UUID。
+                格式为 房间ID?exp=…&sig=…（查询串签名），OBS 串流密钥整段粘贴即可。
               </p>
             </div>
             <div class="action-card">

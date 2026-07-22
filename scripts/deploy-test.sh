@@ -56,7 +56,7 @@ echo "OBS 开播（主播调用 media/publish 之后）："
 echo "  服务:       自定义…"
 echo "  服务器:     rtmp://localhost:1935/live"
 echo "  串流密钥:   POST /api/v1/rooms/{id}/media/publish 返回的签名 token"
-echo "              （格式 room_id_exp_sig — 不是裸房间 UUID）"
+echo "              （格式 roomId?exp=&sig= — 不是裸房间 UUID）"
 echo "  观看 HLS:   GET /api/v1/rooms/{id}/media/play  或 H5 ?room={id}"
 echo "  完整手册:   docs/runbooks/go-live-local.md"
 echo

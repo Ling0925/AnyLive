@@ -24,10 +24,10 @@ cargo run -p anylive-api   # :8088，OTP 123456
 1. OTP 登录为主播  
 2. `POST /api/v1/rooms` → `POST /api/v1/rooms/{id}/start`  
 3. `POST /api/v1/rooms/{id}/media/publish` → 复制：  
-   - `push_url` — 完整 RTMP 地址（含流名）  
-   - `stream_key` — **签名令牌** `{room_id}_{exp}_{sig}`（**不是**裸房间 UUID）  
+   - `push_url` — 完整 RTMP 地址（含流名 + 查询串）  
+   - `stream_key` — **签名令牌** `{room_id}?exp={unix}&sig={hex}`（**不是**裸房间 UUID）  
 
-裸房间 UUID 会被 `on_publish` 拒绝。API 会记住已签发的 key，使 play 地址与 SRS 写出的 HLS/FLV 流名一致。
+裸房间 UUID 会被 `on_publish` 拒绝。RTMP stream name 是裸 UUID（稳定 HLS），HMAC 在 query 里。
 
 ## 3. OBS 自定义 RTMP
 
@@ -35,9 +35,9 @@ cargo run -p anylive-api   # :8088，OTP 123456
 |---|---|
 | 服务 | 自定义… |
 | 服务器 | `rtmp://localhost:1935/live`（或从 `push_url` 去掉流名后的 host/app） |
-| 串流密钥 | media/publish 返回的 **完整** `stream_key`（`{room}_{exp}_{sig}`） |
+| 串流密钥 | media/publish 返回的 **完整** `stream_key`（`{room}?exp=&sig=`） |
 
-在 OBS 中开始推流。流名必须等于完整的签名 `stream_key`。
+在 OBS 中开始推流。串流密钥整段粘贴（含 `?exp=&sig=`）。
 
 ## 4. 播放 HLS（H5 或 Flutter）
 
@@ -45,11 +45,11 @@ cargo run -p anylive-api   # :8088，OTP 123456
 
 ```http
 GET /api/v1/rooms/{id}/media/play
-→ { "hls": "http://localhost:8080/live/{stream_key}.m3u8", "flv": "..." }
+→ { "hls": "http://localhost:8080/live/{room_id}.m3u8", "flv": "..." }
 ```
 
-在 publish 凭证有效期间，HLS/FLV 使用与 OBS 相同的 **签名流名**（SRS 写出 `{stream_key}.m3u8`）。  
-房间 stop / unpublish / 强关后会清除映射，play 回退到裸房间 id。
+HLS/FLV 始终使用 **裸房间 id** 作为 stream name（与 SRS 默认 HLS 模板一致）。  
+签名只用于推流鉴权，不进播放路径。
 
 - **H5**：用房间 id 打开观看页；`hls.js`（或原生 HLS）拉流。  
 - **Flutter**：房间页目前以控制面为主 — 复制 HLS 到外部播放器，或 Safari/VLC，直至接入 media_kit。
@@ -62,7 +62,7 @@ OBS 停止时，SRS 应回调 API（回调地址指向 API 主机）：
 - `POST /api/v1/webhooks/srs/on_publish` → 可选准入/审计（必须签名 key）  
 
 本地 `deploy/srs/srs.conf` 启用了 `http_hooks` →  
-`http://host.docker.internal:8088/api/v1/webhooks/srs/on_publish|on_unpublish`。  
+`http://host.docker.internal:8088/api/v1/webhooks/srs/on_publish|on_unpublish?secret=...`。  
 Linux Docker 若无该主机别名，请改 conf 或为 `srs` 服务加  
 `extra_hosts: ["host.docker.internal:host-gateway"]`。  
 若回调打不到 API，请用 `POST .../stop` 或管理端强关房间。
@@ -91,5 +91,5 @@ Linux Docker 若无该主机别名，请改 conf 或为 `srs` 服务加
 | `SRS_API_BASE` | `http://127.0.0.1:1985` | 可选 SRS HTTP API |
 | `SKIP_SRS` | `0` | 设为 `1` 跳过 SRS 探测 |
 
-`dogfood-media-smoke` **不会** 推 RTMP，也 **不会** 等待 HLS 分片 — 它检查 publish/play 响应是否一致（签名 `stream_key` 形态、HLS 路径含 stream key/房间 id、从 `push_url` 推导 OBS Server）。  
+`dogfood-media-smoke` **不会** 推 RTMP，也 **不会** 等待 HLS 分片 — 它检查 publish/play 响应是否一致（签名 `stream_key` 形态 `room?exp=&sig=`、HLS 路径含房间 id、从 `push_url` 推导 OBS Server）。  
 字节面验证仍靠 OBS → SRS → 播放器。  

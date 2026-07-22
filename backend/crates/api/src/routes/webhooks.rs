@@ -1,9 +1,10 @@
 //! SRS HTTP hooks: on_publish / on_unpublish.
 //!
 //! When `SRS_WEBHOOK_SECRET` is set, requests must present the same value via
-//! header `X-AnyLive-Webhook-Secret` only (query `?secret=` is rejected to avoid
-//! access-log leakage). Production should always set the secret; local dogfood
-//! may leave it empty (open hooks).
+//! header `X-AnyLive-Webhook-Secret` **or** query `?secret=` (SRS http_hooks
+//! cannot set custom headers, so query is required for real OBS→SRS→API).
+//! Prefer header when the caller can set it. Production should always set the
+//! secret; local dogfood may leave it empty (open hooks).
 //!
 //! Publish stream names must be signed HMAC tokens issued by media publish —
 //! bare room UUIDs are rejected.
@@ -54,24 +55,19 @@ pub struct WebhookQuery {
 /// Production startup requires a non-empty secret via
 /// [`crate::guards::check_srs_webhook_for_production`].
 ///
-/// Only the header is accepted — query secrets are rejected when a secret is
-/// configured (prevents log/referrer leakage).
+/// Accepts either:
+/// - header `X-AnyLive-Webhook-Secret` (preferred for non-SRS callers), or
+/// - query `?secret=` (required for stock SRS `http_hooks`, which cannot set headers).
 pub fn check_webhook_secret(headers: &HeaderMap, query: &WebhookQuery) -> Result<(), ApiError> {
     let expected = match std::env::var("SRS_WEBHOOK_SECRET") {
         Ok(s) if !s.is_empty() => s,
         _ => return Ok(()), // open in local when unset
     };
-    // Reject query-based secrets when a secret is configured (log leak vector).
-    if query.secret.is_some() {
-        return Err(ApiError(anylive_common::AppError::new(
-            anylive_common::ErrorCode::Forbidden,
-            "webhook secret must be sent via X-AnyLive-Webhook-Secret header",
-        )));
-    }
     let header = headers
         .get("x-anylive-webhook-secret")
         .and_then(|v| v.to_str().ok());
-    match header {
+    let provided = header.or(query.secret.as_deref());
+    match provided {
         Some(got) if constant_time_eq(got, &expected) => Ok(()),
         _ => Err(ApiError(anylive_common::AppError::new(
             anylive_common::ErrorCode::Forbidden,
@@ -95,12 +91,21 @@ pub async fn srs_on_publish(
     Json(body): Json<SrsPublishHook>,
 ) -> Result<(StatusCode, Json<SrsHookResponse>), ApiError> {
     check_webhook_secret(&headers, &query)?;
-    // Strict signed stream key validation (bare UUID rejected).
-    let room_id = match state.media.validate_publish_stream(&body.stream) {
+    // Strict signed stream validation: stream name = room UUID, auth in param or stream query.
+    let room_id = match state
+        .media
+        .validate_publish_stream_with_param(&body.stream, &body.param)
+    {
         Ok(id) => id,
         Err(e) => {
-            tracing::warn!(stream = %body.stream, error = %e, "srs on_publish denied: bad stream key");
-            return Ok((StatusCode::OK, Json(SrsHookResponse { code: 1 })));
+            // Also accept full OBS key in `stream` field alone.
+            match state.media.validate_publish_stream(&body.stream) {
+                Ok(id) => id,
+                Err(_) => {
+                    tracing::warn!(stream = %body.stream, param = %body.param, error = %e, "srs on_publish denied: bad stream key");
+                    return Ok((StatusCode::OK, Json(SrsHookResponse { code: 1 })));
+                }
+            }
         }
     };
     match state.rooms.get(room_id).await {
@@ -134,11 +139,17 @@ pub async fn srs_on_unpublish(
     Json(body): Json<SrsPublishHook>,
 ) -> Result<(StatusCode, Json<SrsHookResponse>), ApiError> {
     check_webhook_secret(&headers, &query)?;
-    // Unpublish accepts signed keys or bare room id (best-effort stop).
+    // Unpublish accepts signed keys (stream+param or combined) or bare room id.
     let room_id = state
         .media
-        .validate_publish_stream(&body.stream)
+        .validate_publish_stream_with_param(&body.stream, &body.param)
         .ok()
+        .or_else(|| {
+            state
+                .media
+                .validate_publish_stream(&body.stream)
+                .ok()
+        })
         .or_else(|| parse_room_from_stream(&body.stream));
     if let Some(room_id) = room_id {
         if let Ok(room) = state.rooms.get(room_id).await {
@@ -215,12 +226,24 @@ mod tests {
     }
 
     #[test]
-    fn webhook_secret_rejects_query() {
+    fn webhook_secret_accepts_query() {
         let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("SRS_WEBHOOK_SECRET", "s3cret");
         let headers = HeaderMap::new();
         let q = WebhookQuery {
             secret: Some("s3cret".into()),
+        };
+        assert!(check_webhook_secret(&headers, &q).is_ok());
+        std::env::remove_var("SRS_WEBHOOK_SECRET");
+    }
+
+    #[test]
+    fn webhook_secret_rejects_wrong_query() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("SRS_WEBHOOK_SECRET", "s3cret");
+        let headers = HeaderMap::new();
+        let q = WebhookQuery {
+            secret: Some("wrong".into()),
         };
         assert!(check_webhook_secret(&headers, &q).is_err());
         std::env::remove_var("SRS_WEBHOOK_SECRET");

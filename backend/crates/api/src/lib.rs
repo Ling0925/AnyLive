@@ -627,8 +627,12 @@ mod tests {
         let pub_info = body_json(res).await;
         let stream_key = pub_info["stream_key"].as_str().unwrap();
         assert!(
-            stream_key.starts_with(&format!("{room_id}_")),
-            "stream_key should be signed room_exp_sig, got {stream_key}"
+            stream_key.starts_with(&format!("{room_id}?")),
+            "stream_key should be signed room?exp=&sig=, got {stream_key}"
+        );
+        assert!(
+            stream_key.contains("exp=") && stream_key.contains("sig="),
+            "stream_key must embed exp+sig query, got {stream_key}"
         );
         assert_ne!(stream_key, room_id, "stream_key must not be bare room uuid");
         assert!(pub_info["push_url"].as_str().unwrap().contains(&room_id));

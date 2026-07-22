@@ -72,8 +72,8 @@ docker compose -f deploy/docker-compose.yml --profile app down
 
 | 字段 | 用途 |
 |---|---|
-| `push_url` | 完整 RTMP 地址（含流名） |
-| `stream_key` | **签名密钥** `{room_id}_{exp}_{sig}` — **不是**裸房间 UUID |
+| `push_url` | 完整 RTMP 地址（含流名 + 查询串） |
+| `stream_key` | **签名密钥** `{room_id}?exp={unix}&sig={hex}` — **不是**裸房间 UUID |
 | `expires_at` | 密钥过期时间；过期后重新调 publish |
 
 也可跑 `./scripts/dogfood-api-smoke.sh` 或 Flutter 开播流程，从输出/对话框复制。
@@ -84,26 +84,25 @@ docker compose -f deploy/docker-compose.yml --profile app down
 |---|---|
 | 服务 | 自定义… |
 | 服务器 | `rtmp://localhost:1935/live` |
-| 串流密钥 | media/publish 返回的 **完整** `stream_key`（签名串） |
+| 串流密钥 | media/publish 返回的 **完整** `stream_key`（含 `?exp=&sig=`） |
 
-用裸房间 UUID 当串流密钥会被 API 的 `on_publish` 校验 **拒绝**（`validate_publish_stream`）。SRS 回调：
+用裸房间 UUID 当串流密钥会被 API 的 `on_publish` 校验 **拒绝**。SRS 会把 stream 拆成裸 UUID + query 参数回调 API：
 
-- `on_publish` / `on_unpublish` → `http://host.docker.internal:8088/api/v1/webhooks/srs/...`
-- 回调会校验签名流名，以及（若配置）`SRS_WEBHOOK_SECRET`
+- `on_publish` / `on_unpublish` → `http://host.docker.internal:8088/api/v1/webhooks/srs/...?secret=...`
+- 回调校验 HMAC，以及（若配置）`SRS_WEBHOOK_SECRET`
 
 详见 `deploy/srs/srs.conf` 与 `scripts/dogfood-media.md`。
 
 ## 5. 观看 HLS
 
-主播调用过 media/publish 之后，公开播放接口：
+主播开播后，公开播放接口：
 
 ```http
 GET /api/v1/rooms/{id}/media/play
-→ { "hls": "http://localhost:8080/live/{stream_key}.m3u8", "flv": "..." }
+→ { "hls": "http://localhost:8080/live/{room_id}.m3u8", "flv": "..." }
 ```
 
-播放路径使用 **当前签发的签名 stream key**，与 OBS 推到 SRS 的流名一致。观众只需 HLS 地址，不需要 RTMP 密钥。  
-若从未 publish，会回退到裸 `{room_id}.m3u8`。
+播放路径始终是 **裸房间 UUID**（与 RTMP stream name 一致；签名只在推流 query 里）。观众只需 HLS 地址，不需要 RTMP 密钥。
 
 | 观众端 | 方式 |
 |---|---|

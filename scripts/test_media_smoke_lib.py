@@ -22,7 +22,7 @@ from media_smoke_lib import (  # noqa: E402
 ROOM = "11111111-1111-1111-1111-111111111111"
 
 
-SIGNED_KEY = f"{ROOM}_9999999999_deadbeefcafef00d"
+SIGNED_KEY = f"{ROOM}?exp=9999999999&sig=deadbeefcafef00d"
 
 
 class TestObsServerFromPushUrl(unittest.TestCase):
