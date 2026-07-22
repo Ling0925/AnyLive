@@ -2,10 +2,10 @@
 
 use std::sync::Arc;
 
-use anylive_auth::{AuthService, InMemoryOtpStore, JwtConfig, JwtService, OtpConfig, OtpService};
+use anylive_auth::{AuthService, JwtConfig, JwtService, OtpConfig, OtpService};
 use anylive_db::{
-    postgres_enabled, AnyChat, AnyDeletedUsers, AnyModeration, AnyProfileExtras, AnyRefreshStore,
-    AnyReports, AnySocial, AnyUserStore, AnyWallet, PgPool,
+    postgres_enabled, AnyChat, AnyDeletedUsers, AnyModeration, AnyOtpStore, AnyProfileExtras,
+    AnyRefreshStore, AnyReports, AnySocial, AnyUserStore, AnyWallet, PgPool,
 };
 use anylive_media::SrsMediaProvider;
 use anylive_realtime::{
@@ -16,9 +16,8 @@ use anylive_realtime::{
 use crate::guards::{check_production_secrets, is_production_env};
 use crate::rooms::AnyRoomStore;
 
-/// Auth service with pluggable user + refresh stores (memory default, Postgres when enabled).
-/// OTP stays in-memory for P1 (short TTL; process-local is acceptable).
-pub type AppAuthService = AuthService<AnyUserStore, InMemoryOtpStore, AnyRefreshStore>;
+/// Auth service with pluggable user + OTP + refresh stores (memory default, Postgres when enabled).
+pub type AppAuthService = AuthService<AnyUserStore, AnyOtpStore, AnyRefreshStore>;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -82,7 +81,7 @@ impl AppState {
     /// Unchanged for integration tests and offline development — always memory stores.
     pub fn dev() -> Arc<Self> {
         let jwt = JwtService::new(JwtConfig::from_env());
-        let otp = OtpService::new(InMemoryOtpStore::default(), OtpConfig::dev());
+        let otp = OtpService::new(AnyOtpStore::memory(), OtpConfig::dev());
         let auth = AuthService::new(AnyUserStore::memory(), otp, AnyRefreshStore::memory(), jwt);
         Arc::new(Self::new(
             auth,
@@ -116,7 +115,7 @@ impl AppState {
     /// - `APP_ENV` — `production` / `prod` enables fail-closed secret checks
     /// - `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` via [`JwtConfig::from_env`]
     /// - `CENTRIFUGO_TOKEN_SECRET` via [`CentrifugoConfig::default`]
-    /// - OTP: fixed/dev OTP only when **not** production (OTP store stays in-memory for P1)
+    /// - OTP: fixed/dev OTP only when **not** production; store is dual memory/Postgres
     /// - `USE_POSTGRES=1` + `DATABASE_URL` — optional Postgres dual stores + migrations
     ///
     /// Realtime routes are always mounted, so Centrifugo secret is always guarded
@@ -144,8 +143,6 @@ impl AppState {
         )?;
 
         let jwt = JwtService::new(jwt_cfg);
-        // OTP remains process-local for P1 (short TTL; dual store deferred).
-        let otp = OtpService::new(InMemoryOtpStore::default(), otp_cfg);
 
         let (
             users,
@@ -158,6 +155,7 @@ impl AppState {
             profile_extras,
             deleted_users,
             refresh,
+            otp_store,
             db,
         ) = if postgres_enabled() {
             let pool = anylive_db::connect_and_migrate_from_env()
@@ -166,7 +164,7 @@ impl AppState {
             tracing::info!(
                 "postgres enabled: migrations applied; using Postgres dual stores for \
                  users/rooms/wallet/social/moderation/reports/chat/profile_extras/\
-                 deleted_users/refresh (OTP remains in-memory for P1)"
+                 deleted_users/refresh/otp"
             );
             (
                 AnyUserStore::postgres(pool.clone()),
@@ -179,6 +177,7 @@ impl AppState {
                 AnyProfileExtras::postgres(pool.clone()),
                 AnyDeletedUsers::postgres(pool.clone()),
                 AnyRefreshStore::postgres(pool.clone()),
+                AnyOtpStore::postgres(pool.clone()),
                 Some(pool),
             )
         } else {
@@ -201,10 +200,12 @@ impl AppState {
                 AnyProfileExtras::memory(),
                 AnyDeletedUsers::memory(),
                 AnyRefreshStore::memory(),
+                AnyOtpStore::memory(),
                 None,
             )
         };
 
+        let otp = OtpService::new(otp_store, otp_cfg);
         let auth = AuthService::new(users, otp, refresh, jwt);
 
         let state = Arc::new(Self::new(

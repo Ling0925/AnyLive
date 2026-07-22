@@ -1,7 +1,7 @@
 //! Refresh-token dual store (`refresh_tokens` from `004_auth_sessions.sql`).
 //!
 //! Implements [`RefreshStore`] so `AuthService` can persist sessions when Postgres
-//! is enabled. OTP remains in-memory for P1 (short TTL, process-local is acceptable).
+//! is enabled. OTP challenges use a separate dual store (`AnyOtpStore`).
 
 use anylive_auth::{InMemoryRefreshStore, RefreshStore};
 use anylive_common::{AppError, ErrorCode};

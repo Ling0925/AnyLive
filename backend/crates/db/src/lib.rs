@@ -11,13 +11,13 @@
 //! ```
 //!
 //! When enabled, API [`AppState::from_env`] wires Postgres dual stores for
-//! users/rooms/wallet/social/moderation/reports/chat/profile_extras/deleted_users/refresh.
-//! OTP stays in-memory for P1. Default (no env) keeps in-memory stores so
-//! `cargo test --workspace` needs no live PG.
+//! users/rooms/wallet/social/moderation/reports/chat/profile_extras/deleted_users/refresh/otp.
+//! Default (no env) keeps in-memory stores so `cargo test --workspace` needs no live PG.
 
 mod chat;
 mod deleted_users;
 mod moderation;
+mod otp;
 mod pool;
 mod profile;
 mod refresh;
@@ -30,6 +30,7 @@ mod wallet;
 pub use chat::{validate_chat_body, AnyChat, PostgresChat};
 pub use deleted_users::{AnyDeletedUsers, MemoryDeletedUsers, PostgresDeletedUsers};
 pub use moderation::{AnyModeration, PostgresModeration};
+pub use otp::{AnyOtpStore, PostgresOtpStore};
 pub use pool::{
     connect, connect_and_migrate_from_env, migrate, migrations_dir, ping, postgres_enabled,
     DbError, PgPool,
@@ -53,6 +54,7 @@ pub const MIGRATION_FILES: &[&str] = &[
     "002_reports_mute.sql",
     "003_profile_extras.sql",
     "004_auth_sessions.sql",
+    "005_otp_challenges.sql",
 ];
 
 /// Validate that a SQL identifier is safe for use in limited admin tooling.
@@ -69,7 +71,7 @@ pub fn is_safe_ident(name: &str) -> bool {
             .unwrap_or(false)
 }
 
-/// Tables created by 001–004 migrations (smoke assertions without a live DB).
+/// Tables created by 001–005 migrations (smoke assertions without a live DB).
 pub fn expected_tables() -> &'static [&'static str] {
     &[
         "users",
@@ -88,6 +90,7 @@ pub fn expected_tables() -> &'static [&'static str] {
         "profile_extras",
         "deleted_users",
         "refresh_tokens",
+        "otp_challenges",
     ]
 }
 
@@ -105,6 +108,7 @@ mod tests {
                 "002_reports_mute.sql",
                 "003_profile_extras.sql",
                 "004_auth_sessions.sql",
+                "005_otp_challenges.sql",
             ]
         );
     }
@@ -120,6 +124,7 @@ mod tests {
         assert!(tables.contains(&"profile_extras"));
         assert!(tables.contains(&"deleted_users"));
         assert!(tables.contains(&"refresh_tokens"));
+        assert!(tables.contains(&"otp_challenges"));
     }
 
     #[test]
@@ -193,6 +198,22 @@ mod tests {
         assert!(sql.contains("CREATE TABLE IF NOT EXISTS deleted_users"));
         assert!(sql.contains("CREATE TABLE IF NOT EXISTS refresh_tokens"));
         assert!(sql.contains("idx_refresh_tokens_user"));
+    }
+
+    #[test]
+    fn otp_challenges_migration_file_exists() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../migrations/005_otp_challenges.sql");
+        assert!(
+            path.exists(),
+            "expected migration at {}",
+            path.display()
+        );
+        let sql = std::fs::read_to_string(&path).unwrap();
+        assert!(sql.contains("CREATE TABLE IF NOT EXISTS otp_challenges"));
+        assert!(sql.contains("email TEXT PRIMARY KEY"));
+        assert!(sql.contains("expires_at TIMESTAMPTZ NOT NULL"));
+        assert!(sql.contains("attempts INT NOT NULL DEFAULT 0"));
     }
 
     #[test]
