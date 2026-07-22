@@ -16,6 +16,7 @@ API memory mode does **not** need the full compose stack — only SRS for actual
 ```bash
 cargo run -p anylive-api   # :8088, OTP 123456
 # or: ./scripts/dogfood-api-smoke.sh   # prints push_url / stream_key / hls
+# or: ./scripts/dogfood-media-smoke.sh # health + publish/play consistency + optional SRS
 ```
 
 Host flow:
@@ -64,5 +65,27 @@ If hooks cannot reach the API, stop the room with `POST .../stop` or admin force
 ## Smoke order
 
 1. `cargo run -p anylive-api`
-2. `./scripts/dogfood-api-smoke.sh` (control plane)
-3. Compose up `srs` + OBS publish + H5/Flutter play (media plane)
+2. `./scripts/dogfood-api-smoke.sh` (full control plane: auth, gifts, chat, feed)
+3. `./scripts/dogfood-media-smoke.sh` (media-focused: `/health`, optional SRS `:1985`, OTP → room → publish/play consistency)
+4. Compose up `srs` + OBS publish + H5/Flutter play (media plane bytes)
+
+### Media smoke details
+
+| Piece | Path |
+|---|---|
+| Pure helpers (parse publish/play, stream_key == room_id, SRS probe URL) | `scripts/media_smoke_lib.py` |
+| Unit tests | `python3 -m unittest scripts/test_media_smoke_lib.py` |
+| Live smoke script | `./scripts/dogfood-media-smoke.sh` |
+
+Env:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `API_BASE` | `http://localhost:8088` | Control-plane API |
+| `OTP_CODE` | `123456` | Dev OTP (same as dogfood-api-smoke) |
+| `SRS_API_BASE` | `http://127.0.0.1:1985` | Optional SRS HTTP API |
+| `SKIP_SRS` | `0` | Set `1` to skip the SRS probe |
+
+`dogfood-media-smoke` does **not** push RTMP or wait for HLS segments — it checks that
+publish/play responses are consistent (`stream_key == room_id`, HLS path contains the room id,
+OBS server derived from `push_url`). Byte-plane verification is still OBS → SRS → player.
