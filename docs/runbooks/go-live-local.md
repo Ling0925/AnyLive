@@ -1,5 +1,7 @@
 # 本地开播（Dogfood 测试栈）
 
+> Stage / 生产上线清单见 [go-live-stage.md](./go-live-stage.md)。
+
 端到端：主播推流 → SRS → HLS 观看。基于 Docker 测试栈。
 
 ## 1. 启动全栈
@@ -19,6 +21,7 @@ API 服务已注入 dogfood 开关（与 `deploy/.env.test` 一致）：
 | `OTP_NOTIFIER` | `noop` | 不发真实邮件/短信 |
 | `SRS_PUBLISH_SECRET` | 测试值 | 推流 stream key 的 HMAC 密钥 |
 | `SRS_WEBHOOK_SECRET` | 测试值 | SRS 回调鉴权（请求头） |
+| `PAY_CHANNELS` / `PAY_MOCK_SECRET` | mock / 测试值 | Mock 充值通道 + sandbox-complete |
 
 启动成功后会打印 OBS 说明，并自动跑：
 

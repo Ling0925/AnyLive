@@ -18,6 +18,8 @@
 | [海外合规与上架闸门](../compliance/海外合规与上架闸门.md) | App Store/Play、GDPR、支付、审核策略钩子 | 产品 / 法务对接 |
 | [架构总览](../architecture/overview.md) | 平面划分、硬约束、阶段映射 | 全员 |
 | [支付通道接入设计](../architecture/payment-channels.md) | PayProvider、Jeepay/易支付/TokenPay、订单与 webhook | 后端 / 客户端 |
+| [本地开播 Runbook](../runbooks/go-live-local.md) | Dogfood 测试栈开播 | 全员 |
+| [Stage/生产 Runbook](../runbooks/go-live-stage.md) | 生产禁止项、环境变量、发布清单 | SRE / TL |
 
 ## 一页纸（English）
 

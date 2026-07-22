@@ -52,6 +52,8 @@
 | 账号导出实质 payload | 完成 | 资料/房间/钱包流水/关注；截断 + 省略聊天与 stream key |
 | OTP HTTP 投递（smtp/http） | 完成 | `HttpOtpNotifier`；生产禁 log/noop；需 URL |
 | H5 Pay mock 收银台 | 完成 | 币包列表 + 建单 + sandbox-complete |
+| Dogfood API smoke 含 pay/export | 完成 | `dogfood-api-smoke.sh` 建单+入账+导出 |
+| Stage/生产上线 Runbook | 完成 | `docs/runbooks/go-live-stage.md` |
 
 ---
 
