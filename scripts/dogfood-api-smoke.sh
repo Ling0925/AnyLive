@@ -2,7 +2,7 @@
 # Control-plane dogfood smoke against a running AnyLive API.
 #
 # Prerequisites:
-#   cargo run -p anylive-api   # default :8088, dev OTP = 123456
+#   cargo run -p anylive-api   # local: fixed OTP + set ALLOW_MOCK_TOPUP=1 for gifts
 # Memory mode needs no docker. Optional Postgres dual store:
 #   USE_POSTGRES=1 DATABASE_URL=postgres://anylive:anylive@127.0.0.1:5432/anylive \
 #     cargo run -p anylive-api
@@ -14,6 +14,11 @@
 # Requires: curl, python3. Fails on non-2xx (except documented 204).
 
 set -euo pipefail
+
+# Dogfood expects local API with fixed OTP + mock topup.
+# Server side: APP_ENV=local (or ALLOW_DEV_OTP=1) and ALLOW_MOCK_TOPUP=1 for gifts.
+# These exports only affect this script process, not the API server.
+export OTP_CODE="${OTP_CODE:-123456}"
 
 API_BASE="${API_BASE:-http://localhost:8088}"
 OTP_CODE="${OTP_CODE:-123456}"

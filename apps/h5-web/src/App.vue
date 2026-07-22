@@ -82,7 +82,51 @@ watch([videoEl, hlsUrl], ([el, url]) => {
   }
 })
 
-onBeforeUnmount(() => teardownPlayer())
+let statusPoll: ReturnType<typeof setInterval> | null = null
+
+function stopStatusPoll() {
+  if (statusPoll) {
+    clearInterval(statusPoll)
+    statusPoll = null
+  }
+}
+
+function startStatusPoll() {
+  stopStatusPoll()
+  // Match mobile ~8s poll so stop/force-close/webhook flips ended UI without manual refresh.
+  statusPoll = setInterval(() => {
+    if (roomEnded.value || !canWatch.value) {
+      stopStatusPoll()
+      return
+    }
+    void pollRoomStatus()
+  }, 8000)
+}
+
+async function pollRoomStatus() {
+  const id = roomId.value.trim()
+  if (!id) return
+  try {
+    const roomRes = await fetch(`${apiBase}/api/v1/rooms/${id}`)
+    if (!roomRes.ok) return
+    const room = await roomRes.json()
+    const next = typeof room.status === 'string' ? room.status : ''
+    if (!next || next === status.value) return
+    status.value = next
+    if (isRoomEnded(next) || !isLiveStatus(next)) {
+      hlsUrl.value = ''
+      teardownPlayer()
+      stopStatusPoll()
+    }
+  } catch {
+    // ignore transient poll errors
+  }
+}
+
+onBeforeUnmount(() => {
+  stopStatusPoll()
+  teardownPlayer()
+})
 
 onMounted(() => {
   restoreSession()
@@ -170,6 +214,7 @@ async function loadRoom() {
     }
     const play = await playRes.json()
     hlsUrl.value = play.hls ?? buildPlayUrl('http://localhost:8080/live', id)
+    startStatusPoll()
 
     // Public chat history + gift catalog (no auth required)
     void refreshMessages()
@@ -285,6 +330,10 @@ async function refreshMessages() {
 
 async function sendChat() {
   chatHint.value = ''
+  if (roomEnded.value || !canWatch.value) {
+    chatHint.value = 'Room is not live'
+    return
+  }
   const id = roomId.value.trim()
   const body = chatBody.value.trim()
   if (!id || !body) {
@@ -376,6 +425,10 @@ async function doTopup() {
 
 async function sendGift(gift: GiftItem) {
   giftHint.value = ''
+  if (roomEnded.value || !canWatch.value) {
+    giftHint.value = 'Room is not live'
+    return
+  }
   const id = roomId.value.trim()
   if (!id) {
     giftHint.value = 'Load a room first'
@@ -476,7 +529,7 @@ async function sendGift(gift: GiftItem) {
     </section>
 
     <!-- Chat: list is public; send requires login -->
-    <section v-if="roomId.trim() && status" class="panel chat">
+    <section v-if="roomId.trim() && status && !roomEnded && canWatch" class="panel chat">
       <div class="panel-head">
         <h2>Chat</h2>
         <button type="button" class="ghost" @click="refreshMessages">Refresh</button>
@@ -500,7 +553,7 @@ async function sendGift(gift: GiftItem) {
     </section>
 
     <!-- Gifts + wallet: visible when room loaded; send/topup require login -->
-    <section v-if="roomId.trim() && status" class="panel gifts">
+    <section v-if="roomId.trim() && status && !roomEnded && canWatch" class="panel gifts">
       <div class="panel-head">
         <h2>Gifts</h2>
         <span v-if="authed" class="chip">balance: {{ balance }}</span>
