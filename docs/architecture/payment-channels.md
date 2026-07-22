@@ -1,6 +1,6 @@
 # 支付通道接入设计
 
-> 状态：**设计文档（未实现）**  
+> 状态：**部分实现** — `PayProvider` 端口 + 订单/币包 + Mock 渠道 + webhook 入账已落地；Jeepay/EPay/TokenPay 适配器待实现  
 > 关联：[架构总览](./overview.md) · [技术评定与架构方案](../技术评定与架构方案.md) · [契约与接口冻结](../product/03-契约与接口冻结.md) · [海外合规与上架闸门](../compliance/海外合规与上架闸门.md) · [P1 现状](../product/p1-status.md)
 
 **读者：** 后端 / 客户端 / SRE  

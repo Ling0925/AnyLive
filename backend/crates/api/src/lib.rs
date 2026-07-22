@@ -74,6 +74,14 @@ pub fn build_app_with_state_and_cors(state: Arc<AppState>, cors: CorsLayer) -> R
         .route("/api/v1/wallet", get(routes::get_wallet))
         .route("/api/v1/wallet/ledger", get(routes::get_wallet_ledger))
         .route("/api/v1/wallet/topups", post(routes::topup_wallet))
+        .route("/api/v1/pay/channels", get(routes::list_pay_channels))
+        .route("/api/v1/pay/products", get(routes::list_pay_products))
+        .route("/api/v1/pay/orders", post(routes::create_pay_order))
+        .route("/api/v1/pay/orders/{id}", get(routes::get_pay_order))
+        .route("/api/v1/webhooks/pay/mock", post(routes::pay_webhook_mock))
+        .route("/api/v1/webhooks/pay/jeepay", post(routes::pay_webhook_jeepay))
+        .route("/api/v1/webhooks/pay/epay", post(routes::pay_webhook_epay))
+        .route("/api/v1/webhooks/pay/tokenpay", post(routes::pay_webhook_tokenpay))
         .route("/api/v1/gifts", get(routes::list_gifts))
         .route("/api/v1/rooms/{id}/gifts", post(routes::send_gift))
         .route("/api/v1/realtime/token", post(routes::realtime_token))
@@ -1136,6 +1144,9 @@ mod tests {
             base.profile_extras.clone(),
             None,
             base.allow_mock_topup,
+            base.pay.clone(),
+            base.pay_registry.clone(),
+            base.pay_public_base.clone(),
         ));
         let app = build_app_with_state(state);
         let token = login(&app, "chat-pub@example.com").await;
@@ -1200,6 +1211,9 @@ mod tests {
             base.profile_extras.clone(),
             None,
             base.allow_mock_topup,
+            base.pay.clone(),
+            base.pay_registry.clone(),
+            base.pay_public_base.clone(),
         ));
         let app = build_app_with_state(state);
         let host_token = login(&app, "gift-pub-host@example.com").await;

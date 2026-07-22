@@ -8,9 +8,10 @@ use anylive_auth::{
 };
 use anylive_db::{
     postgres_enabled, AnyChat, AnyDeletedUsers, AnyModeration, AnyOtpStore, AnyProfileExtras,
-    AnyRefreshStore, AnyReports, AnySocial, AnyUserStore, AnyWallet, PgPool,
+    AnyRefreshStore, AnyReports, AnySocial, AnyPayStore, AnyUserStore, AnyWallet, PgPool,
 };
 use anylive_media::SrsMediaProvider;
+use anylive_pay::{PayChannelRegistry, PayStore};
 use anylive_realtime::{
     publisher_from_env, CentrifugoConfig, CentrifugoPublisher, ChatRateLimiter,
     NoopCentrifugoPublisher,
@@ -50,6 +51,12 @@ pub struct AppState {
     pub db: Option<PgPool>,
     /// Whether mock topup is enabled for this process (`ALLOW_MOCK_TOPUP=1`).
     pub allow_mock_topup: bool,
+    /// Pay products / orders store (memory or Postgres).
+    pub pay: AnyPayStore,
+    /// Enabled payment channel providers.
+    pub pay_registry: PayChannelRegistry,
+    /// Public API base for notify_url construction.
+    pub pay_public_base: String,
 }
 
 impl AppState {
@@ -70,6 +77,9 @@ impl AppState {
         profile_extras: AnyProfileExtras,
         db: Option<PgPool>,
         allow_mock_topup: bool,
+        pay: AnyPayStore,
+        pay_registry: PayChannelRegistry,
+        pay_public_base: String,
     ) -> Self {
         Self {
             auth,
@@ -88,6 +98,9 @@ impl AppState {
             profile_extras,
             db,
             allow_mock_topup,
+            pay,
+            pay_registry,
+            pay_public_base,
         }
     }
 
@@ -122,6 +135,9 @@ impl AppState {
             AnyProfileExtras::memory(),
             None,
             true, // tests exercise mock topup
+            AnyPayStore::memory(),
+            PayChannelRegistry::mock_only("anylive-dev-pay-mock-secret-change-me"),
+            "http://localhost:8088".into(),
         ))
     }
 
@@ -129,6 +145,7 @@ impl AppState {
     pub async fn dev_ready() -> Arc<Self> {
         let state = Self::dev();
         state.wallet.seed_default_gifts().await;
+        state.pay.seed_default_products().await;
         state
     }
 
@@ -206,6 +223,7 @@ impl AppState {
             deleted_users,
             refresh,
             otp_store,
+            pay_store,
             db,
         ) = if postgres_enabled() {
             let pool = anylive_db::connect_and_migrate_from_env()
@@ -214,7 +232,7 @@ impl AppState {
             tracing::info!(
                 "postgres enabled: migrations applied; using Postgres dual stores for \
                  users/rooms/wallet/social/moderation/reports/chat/profile_extras/\
-                 deleted_users/refresh/otp"
+                 deleted_users/refresh/otp/pay"
             );
             (
                 AnyUserStore::postgres(pool.clone()),
@@ -228,6 +246,7 @@ impl AppState {
                 AnyDeletedUsers::postgres(pool.clone()),
                 AnyRefreshStore::postgres(pool.clone()),
                 AnyOtpStore::postgres(pool.clone()),
+                AnyPayStore::postgres(pool.clone()),
                 Some(pool),
             )
         } else {
@@ -251,6 +270,7 @@ impl AppState {
                 AnyDeletedUsers::memory(),
                 AnyRefreshStore::memory(),
                 AnyOtpStore::memory(),
+                AnyPayStore::memory(),
                 None,
             )
         };
@@ -260,6 +280,23 @@ impl AppState {
         let allow_mock_topup = mock_topup_allowed();
         if allow_mock_topup {
             tracing::warn!("ALLOW_MOCK_TOPUP=1: mock wallet topup is enabled");
+        }
+
+        let pay_registry = PayChannelRegistry::from_env();
+        let pay_public_base = std::env::var("PAY_PUBLIC_BASE_URL")
+            .or_else(|_| std::env::var("API_PUBLIC_BASE_URL"))
+            .unwrap_or_else(|_| "http://localhost:8088".into());
+        if pay_registry.enabled_channels().is_empty() {
+            tracing::info!("no pay channels enabled (set PAY_CHANNELS or PAY_ENABLE_MOCK=1)");
+        } else {
+            tracing::info!(
+                channels = ?pay_registry
+                    .enabled_channels()
+                    .iter()
+                    .map(|c| c.as_str())
+                    .collect::<Vec<_>>(),
+                "pay channels enabled"
+            );
         }
 
         let state = Arc::new(Self::new(
@@ -279,8 +316,12 @@ impl AppState {
             profile_extras,
             db,
             allow_mock_topup,
+            pay_store,
+            pay_registry,
+            pay_public_base,
         ));
         state.wallet.seed_default_gifts().await;
+        state.pay.seed_default_products().await;
         Ok(state)
     }
 }

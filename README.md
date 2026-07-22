@@ -72,6 +72,7 @@ cd apps/h5-web && pnpm test
 - `GET /api/v1/legal/privacy|terms`
 - `POST/GET /api/v1/rooms` · `POST .../start|stop` · `.../media/publish|play`
 - `GET /api/v1/wallet` · `GET /api/v1/wallet/ledger` · `POST /api/v1/wallet/topups` · `GET /api/v1/gifts` · `POST .../gifts`
+- `GET /api/v1/pay/channels|products` · `POST|GET /api/v1/pay/orders` · `POST /api/v1/webhooks/pay/{mock,jeepay,epay,tokenpay}`
 - `POST /api/v1/realtime/token` · `POST/GET /api/v1/rooms/{id}/messages`
 - `POST /api/v1/admin/grant|ban|mute|unmute|rooms/force-close` · `GET /api/v1/admin/audit`
 - `GET|POST /api/v1/admin/gifts` · `GET /api/v1/admin/reports` · `PATCH .../reports/{id}`

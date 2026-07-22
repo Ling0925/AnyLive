@@ -49,6 +49,7 @@ dependencies = [
  "anylive-domain",
  "anylive-media",
  "anylive-moderation",
+ "anylive-pay",
  "anylive-realtime",
  "anylive-social",
  "anylive-wallet",
@@ -109,12 +110,14 @@ dependencies = [
  "anylive-common",
  "anylive-domain",
  "anylive-moderation",
+ "anylive-pay",
  "anylive-realtime",
  "anylive-social",
  "anylive-wallet",
  "async-trait",
  "chrono",
  "serde",
+ "serde_json",
  "sqlx",
  "thiserror",
  "tokio",
@@ -161,6 +164,27 @@ dependencies = [
  "chrono",
  "serde",
  "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "anylive-pay"
+version = "0.1.0"
+dependencies = [
+ "anylive-common",
+ "anylive-domain",
+ "async-trait",
+ "chrono",
+ "hex",
+ "hmac",
+ "http",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "subtle",
+ "thiserror",
+ "tokio",
+ "tracing",
  "uuid",
 ]
 

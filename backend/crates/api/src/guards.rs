@@ -115,6 +115,15 @@ pub fn check_feature_flags_for_production() -> Result<(), String> {
     if env_flag_enabled("ALLOW_INSECURE_JWT") {
         return Err("production forbids ALLOW_INSECURE_JWT".into());
     }
+    if env_flag_enabled("PAY_ENABLE_MOCK") {
+        return Err("production forbids PAY_ENABLE_MOCK".into());
+    }
+    if anylive_pay::mock_pay_enabled_from_env() {
+        return Err(
+            "production forbids mock pay channel (PAY_CHANNELS=mock / PAY_ENABLE_MOCK / ALLOW_MOCK_TOPUP)"
+                .into(),
+        );
+    }
     Ok(())
 }
 

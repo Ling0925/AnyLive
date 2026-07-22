@@ -15,6 +15,7 @@ anylive-db = { path = "../db" }
 anylive-auth = { path = "../auth" }
 anylive-media = { path = "../media" }
 anylive-wallet = { path = "../wallet" }
+anylive-pay = { path = "../pay" }
 anylive-realtime = { path = "../realtime" }
 anylive-moderation = { path = "../moderation" }
 anylive-social = { path = "../social" }

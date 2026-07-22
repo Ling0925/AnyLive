@@ -18,6 +18,7 @@ mod chat;
 mod deleted_users;
 mod moderation;
 mod otp;
+mod pay;
 mod pool;
 mod profile;
 mod refresh;
@@ -31,6 +32,7 @@ pub use chat::{validate_chat_body, AnyChat, PostgresChat};
 pub use deleted_users::{AnyDeletedUsers, MemoryDeletedUsers, PostgresDeletedUsers};
 pub use moderation::{AnyModeration, PostgresModeration};
 pub use otp::{AnyOtpStore, PostgresOtpStore};
+pub use pay::{AnyPayStore, PostgresPayStore};
 pub use pool::{
     connect, connect_and_migrate_from_env, migrate, migrations_dir, ping, postgres_enabled,
     DbError, PgPool,
@@ -55,6 +57,8 @@ pub const MIGRATION_FILES: &[&str] = &[
     "003_profile_extras.sql",
     "004_auth_sessions.sql",
     "005_otp_challenges.sql",
+    "006_wallet_topup_idempotency.sql",
+    "007_pay_orders.sql",
 ];
 
 /// Validate that a SQL identifier is safe for use in limited admin tooling.
@@ -91,6 +95,9 @@ pub fn expected_tables() -> &'static [&'static str] {
         "deleted_users",
         "refresh_tokens",
         "otp_challenges",
+        "pay_products",
+        "pay_orders",
+        "pay_webhook_events",
     ]
 }
 
@@ -109,6 +116,8 @@ mod tests {
                 "003_profile_extras.sql",
                 "004_auth_sessions.sql",
                 "005_otp_challenges.sql",
+                "006_wallet_topup_idempotency.sql",
+                "007_pay_orders.sql",
             ]
         );
     }

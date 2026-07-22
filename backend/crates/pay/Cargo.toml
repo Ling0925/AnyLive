@@ -1,24 +1,21 @@
 [package]
-name = "anylive-db"
+name = "anylive-pay"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-anylive-auth = { path = "../auth" }
 anylive-common = { path = "../common" }
 anylive-domain = { path = "../domain" }
-anylive-moderation = { path = "../moderation" }
-anylive-realtime = { path = "../realtime" }
-anylive-social = { path = "../social" }
-anylive-wallet = { path = "../wallet" }
-anylive-pay = { path = "../pay" }
-anyhow = { workspace = true }
 async-trait = { workspace = true }
 chrono = { workspace = true }
+hex = { workspace = true }
+http = { workspace = true }
+hmac = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-sqlx = { workspace = true }
+sha2 = { workspace = true }
+subtle = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

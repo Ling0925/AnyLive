@@ -26,7 +26,7 @@
 | 社交 关注 / 取关 + 关注列表 | 完成 | `feat(social)` |
 | 热门 + 关注中的直播 Feed | 完成 | `feat(feed)` |
 | 用户举报 API | 完成 | `POST /api/v1/reports` |
-| Postgres 迁移 001–006 | 完成 | 含 OTP 表、充值幂等约束 |
+| Postgres 迁移 001–007 | 完成 | 含 OTP、充值幂等、pay_products/orders |
 | Postgres 双存储（users/rooms/wallet/social/moderation/reports/chat/profile/**deleted**/**refresh**/**otp**） | 完成 | `USE_POSTGRES=1` |
 | SRS on_publish / on_unpublish 回调 | 完成 | HMAC 签名推流 key；秘钥仅 header |
 | 生产密钥守卫（OTP / JWT / SRS / 特性开关） | 完成 | `ALLOW_DEV_OTP`、`ALLOW_MOCK_TOPUP`、`OTP_NOTIFIER`、`SRS_WEBHOOK_SECRET` 等 |
@@ -48,6 +48,7 @@
 | 媒体 dogfood 冒烟自动化 | 完成 | `dogfood-media-smoke.sh` + `media_smoke_lib.py` |
 | 本地开播栈（compose + dogfood 开关 + 手册） | 完成 | `./scripts/deploy-test.sh` + `docs/runbooks/go-live-local.md` |
 | 签名推流 key 与 HLS 播放路径对齐 | 完成 | active stream 映射；stop/强关/unpublish 清除 |
+| PayProvider 控制面（币包/订单/Mock webhook 入账） | 完成 | `anylive-pay`；`POST /pay/orders`；`pay:{order_id}` 幂等入账；生产禁 mock |
 
 ---
 
@@ -60,7 +61,7 @@
 | 管理 UI | 深色运维壳可用；非完整 Vben 套件 |
 | Flutter 播放器 | StreamPreview 已交付；media_kit / video_player 真嵌仍开放 |
 | OTP 投递 | 通知端口 + 哈希存储已完成；真 SMTP/SMS 仍待接（可用 `OTP_NOTIFIER=log` 或 `ALLOW_DEV_OTP`） |
-| 充值 | 仅模拟充值（`ALLOW_MOCK_TOPUP=1`）；无 Stripe 等支付 |
+| 充值 | Mock topup + Pay mock 通道；真实 PSP 未接 |
 | SRS 本地回调配置 | `deploy/srs/srs.conf` 已指向 API `:8088`（host.docker.internal） |
 
 ---
