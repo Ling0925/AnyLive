@@ -22,11 +22,14 @@ from media_smoke_lib import (  # noqa: E402
 ROOM = "11111111-1111-1111-1111-111111111111"
 
 
+SIGNED_KEY = f"{ROOM}_9999999999_deadbeefcafef00d"
+
+
 class TestObsServerFromPushUrl(unittest.TestCase):
     def test_strips_stream_key_suffix(self) -> None:
-        push = f"rtmp://localhost:1935/live/{ROOM}"
+        push = f"rtmp://localhost:1935/live/{SIGNED_KEY}"
         self.assertEqual(
-            obs_server_from_push_url(push, ROOM),
+            obs_server_from_push_url(push, SIGNED_KEY),
             "rtmp://localhost:1935/live",
         )
 
@@ -43,18 +46,18 @@ class TestObsServerFromPushUrl(unittest.TestCase):
 class TestParsePublishResponse(unittest.TestCase):
     def test_happy_path(self) -> None:
         data = {
-            "push_url": f"rtmp://localhost:1935/live/{ROOM}",
-            "stream_key": ROOM,
+            "push_url": f"rtmp://localhost:1935/live/{SIGNED_KEY}",
+            "stream_key": SIGNED_KEY,
             "expires_at": "2099-01-01T00:00:00Z",
         }
         out = parse_publish_response(data)
-        self.assertEqual(out["stream_key"], ROOM)
+        self.assertEqual(out["stream_key"], SIGNED_KEY)
         self.assertEqual(out["push_url"], data["push_url"])
         self.assertEqual(out["server"], "rtmp://localhost:1935/live")
 
     def test_missing_push_url(self) -> None:
         with self.assertRaises(MediaSmokeError):
-            parse_publish_response({"stream_key": ROOM})
+            parse_publish_response({"stream_key": SIGNED_KEY})
 
     def test_missing_stream_key(self) -> None:
         with self.assertRaises(MediaSmokeError):
@@ -62,7 +65,7 @@ class TestParsePublishResponse(unittest.TestCase):
 
     def test_empty_fields(self) -> None:
         with self.assertRaises(MediaSmokeError):
-            parse_publish_response({"push_url": "  ", "stream_key": ROOM})
+            parse_publish_response({"push_url": "  ", "stream_key": SIGNED_KEY})
         with self.assertRaises(MediaSmokeError):
             parse_publish_response({"push_url": "rtmp://x/live/k", "stream_key": ""})
 
@@ -96,15 +99,19 @@ class TestParsePlayResponse(unittest.TestCase):
 
 
 class TestAssertStreamKeyMatchesRoom(unittest.TestCase):
-    def test_match(self) -> None:
-        assert_stream_key_matches_room(ROOM, ROOM)
+    def test_signed_match(self) -> None:
+        assert_stream_key_matches_room(SIGNED_KEY, ROOM)
+
+    def test_bare_uuid_rejected(self) -> None:
+        with self.assertRaises(MediaSmokeError):
+            assert_stream_key_matches_room(ROOM, ROOM)
 
     def test_mismatch(self) -> None:
         with self.assertRaises(MediaSmokeError):
             assert_stream_key_matches_room("abc", ROOM)
 
     def test_strips_whitespace(self) -> None:
-        assert_stream_key_matches_room(f"  {ROOM}  ", f" {ROOM}")
+        assert_stream_key_matches_room(f"  {SIGNED_KEY}  ", f" {ROOM}")
 
 
 class TestSrsUrls(unittest.TestCase):

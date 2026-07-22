@@ -2,7 +2,7 @@
 # Media-plane dogfood smoke: control-plane publish/play consistency + optional SRS.
 #
 # Prerequisites:
-#   cargo run -p anylive-api   # default :8088, dev OTP = 123456
+#   cargo run -p anylive-api   # local: fixed OTP + set ALLOW_MOCK_TOPUP=1 for gifts
 # Optional (SRS liveness only — does not require OBS):
 #   docker compose -f deploy/docker-compose.yml up -d srs
 #
@@ -17,6 +17,11 @@
 
 set -euo pipefail
 
+# Dogfood expects local API with fixed OTP + mock topup.
+# Server side: APP_ENV=local (or ALLOW_DEV_OTP=1) and ALLOW_MOCK_TOPUP=1 for gifts.
+# These exports only affect this script process, not the API server.
+export OTP_CODE="${OTP_CODE:-123456}"
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 API_BASE="${API_BASE:-http://localhost:8088}"
 OTP_CODE="${OTP_CODE:-123456}"
@@ -25,6 +30,7 @@ SKIP_SRS="${SKIP_SRS:-0}"
 API_BASE="${API_BASE%/}"
 
 HOST_EMAIL="dogfood-media-host-$(date +%s)@example.com"
+export HOST_EMAIL OTP_CODE SRS_API_BASE
 
 step=0
 label() {
@@ -63,6 +69,7 @@ api() {
 json_get() {
   local json="$1"
   local expr="$2"
+  # Pass JSON as argv[1]; expression reads obj from that — never embed secrets in source.
   python3 -c "import json,sys; obj=json.loads(sys.argv[1]); print(${expr})" "$json"
 }
 
@@ -80,9 +87,10 @@ if [[ "$SKIP_SRS" == "1" ]]; then
   echo "SKIP_SRS=1 — not probing SRS"
 else
   SRS_PROBE_URL="$(
-    PYTHONPATH="${ROOT}/scripts${PYTHONPATH:+:$PYTHONPATH}" python3 - <<PY
+    PYTHONPATH="${ROOT}/scripts${PYTHONPATH:+:$PYTHONPATH}" python3 - <<'PY'
+import os
 from media_smoke_lib import srs_http_ok_url
-print(srs_http_ok_url("${SRS_API_BASE}"))
+print(srs_http_ok_url(os.environ["SRS_API_BASE"]))
 PY
   )"
   if curl -sS -o /tmp/anylive-srs-probe.json -w "%{http_code}" --connect-timeout 2 --max-time 5 \
@@ -103,8 +111,10 @@ fi
 
 # ---------------------------------------------------------------------------
 label "Host OTP + create room + start live"
-api POST /api/v1/auth/otp/send "{\"email\":\"${HOST_EMAIL}\"}"
-api POST /api/v1/auth/otp/verify "{\"email\":\"${HOST_EMAIL}\",\"code\":\"${OTP_CODE}\"}"
+OTP_SEND_BODY="$(python3 -c 'import json,os; print(json.dumps({"email": os.environ["HOST_EMAIL"]}))')"
+OTP_VERIFY_BODY="$(python3 -c 'import json,os; print(json.dumps({"email": os.environ["HOST_EMAIL"], "code": os.environ["OTP_CODE"]}))')"
+api POST /api/v1/auth/otp/send "${OTP_SEND_BODY}"
+api POST /api/v1/auth/otp/verify "${OTP_VERIFY_BODY}"
 HOST_TOKEN="$(json_get "$HTTP_BODY" "obj['access_token']")"
 HOST_ID="$(json_get "$HTTP_BODY" "obj['user']['id']")"
 echo "host_id=${HOST_ID}"
@@ -126,9 +136,10 @@ PUBLISH_JSON="$HTTP_BODY"
 api GET "/api/v1/rooms/${ROOM_ID}/media/play"
 PLAY_JSON="$HTTP_BODY"
 
-PYTHONPATH="${ROOT}/scripts${PYTHONPATH:+:$PYTHONPATH}" python3 - <<PY
+export ROOM_ID PUBLISH_JSON PLAY_JSON
+PYTHONPATH="${ROOT}/scripts${PYTHONPATH:+:$PYTHONPATH}" python3 - <<'PY'
 import json
-import sys
+import os
 
 from media_smoke_lib import (
     assert_stream_key_matches_room,
@@ -136,9 +147,9 @@ from media_smoke_lib import (
     parse_publish_response,
 )
 
-room_id = ${ROOM_ID@Q}
-publish = json.loads(${PUBLISH_JSON@Q})
-play = json.loads(${PLAY_JSON@Q})
+room_id = os.environ["ROOM_ID"]
+publish = json.loads(os.environ["PUBLISH_JSON"])
+play = json.loads(os.environ["PLAY_JSON"])
 
 info = parse_publish_response(publish)
 assert_stream_key_matches_room(info["stream_key"], room_id)
