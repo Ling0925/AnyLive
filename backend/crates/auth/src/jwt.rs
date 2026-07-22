@@ -49,26 +49,36 @@ impl Default for JwtConfig {
 impl JwtConfig {
     /// Load secrets from `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET`.
     ///
-    /// Falls back to dev defaults when unset (with a warning). Rejects secrets
-    /// shorter than [`MIN_SECRET_LEN`]. Access and refresh secrets must differ.
+    /// Falls back to dev defaults only when `ALLOW_INSECURE_JWT=1` or
+    /// `APP_ENV=local` (or unset treated as local). Staging/prod without secrets
+    /// panic. Rejects secrets shorter than [`MIN_SECRET_LEN`]. Access and refresh
+    /// secrets must differ.
     pub fn from_env() -> Self {
+        let access = std::env::var("JWT_ACCESS_SECRET").ok();
+        let refresh = std::env::var("JWT_REFRESH_SECRET").ok();
+        let allow_insecure = crate::otp::env_flag_enabled("ALLOW_INSECURE_JWT")
+            || is_local_app_env();
+
         let mut cfg = Self::default();
-        let mut from_env = false;
-        if let Ok(s) = std::env::var("JWT_ACCESS_SECRET") {
-            cfg.access_secret = s;
-            from_env = true;
-        }
-        if let Ok(s) = std::env::var("JWT_REFRESH_SECRET") {
-            cfg.refresh_secret = s;
-            from_env = true;
-        }
-        if !from_env {
-            tracing::warn!(
-                "JWT_ACCESS_SECRET / JWT_REFRESH_SECRET unset; using insecure dev defaults"
-            );
+        match (access, refresh) {
+            (Some(a), Some(r)) => {
+                cfg.access_secret = a;
+                cfg.refresh_secret = r;
+            }
+            (None, None) if allow_insecure => {
+                tracing::warn!(
+                    "JWT_ACCESS_SECRET / JWT_REFRESH_SECRET unset; using insecure dev defaults"
+                );
+            }
+            _ => {
+                panic!(
+                    "JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must both be set \
+                     (or set ALLOW_INSECURE_JWT=1 / APP_ENV=local for local only)"
+                );
+            }
         }
         if let Err(e) = cfg.validate() {
-            // Fail closed for misconfigured production secrets.
+            // Fail closed for misconfigured secrets.
             panic!("invalid JWT config: {e}");
         }
         cfg
@@ -90,6 +100,17 @@ impl JwtConfig {
             return Err("JWT access and refresh secrets must be distinct".into());
         }
         Ok(())
+    }
+}
+
+fn is_local_app_env() -> bool {
+    match std::env::var("APP_ENV") {
+        Ok(v) => {
+            let v = v.trim().to_ascii_lowercase();
+            v.is_empty() || v == "local" || v == "development" || v == "dev" || v == "test"
+        }
+        // Unset APP_ENV is treated as local for offline/dev ergonomics.
+        Err(_) => true,
     }
 }
 

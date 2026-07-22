@@ -7,10 +7,12 @@
 //! - [`JwtService`] / [`TokenService`] — HS256 access (15m) + refresh tokens
 //! - [`InMemoryUserStore`] + [`InMemoryRefreshStore`] — offline-capable stores
 //! - [`AuthService`] / [`MemoryAuthService`] — passwordless OTP login facade
+//! - [`OtpNotifier`] — delivery port (must be wired in production)
 //!
 //! Secrets: `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET` (see [`JwtConfig::from_env`]).
 
 mod jwt;
+mod notifier;
 mod otp;
 mod service;
 mod store;
@@ -21,8 +23,13 @@ pub use jwt::{
 };
 /// Alias matching the architecture name `TokenService`.
 pub use jwt::JwtService as TokenService;
+pub use notifier::{
+    otp_notifier_from_env, LogOtpNotifier, NoopOtpNotifier, OtpNotifier, SharedOtpNotifier,
+    UnconfiguredOtpNotifier,
+};
 pub use otp::{
-    normalize_email, OtpCode, OtpConfig, OtpService, OTP_MAX_ATTEMPTS, OTP_RESEND_COOLDOWN_SECS,
+    env_flag_enabled, hash_otp_code, normalize_email, OtpCode, OtpConfig, OtpService,
+    OTP_MAX_ATTEMPTS, OTP_RESEND_COOLDOWN_SECS,
 };
 pub use service::{
     AuthService, AuthSession, LogoutRequest, MemoryAuthService, OtpSendRequest, OtpVerifyRequest,

@@ -1,7 +1,12 @@
-//! Email OTP generation and validation (dev-friendly).
+//! Email OTP generation and validation.
+//!
+//! Challenges store a **hash** of the code (never plaintext). Delivery of the
+//! plaintext code is the caller's responsibility via [`crate::OtpNotifier`].
 
 use anylive_common::{AppError, ErrorCode};
 use chrono::{Duration, Utc};
+use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
 use uuid::Uuid;
 
 use crate::store::{OtpChallenge, OtpStore};
@@ -10,12 +15,36 @@ use crate::DEV_OTP_CODE;
 /// Max failed verify attempts before the challenge is burned.
 pub const OTP_MAX_ATTEMPTS: u32 = 5;
 
+/// Pepper used when hashing OTP codes. Prefer `OTP_PEPPER` env in deployed envs.
+fn otp_pepper() -> String {
+    std::env::var("OTP_PEPPER").unwrap_or_else(|_| "anylive-otp-pepper-dev".into())
+}
+
+/// Hash `code` bound to `email` so a stolen hash cannot be reused cross-account.
+pub fn hash_otp_code(email: &str, code: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(otp_pepper().as_bytes());
+    hasher.update(b"|");
+    hasher.update(email.as_bytes());
+    hasher.update(b"|");
+    hasher.update(code.as_bytes());
+    hex::encode(hasher.finalize())
+}
+
+/// Constant-time equality for equal-length hex digests.
+fn constant_time_eq(a: &str, b: &str) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    bool::from(a.as_bytes().ct_eq(b.as_bytes()))
+}
+
 #[derive(Debug, Clone)]
 pub struct OtpConfig {
     /// OTP lifetime.
     pub ttl_secs: i64,
     /// When true, always accept [`DEV_OTP_CODE`] and store that code on send.
-    /// Defaults to **false** (safe). Enable explicitly for local/dev only.
+    /// Defaults to **false** (safe). Enable only via explicit env (`ALLOW_DEV_OTP=1`).
     pub dev_fixed_otp: bool,
 }
 
@@ -37,6 +66,30 @@ impl OtpConfig {
             ttl_secs: 5 * 60,
             dev_fixed_otp: true,
         }
+    }
+
+    /// Resolve OTP config from env.
+    ///
+    /// Fixed OTP is enabled **only** when `ALLOW_DEV_OTP=1` (or true/yes/on).
+    /// `APP_ENV` alone never enables the bypass — staging/dogfood must use real
+    /// delivery or set the flag explicitly.
+    pub fn from_env() -> Self {
+        if env_flag_enabled("ALLOW_DEV_OTP") {
+            Self::dev()
+        } else {
+            Self::default()
+        }
+    }
+}
+
+/// True for `1`, `true`, `yes`, `on` (case-insensitive).
+pub fn env_flag_enabled(name: &str) -> bool {
+    match std::env::var(name) {
+        Ok(v) => matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        ),
+        Err(_) => false,
     }
 }
 
@@ -61,17 +114,6 @@ impl OtpCode {
     }
 }
 
-/// Constant-time equality for equal-length digit strings (mitigates timing leaks).
-fn constant_time_eq(a: &str, b: &str) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    a.bytes()
-        .zip(b.bytes())
-        .fold(0u8, |acc, (x, y)| acc | (x ^ y))
-        == 0
-}
-
 /// Cryptographically random 6-digit OTP (000000–999999), via UUID v4 CSPRNG.
 fn generate_otp_code() -> String {
     let n = (Uuid::new_v4().as_u128() % 1_000_000) as u32;
@@ -93,9 +135,14 @@ impl<S: OtpStore> OtpService<S> {
         &self.store
     }
 
+    pub fn config(&self) -> &OtpConfig {
+        &self.config
+    }
+
     /// Create/overwrite OTP for email. In dev mode the code is always `123456`.
     ///
     /// Returns the plaintext code for delivery (email/SMS). Callers must not log it.
+    /// The store only receives the hash of the code.
     /// Enforces a per-email resend cooldown to slow enumeration/spam.
     pub async fn send(&self, email: &str) -> Result<String, AppError> {
         let email = normalize_email(email)?;
@@ -116,11 +163,12 @@ impl<S: OtpStore> OtpService<S> {
             generate_otp_code()
         };
         let expires_at = Utc::now() + Duration::seconds(self.config.ttl_secs);
+        let code_hash = hash_otp_code(&email, &code);
         self.store
             .put(
                 &email,
                 OtpChallenge {
-                    code: code.clone(),
+                    code: code_hash,
                     expires_at,
                     attempts: 0,
                 },
@@ -167,7 +215,8 @@ impl<S: OtpStore> OtpService<S> {
             ));
         }
 
-        if !constant_time_eq(&challenge.code, submitted.as_str()) {
+        let submitted_hash = hash_otp_code(&email, submitted.as_str());
+        if !constant_time_eq(&challenge.code, &submitted_hash) {
             challenge.attempts += 1;
             // Burn after the failed attempt that hits the limit (leave deleted).
             if challenge.attempts < OTP_MAX_ATTEMPTS {
@@ -243,6 +292,10 @@ mod tests {
         let code = s.send("prod@example.com").await.unwrap();
         assert_eq!(code.len(), 6);
         assert!(code.chars().all(|c| c.is_ascii_digit()));
+        // Store must not keep plaintext.
+        let stored = s.store().get("prod@example.com").await.unwrap().unwrap();
+        assert_ne!(stored.code, code);
+        assert_eq!(stored.code, hash_otp_code("prod@example.com", &code));
         let email = s.verify("prod@example.com", &code).await.unwrap();
         assert_eq!(email, "prod@example.com");
         // Consumed — second use fails.
@@ -315,9 +368,22 @@ mod tests {
     }
 
     #[test]
+    fn hash_is_email_bound() {
+        let a = hash_otp_code("a@b.co", "123456");
+        let b = hash_otp_code("c@d.co", "123456");
+        assert_ne!(a, b);
+        assert_eq!(a, hash_otp_code("a@b.co", "123456"));
+    }
+
+    #[test]
     fn constant_time_eq_basic() {
         assert!(constant_time_eq("123456", "123456"));
         assert!(!constant_time_eq("123456", "123457"));
         assert!(!constant_time_eq("1234", "12345"));
+    }
+
+    #[test]
+    fn env_flag_parsing() {
+        assert!(!env_flag_enabled("ALLOW_DEV_OTP_MISSING_XYZ"));
     }
 }

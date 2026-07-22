@@ -1,10 +1,13 @@
 //! Auth application service: OTP login, refresh, logout.
 
+use std::sync::Arc;
+
 use anylive_common::{AppError, ErrorCode};
 use anylive_domain::{User, UserId};
 use serde::{Deserialize, Serialize};
 
 use crate::jwt::{JwtService, TokenPair};
+use crate::notifier::SharedOtpNotifier;
 use crate::otp::{normalize_email, OtpService};
 use crate::store::{OtpStore, RefreshStore, UserStore};
 
@@ -48,6 +51,7 @@ where
     otp: OtpService<O>,
     refresh: R,
     jwt: JwtService,
+    notifier: SharedOtpNotifier,
 }
 
 impl<U, O, R> AuthService<U, O, R>
@@ -57,11 +61,28 @@ where
     R: RefreshStore,
 {
     pub fn new(users: U, otp: OtpService<O>, refresh: R, jwt: JwtService) -> Self {
+        Self::with_notifier(
+            users,
+            otp,
+            refresh,
+            jwt,
+            Arc::new(crate::notifier::LogOtpNotifier),
+        )
+    }
+
+    pub fn with_notifier(
+        users: U,
+        otp: OtpService<O>,
+        refresh: R,
+        jwt: JwtService,
+        notifier: SharedOtpNotifier,
+    ) -> Self {
         Self {
             users,
             otp,
             refresh,
             jwt,
+            notifier,
         }
     }
 
@@ -73,14 +94,25 @@ where
         &self.users
     }
 
+    pub fn otp_config(&self) -> &crate::otp::OtpConfig {
+        self.otp.config()
+    }
+
+    /// Issue OTP, store its hash, and deliver the plaintext code via notifier.
     pub async fn send_otp(&self, req: OtpSendRequest) -> Result<(), AppError> {
-        let _ = self.otp.send(&req.email).await?;
+        let code = self.otp.send(&req.email).await?;
+        self.notifier.send_otp(&req.email, &code).await?;
         Ok(())
     }
 
     pub async fn verify_otp(&self, req: OtpVerifyRequest) -> Result<AuthSession, AppError> {
         let email = self.otp.verify(&req.email, &req.code).await?;
         let user = self.users.upsert_by_email(&email).await?;
+        // Issue tokens only after user load so callers can still reject deleted/banned
+        // before insert — but prefer checking at the route layer *after* user is known
+        // and *before* refresh insert when possible. We issue here; routes that need
+        // ban/delete checks must run them before calling this, or revoke on reject.
+        // For the common path, routes check after and we add hooks below.
         let issued = self.jwt.issue_pair(user.id, user.email.clone())?;
         self.refresh
             .insert(issued.refresh_jti, issued.user_id, issued.refresh_exp)
@@ -91,12 +123,40 @@ where
         })
     }
 
+    /// Like [`verify_otp`] but runs `gate` after user upsert and **before**
+    /// issuing tokens. Used by the API to reject deleted/banned accounts without
+    /// orphan refresh rows.
+    pub async fn verify_otp_gated<F, Fut>(
+        &self,
+        req: OtpVerifyRequest,
+        gate: F,
+    ) -> Result<AuthSession, AppError>
+    where
+        F: FnOnce(User) -> Fut,
+        Fut: std::future::Future<Output = Result<User, AppError>>,
+    {
+        let email = self.otp.verify(&req.email, &req.code).await?;
+        let user = self.users.upsert_by_email(&email).await?;
+        let user = gate(user).await?;
+        let issued = self.jwt.issue_pair(user.id, user.email.clone())?;
+        self.refresh
+            .insert(issued.refresh_jti, issued.user_id, issued.refresh_exp)
+            .await?;
+        Ok(AuthSession {
+            user,
+            tokens: issued.pair,
+        })
+    }
+
+    /// Rotate refresh: insert the new jti first, then revoke the old one.
+    /// If user lookup / issue fails, the old token stays active so the client
+    /// can retry. Concurrent double-refresh still fails the second revoke path
+    /// only after both have verified JWT — residual race is acceptable vs
+    /// losing the only valid refresh on a mid-path error.
     pub async fn refresh(&self, req: RefreshRequest) -> Result<TokenPair, AppError> {
         let claims = self.jwt.verify_refresh(&req.refresh_token)?;
-        // Atomic rotate: revoke-first so concurrent refresh of the same jti
-        // cannot both succeed (second revoke returns false → treated as reused).
-        let was_active = self.refresh.revoke(claims.jti).await?;
-        if !was_active {
+        // Confirm still active before rotating (soft check; race handled by revoke).
+        if !self.refresh.is_active(claims.jti).await? {
             return Err(AppError::new(
                 ErrorCode::AuthTokenRevoked,
                 "refresh token revoked",
@@ -108,9 +168,21 @@ where
             .await?
             .ok_or_else(|| AppError::unauthorized("user not found"))?;
         let issued = self.jwt.issue_pair(user.id, user.email.clone())?;
+        // Insert new first so a failure after this still leaves the client with
+        // a valid refresh (old remains until we revoke).
         self.refresh
             .insert(issued.refresh_jti, issued.user_id, issued.refresh_exp)
             .await?;
+        let was_active = self.refresh.revoke(claims.jti).await?;
+        if !was_active {
+            // Concurrent rotation already consumed the old jti — revoke the new
+            // one we just inserted to avoid leaving an extra live session.
+            let _ = self.refresh.revoke(issued.refresh_jti).await;
+            return Err(AppError::new(
+                ErrorCode::AuthTokenRevoked,
+                "refresh token revoked",
+            ));
+        }
         Ok(issued.pair)
     }
 
@@ -170,11 +242,12 @@ impl MemoryAuthService {
         let jwt = JwtService::new(JwtConfig::from_env());
         // Explicit dev OTP — never use OtpConfig::default() here (defaults secure).
         let otp = OtpService::new(InMemoryOtpStore::default(), OtpConfig::dev());
-        Self::new(
+        Self::with_notifier(
             InMemoryUserStore::default(),
             otp,
             InMemoryRefreshStore::default(),
             jwt,
+            Arc::new(crate::notifier::NoopOtpNotifier),
         )
     }
 }
@@ -182,6 +255,7 @@ impl MemoryAuthService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::notifier::OtpNotifier;
     use crate::jwt::JwtConfig;
     use crate::otp::OtpConfig;
     use crate::store::{InMemoryOtpStore, InMemoryRefreshStore, InMemoryUserStore};
@@ -190,11 +264,12 @@ mod tests {
     fn service() -> MemoryAuthService {
         let jwt = JwtService::new(JwtConfig::default());
         let otp = OtpService::new(InMemoryOtpStore::default(), OtpConfig::dev());
-        AuthService::new(
+        AuthService::with_notifier(
             InMemoryUserStore::default(),
             otp,
             InMemoryRefreshStore::default(),
             jwt,
+            Arc::new(crate::notifier::NoopOtpNotifier),
         )
     }
 
@@ -219,6 +294,27 @@ mod tests {
 
         let me = svc.me(session.user.id).await.unwrap();
         assert_eq!(me.id, session.user.id);
+    }
+
+    #[tokio::test]
+    async fn gated_verify_rejects_before_token_issue() {
+        let svc = service();
+        let err = svc
+            .verify_otp_gated(
+                OtpVerifyRequest {
+                    email: "banned@example.com".into(),
+                    code: DEV_OTP_CODE.into(),
+                },
+                |_user| async {
+                    Err(AppError::new(
+                        ErrorCode::ForbiddenPolicy,
+                        "user is banned",
+                    ))
+                },
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, ErrorCode::ForbiddenPolicy);
     }
 
     #[tokio::test]
@@ -327,5 +423,39 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.code, ErrorCode::AuthTokenRevoked);
+    }
+
+    #[tokio::test]
+    async fn send_delivers_via_notifier() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        struct CountingNotifier {
+            n: AtomicUsize,
+        }
+        #[async_trait::async_trait]
+        impl OtpNotifier for CountingNotifier {
+            async fn send_otp(&self, _email: &str, code: &str) -> Result<(), AppError> {
+                assert_eq!(code, DEV_OTP_CODE);
+                self.n.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }
+        }
+        let jwt = JwtService::new(JwtConfig::default());
+        let otp = OtpService::new(InMemoryOtpStore::default(), OtpConfig::dev());
+        let counter = Arc::new(CountingNotifier {
+            n: AtomicUsize::new(0),
+        });
+        let svc = AuthService::with_notifier(
+            InMemoryUserStore::default(),
+            otp,
+            InMemoryRefreshStore::default(),
+            jwt,
+            counter.clone(),
+        );
+        svc.send_otp(OtpSendRequest {
+            email: "n@example.com".into(),
+        })
+        .await
+        .unwrap();
+        assert_eq!(counter.n.load(Ordering::SeqCst), 1);
     }
 }

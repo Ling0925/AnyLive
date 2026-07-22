@@ -1,4 +1,5 @@
 -- OTP challenges dual store (email OTP put/get/take).
+-- `code` stores a SHA-256 hex digest of (pepper || email || plaintext), never the raw OTP.
 
 CREATE TABLE IF NOT EXISTS otp_challenges (
     email TEXT PRIMARY KEY,
