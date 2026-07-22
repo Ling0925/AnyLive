@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use anylive_pay::{
-    CreatePaymentRequest, PayChannel, PayMode, PayOrder, PayOrderStatus, PayProduct, PayStore,
-    PaymentStatus, wallet_reference_for_order,
+    wallet_reference_for_order, CreatePaymentRequest, MockPayProvider, PayChannel,
+    PayMode, PayOrder, PayOrderStatus, PayProduct, PayStore, PaymentStatus,
 };
 use axum::body::Bytes;
 use axum::extract::{Path, State};
@@ -501,6 +501,87 @@ async fn credit_order(state: &AppState, order: &PayOrder) -> Result<(), ApiError
     Ok(())
 }
 
+
+/// POST /api/v1/pay/orders/{id}/sandbox-complete
+///
+/// Authenticated sandbox helper: signs and posts the mock webhook server-side so
+/// clients never need `PAY_MOCK_SECRET`. Only available when mock channel is enabled.
+#[utoipa::path(
+    post,
+    path = "/api/v1/pay/orders/{id}/sandbox-complete",
+    tag = "pay",
+    security(("bearerAuth" = [])),
+    responses((status = 200, body = PayOrderDto))
+)]
+pub async fn sandbox_complete_pay_order(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(id): Path<String>,
+) -> Result<Json<PayOrderDto>, ApiError> {
+    if state.pay_registry.get(PayChannel::Mock).is_none() {
+        return Err(ApiError(anylive_common::AppError::new(
+            anylive_common::ErrorCode::ForbiddenPolicy,
+            "mock pay channel not enabled",
+        )));
+    }
+    let order_id = Uuid::parse_str(&id)
+        .map_err(|_| ApiError(anylive_common::AppError::validation("invalid order id")))?;
+    let order = state
+        .pay
+        .get_order(order_id)
+        .await
+        .ok_or_else(|| ApiError(anylive_common::AppError::not_found("pay order not found")))?;
+    if order.user_id != user.user_id {
+        return Err(ApiError(anylive_common::AppError::new(
+            anylive_common::ErrorCode::Forbidden,
+            "not your order",
+        )));
+    }
+    if order.channel != PayChannel::Mock {
+        return Err(ApiError(anylive_common::AppError::validation(
+            "sandbox-complete only for mock channel orders",
+        )));
+    }
+    if order.status == PayOrderStatus::Credited {
+        return Ok(Json(PayOrderDto::from_order(&order, None)));
+    }
+
+    // Bound free-mint abuse on shared dogfood (production forbids mock entirely).
+    state
+        .pay_sandbox_limiter
+        .check(&format!("pay-sandbox:{}", user.user_id.0))
+        .await
+        .map_err(ApiError::from)?;
+
+    let secret = state.pay_mock_secret.as_deref().ok_or_else(|| {
+        ApiError(anylive_common::AppError::new(
+            anylive_common::ErrorCode::ForbiddenPolicy,
+            "mock pay secret not configured",
+        ))
+    })?;
+    let mock = MockPayProvider::new(secret, state.pay_public_base.clone());
+    let sig = mock.sign_order(order_id);
+    let body = serde_json::json!({
+        "order_id": order_id.to_string(),
+        "sig": sig,
+        "amount": order.amount_display(),
+    });
+    let bytes = Bytes::from(serde_json::to_vec(&body).map_err(|e| {
+        ApiError(anylive_common::AppError::new(
+            anylive_common::ErrorCode::Internal,
+            format!("serialize mock notify: {e}"),
+        ))
+    })?);
+    handle_pay_notify(state.clone(), PayChannel::Mock, HeaderMap::new(), bytes).await?;
+
+    let updated = state
+        .pay
+        .get_order(order_id)
+        .await
+        .ok_or_else(|| ApiError(anylive_common::AppError::not_found("pay order not found")))?;
+    Ok(Json(PayOrderDto::from_order(&updated, None)))
+}
+
 /// POST /api/v1/webhooks/pay/mock
 pub async fn pay_webhook_mock(
     State(state): State<Arc<AppState>>,
@@ -713,5 +794,74 @@ mod tests {
             .unwrap();
         let order2 = body_json(res).await;
         assert_eq!(order2["status"], "credited");
+    }
+
+    #[tokio::test]
+    async fn sandbox_complete_credits_without_client_secret() {
+        let state = AppState::dev_ready().await;
+        let app = crate::build_app_with_state(state);
+        let token = login_token(app.clone(), "sandbox@example.com").await;
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/pay/products")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let products = body_json(res).await;
+        let product_id = products["items"][0]["id"].as_str().unwrap();
+        let coins = products["items"][0]["coins"].as_i64().unwrap();
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/pay/orders")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::from(format!(
+                        r#"{{"product_id":"{product_id}","channel":"mock"}}"#
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(res.status().is_success());
+        let order = body_json(res).await;
+        let order_id = order["id"].as_str().unwrap();
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/pay/orders/{order_id}/sandbox-complete"))
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK, "{:?}", body_json(res).await);
+        let done = body_json(res).await;
+        assert_eq!(done["status"], "credited");
+
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/wallet")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let wallet = body_json(res).await;
+        assert_eq!(wallet["balance"].as_i64().unwrap(), coins);
     }
 }

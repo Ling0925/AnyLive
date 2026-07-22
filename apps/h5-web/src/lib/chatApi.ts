@@ -40,6 +40,28 @@ export function walletTopupPath(): string {
   return '/api/v1/wallet/topups'
 }
 
+export function payProductsPath(): string {
+  return '/api/v1/pay/products'
+}
+
+export function payChannelsPath(): string {
+  return '/api/v1/pay/channels'
+}
+
+export function payOrdersPath(): string {
+  return '/api/v1/pay/orders'
+}
+
+export function payOrderPath(orderId: string): string {
+  const id = encodeURIComponent(cleanId(orderId))
+  return `/api/v1/pay/orders/${id}`
+}
+
+export function paySandboxCompletePath(orderId: string): string {
+  const id = encodeURIComponent(cleanId(orderId))
+  return `/api/v1/pay/orders/${id}/sandbox-complete`
+}
+
 export function roomMessagesPath(roomId: string, limit?: number): string {
   const id = encodeURIComponent(cleanId(roomId))
   const base = `/api/v1/rooms/${id}/messages`
@@ -188,6 +210,80 @@ export function sendGiftBody(opts: {
     count: opts.count ?? 1,
     client_request_id: opts.clientRequestId,
   }
+}
+
+export type PayProduct = {
+  id: string
+  sku: string
+  title: string
+  coins: number
+  amount: string
+  currency: string
+}
+
+export type PayOrder = {
+  id: string
+  status: string
+  coins: number
+  amount: string
+  currency: string
+  channel: string
+}
+
+export function parsePayProducts(json: unknown): PayProduct[] {
+  if (!json || typeof json !== 'object') return []
+  const items = (json as Record<string, unknown>).items
+  if (!Array.isArray(items)) return []
+  return items
+    .map((raw) => {
+      if (!raw || typeof raw !== 'object') return null
+      const p = raw as Record<string, unknown>
+      return {
+        id: typeof p.id === 'string' ? p.id : '',
+        sku: typeof p.sku === 'string' ? p.sku : '',
+        title: typeof p.title === 'string' ? p.title : '',
+        coins: typeof p.coins === 'number' ? p.coins : 0,
+        amount: typeof p.amount === 'string' ? p.amount : '',
+        currency: typeof p.currency === 'string' ? p.currency : '',
+      } satisfies PayProduct
+    })
+    .filter((p): p is PayProduct => p !== null && p.id.length > 0)
+}
+
+export function parsePayOrder(json: unknown): PayOrder | null {
+  if (!json || typeof json !== 'object') return null
+  const o = json as Record<string, unknown>
+  if (typeof o.id !== 'string') return null
+  return {
+    id: o.id,
+    status: typeof o.status === 'string' ? o.status : '',
+    coins: typeof o.coins === 'number' ? o.coins : 0,
+    amount: typeof o.amount === 'string' ? o.amount : '',
+    currency: typeof o.currency === 'string' ? o.currency : '',
+    channel: typeof o.channel === 'string' ? o.channel : '',
+  }
+}
+
+/** JSON body for POST /pay/orders. */
+export function createPayOrderBody(opts: {
+  productId: string
+  channel?: string
+  clientRequestId?: string
+}): {
+  product_id: string
+  channel: string
+  client_request_id?: string
+} {
+  const body: {
+    product_id: string
+    channel: string
+    client_request_id?: string
+  } = {
+    product_id: opts.productId,
+    channel: opts.channel ?? 'mock',
+  }
+  if (opts.clientRequestId) body.client_request_id = opts.clientRequestId
+  return body
 }
 
 /** Authorization header map when token present. */

@@ -23,6 +23,7 @@ pub use feed::*;
 pub use pay::{
     create_pay_order, get_pay_order, list_pay_channels, list_pay_products,
     pay_webhook_epay, pay_webhook_jeepay, pay_webhook_mock, pay_webhook_tokenpay,
+    sandbox_complete_pay_order,
 };
 pub use reports::create_report;
 pub use rooms::*;

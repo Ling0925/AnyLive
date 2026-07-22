@@ -78,6 +78,10 @@ pub fn build_app_with_state_and_cors(state: Arc<AppState>, cors: CorsLayer) -> R
         .route("/api/v1/pay/products", get(routes::list_pay_products))
         .route("/api/v1/pay/orders", post(routes::create_pay_order))
         .route("/api/v1/pay/orders/{id}", get(routes::get_pay_order))
+        .route(
+            "/api/v1/pay/orders/{id}/sandbox-complete",
+            post(routes::sandbox_complete_pay_order),
+        )
         .route("/api/v1/webhooks/pay/mock", post(routes::pay_webhook_mock))
         .route("/api/v1/webhooks/pay/jeepay", post(routes::pay_webhook_jeepay))
         .route("/api/v1/webhooks/pay/epay", post(routes::pay_webhook_epay))
@@ -1147,6 +1151,8 @@ mod tests {
             base.pay.clone(),
             base.pay_registry.clone(),
             base.pay_public_base.clone(),
+            base.pay_mock_secret.clone(),
+            base.pay_sandbox_limiter.clone(),
         ));
         let app = build_app_with_state(state);
         let token = login(&app, "chat-pub@example.com").await;
@@ -1214,6 +1220,8 @@ mod tests {
             base.pay.clone(),
             base.pay_registry.clone(),
             base.pay_public_base.clone(),
+            base.pay_mock_secret.clone(),
+            base.pay_sandbox_limiter.clone(),
         ));
         let app = build_app_with_state(state);
         let host_token = login(&app, "gift-pub-host@example.com").await;

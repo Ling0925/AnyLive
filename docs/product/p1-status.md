@@ -49,6 +49,9 @@
 | 本地开播栈（compose + dogfood 开关 + 手册） | 完成 | `./scripts/deploy-test.sh` + `docs/runbooks/go-live-local.md` |
 | 签名推流 key 与 HLS 播放路径对齐 | 完成 | active stream 映射；stop/强关/unpublish 清除 |
 | PayProvider 控制面（币包/订单/Mock webhook 入账） | 完成 | `anylive-pay`；`POST /pay/orders`；`pay:{order_id}` 幂等入账；生产禁 mock |
+| 账号导出实质 payload | 完成 | 资料/房间/钱包流水/关注；截断 + 省略聊天与 stream key |
+| OTP HTTP 投递（smtp/http） | 完成 | `HttpOtpNotifier`；生产禁 log/noop；需 URL |
+| H5 Pay mock 收银台 | 完成 | 币包列表 + 建单 + sandbox-complete |
 
 ---
 
@@ -56,12 +59,12 @@
 
 | 项 | 缺口 |
 |---|---|
-| 账号导出 / 删除 | 软删双存储已有；导出 payload 仍为桩 |
+| 账号导出 / 删除 | 软删双存储已有；`GET /me/export` 含资料/房间/钱包流水/关注 |
 | Centrifugo 推送 | 已接线；需真实 URL/密钥才能线上 fan-out |
 | 管理 UI | 深色运维壳可用；非完整 Vben 套件 |
 | Flutter 播放器 | StreamPreview 已交付；media_kit / video_player 真嵌仍开放 |
-| OTP 投递 | 通知端口 + 哈希存储已完成；真 SMTP/SMS 仍待接（可用 `OTP_NOTIFIER=log` 或 `ALLOW_DEV_OTP`） |
-| 充值 | Mock topup + Pay mock 通道；真实 PSP 未接 |
+| OTP 投递 | `OTP_NOTIFIER=http|smtp` + `OTP_HTTP_URL` 已接；生产禁 log/noop；本地可用 log/dev OTP |
+| 充值 | Mock topup + Pay mock（H5 币包 + sandbox-complete）；真实 PSP 未接 |
 | SRS 本地回调配置 | `deploy/srs/srs.conf` 已指向 API `:8088`（host.docker.internal） |
 
 ---
@@ -69,7 +72,7 @@
 ## 完整 P1 dogfood 出口仍待
 
 1. **真人 OBS 连续推流一周**（栈 + 冒烟 + 手册已就绪：`./scripts/deploy-test.sh`、`docs/runbooks/go-live-local.md`；控制面已绿；多端字节面仍靠人工）
-2. **真邮件 OTP 提供商**（notifier 端口已有，接 SMTP/HTTP）
+2. **真邮件 OTP 提供商账号**（`OTP_NOTIFIER=http|smtp` + URL 已实现；待接真实 ESP/SMTP 桥）
 3. **Flutter media_kit / video_player 内嵌**（外开 URL 路径已可用）
 4. **完整 Centrifugo 1k WS 填数报告 + 设备矩阵**
 5. **完整 Vben 管理模块**（若超出当前运维台需求）

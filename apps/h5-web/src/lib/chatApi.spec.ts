@@ -20,6 +20,12 @@ import {
   topupBody,
   walletPath,
   walletTopupPath,
+  payProductsPath,
+  payOrdersPath,
+  paySandboxCompletePath,
+  parsePayProducts,
+  parsePayOrder,
+  createPayOrderBody,
 } from './chatApi'
 
 describe('url helpers', () => {
@@ -48,6 +54,14 @@ describe('path builders', () => {
     expect(giftsPath()).toBe('/api/v1/gifts')
     expect(walletPath()).toBe('/api/v1/wallet')
     expect(walletTopupPath()).toBe('/api/v1/wallet/topups')
+  })
+
+  it('pay paths', () => {
+    expect(payProductsPath()).toBe('/api/v1/pay/products')
+    expect(payOrdersPath()).toBe('/api/v1/pay/orders')
+    expect(paySandboxCompletePath('ord-1')).toBe(
+      '/api/v1/pay/orders/ord-1/sandbox-complete',
+    )
   })
 
   it('room messages path with optional limit', () => {
@@ -150,5 +164,46 @@ describe('parse helpers', () => {
     expect(parseWalletBalance({ balance: 42 })).toBe(42)
     expect(parseWalletBalance({})).toBe(0)
     expect(parseWalletBalance(null)).toBe(0)
+  })
+})
+
+describe('pay parse / body', () => {
+  it('parses products and orders', () => {
+    expect(
+      parsePayProducts({
+        items: [{ id: 'p1', sku: 'coins_100', title: '100', coins: 100, amount: '6.00', currency: 'CNY' }],
+      }),
+    ).toEqual([
+      { id: 'p1', sku: 'coins_100', title: '100', coins: 100, amount: '6.00', currency: 'CNY' },
+    ])
+    expect(
+      parsePayOrder({
+        id: 'o1',
+        status: 'credited',
+        coins: 100,
+        amount: '6.00',
+        currency: 'CNY',
+        channel: 'mock',
+      }),
+    ).toEqual({
+      id: 'o1',
+      status: 'credited',
+      coins: 100,
+      amount: '6.00',
+      currency: 'CNY',
+      channel: 'mock',
+    })
+  })
+
+  it('builds create order body', () => {
+    expect(createPayOrderBody({ productId: 'p1' })).toEqual({
+      product_id: 'p1',
+      channel: 'mock',
+    })
+    expect(createPayOrderBody({ productId: 'p1', clientRequestId: 'c1', channel: 'mock' })).toEqual({
+      product_id: 'p1',
+      channel: 'mock',
+      client_request_id: 'c1',
+    })
   })
 })

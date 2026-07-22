@@ -57,6 +57,10 @@ pub struct AppState {
     pub pay_registry: PayChannelRegistry,
     /// Public API base for notify_url construction.
     pub pay_public_base: String,
+    /// HMAC secret for mock pay sandbox-complete (None when mock disabled).
+    pub pay_mock_secret: Option<String>,
+    /// Rate limit sandbox-complete minting (per user id).
+    pub pay_sandbox_limiter: IpRateLimiter,
 }
 
 impl AppState {
@@ -80,6 +84,8 @@ impl AppState {
         pay: AnyPayStore,
         pay_registry: PayChannelRegistry,
         pay_public_base: String,
+        pay_mock_secret: Option<String>,
+        pay_sandbox_limiter: IpRateLimiter,
     ) -> Self {
         Self {
             auth,
@@ -101,6 +107,8 @@ impl AppState {
             pay,
             pay_registry,
             pay_public_base,
+            pay_mock_secret,
+            pay_sandbox_limiter,
         }
     }
 
@@ -138,6 +146,9 @@ impl AppState {
             AnyPayStore::memory(),
             PayChannelRegistry::mock_only("anylive-dev-pay-mock-secret-change-me"),
             "http://localhost:8088".into(),
+            Some("anylive-dev-pay-mock-secret-change-me".into()),
+            // High limit for tests; production forbids mock entirely.
+            IpRateLimiter::new(10_000, std::time::Duration::from_secs(60)),
         ))
     }
 
@@ -283,6 +294,9 @@ impl AppState {
         }
 
         let pay_registry = PayChannelRegistry::from_env();
+        let pay_registry_has_mock = pay_registry
+            .get(anylive_pay::PayChannel::Mock)
+            .is_some();
         let pay_public_base = std::env::var("PAY_PUBLIC_BASE_URL")
             .or_else(|_| std::env::var("API_PUBLIC_BASE_URL"))
             .unwrap_or_else(|_| "http://localhost:8088".into());
@@ -298,6 +312,27 @@ impl AppState {
                 "pay channels enabled"
             );
         }
+
+        let pay_mock_secret = if pay_registry_has_mock {
+            let secret = std::env::var("PAY_MOCK_SECRET").unwrap_or_else(|_| {
+                anylive_pay::DEFAULT_PAY_MOCK_SECRET.to_string()
+            });
+            // Default secret is public in source; only allow it for local/dev/test.
+            if !is_local_env(&app_env) && secret == anylive_pay::DEFAULT_PAY_MOCK_SECRET {
+                return Err(
+                    "mock pay requires a non-default PAY_MOCK_SECRET outside local/dev/test"
+                        .into(),
+                );
+            }
+            if secret == anylive_pay::DEFAULT_PAY_MOCK_SECRET {
+                tracing::warn!(
+                    "PAY_MOCK_SECRET is the built-in default; forgeable on open networks — set a unique secret for shared dogfood"
+                );
+            }
+            Some(secret)
+        } else {
+            None
+        };
 
         let state = Arc::new(Self::new(
             auth,
@@ -319,6 +354,9 @@ impl AppState {
             pay_store,
             pay_registry,
             pay_public_base,
+            pay_mock_secret,
+            // Dogfood mint guard: 10 sandbox completes / user / hour.
+            IpRateLimiter::new(10, std::time::Duration::from_secs(3600)),
         ));
         state.wallet.seed_default_gifts().await;
         state.pay.seed_default_products().await;

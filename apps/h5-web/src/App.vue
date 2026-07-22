@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   apiUrl,
   authHeaders,
+  createPayOrderBody,
   giftsPath,
   otpSendBody,
   otpSendPath,
@@ -12,7 +13,12 @@ import {
   parseChatMessages,
   parseGiftCatalog,
   parseGiftOrder,
+  parsePayOrder,
+  parsePayProducts,
   parseWalletBalance,
+  payOrdersPath,
+  payProductsPath,
+  paySandboxCompletePath,
   postMessageBody,
   roomGiftsPath,
   roomMessagesPath,
@@ -22,6 +28,7 @@ import {
   walletTopupPath,
   type ChatMessage,
   type GiftItem,
+  type PayProduct,
 } from './lib/chatApi'
 import { attachHls, buildPlayUrl, isLiveStatus } from './lib/hlsAttach'
 import { isLoggedIn, normalizeEmail, parseAuthSession, type AuthSession } from './lib/session'
@@ -219,6 +226,7 @@ async function loadRoom() {
     // Public chat history + gift catalog (no auth required)
     void refreshMessages()
     void refreshGifts()
+    void refreshPayProducts()
     if (authed.value) {
       void refreshBalance()
     }
@@ -392,6 +400,69 @@ async function refreshBalance() {
   }
 }
 
+async function refreshPayProducts() {
+  payHint.value = ''
+  try {
+    const res = await fetch(apiUrl(apiBase, payProductsPath()))
+    if (!res.ok) {
+      payHint.value = `pay products ${res.status}`
+      return
+    }
+    payProducts.value = parsePayProducts(await res.json())
+  } catch (e) {
+    payHint.value = String(e)
+  }
+}
+
+async function buyCoins(product: PayProduct) {
+  payHint.value = ''
+  if (!authed.value) {
+    loginOpen.value = true
+    return
+  }
+  payBusy.value = true
+  try {
+    const createRes = await fetch(apiUrl(apiBase, payOrdersPath()), {
+      method: 'POST',
+      headers: authHeaders(accessToken.value),
+      body: JSON.stringify(
+        createPayOrderBody({
+          productId: product.id,
+          channel: 'mock',
+          clientRequestId: crypto.randomUUID?.() ?? `pay-${Date.now()}`,
+        }),
+      ),
+    })
+    if (!createRes.ok) {
+      payHint.value = `create order ${createRes.status}`
+      return
+    }
+    const order = parsePayOrder(await createRes.json())
+    if (!order?.id) {
+      payHint.value = 'invalid pay order response'
+      return
+    }
+    // Server-side mock complete — no client secret required.
+    const doneRes = await fetch(apiUrl(apiBase, paySandboxCompletePath(order.id)), {
+      method: 'POST',
+      headers: authHeaders(accessToken.value),
+    })
+    if (!doneRes.ok) {
+      payHint.value = `sandbox complete ${doneRes.status}`
+      return
+    }
+    const credited = parsePayOrder(await doneRes.json())
+    await refreshBalance()
+    payHint.value = credited
+      ? `Paid ${credited.coins} coins (${credited.status}) · balance ${balance.value}`
+      : `Paid · balance ${balance.value}`
+  } catch (e) {
+    payHint.value = String(e)
+  } finally {
+    payBusy.value = false
+  }
+}
+
 async function doTopup() {
   giftHint.value = ''
   if (!authed.value) {
@@ -560,8 +631,25 @@ async function sendGift(gift: GiftItem) {
       </div>
       <div v-if="authed" class="row topup">
         <input v-model.number="topupAmount" type="number" min="1" placeholder="Topup amount" />
-        <button type="button" :disabled="giftBusy" @click="doTopup">Top up</button>
+        <button type="button" :disabled="giftBusy" @click="doTopup">Top up (legacy mock)</button>
         <button type="button" class="ghost" :disabled="giftBusy" @click="refreshBalance">Refresh</button>
+      </div>
+      <div v-if="authed && payProducts.length" class="pay-packs">
+        <p class="muted">Coin packs (pay mock)</p>
+        <div class="gift-bar">
+          <button
+            v-for="p in payProducts"
+            :key="p.id"
+            type="button"
+            class="gift-btn"
+            :disabled="payBusy"
+            @click="buyCoins(p)"
+          >
+            {{ p.title }}
+            <span class="price">{{ p.amount }} {{ p.currency }}</span>
+          </button>
+        </div>
+        <p v-if="payHint" class="hint">{{ payHint }}</p>
       </div>
       <div class="gift-bar">
         <button
