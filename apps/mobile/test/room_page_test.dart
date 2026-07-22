@@ -7,6 +7,7 @@ import 'package:anylive_mobile/api/rooms_repository.dart';
 import 'package:anylive_mobile/api/social_repository.dart';
 import 'package:anylive_mobile/config/app_config.dart';
 import 'package:anylive_mobile/features/rooms/room_page.dart';
+import 'package:anylive_mobile/player/stream_preview.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -196,9 +197,24 @@ void main() {
 
     expect(find.text('Night Show'), findsWidgets);
     expect(find.text('live'), findsOneWidget);
+    expect(find.byType(StreamPreview), findsOneWidget);
+    expect(find.byKey(const Key('stream-preview-play-icon')), findsOneWidget);
     expect(find.text('http://cdn/live/r1.m3u8'), findsOneWidget);
+    // Scroll so wallet / chat below the tall preview enter the viewport.
+    await tester.scrollUntilVisible(
+      find.textContaining('Balance: 42'),
+      80,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
     expect(find.textContaining('Balance: 42'), findsOneWidget);
     expect(find.text('Top up'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.textContaining('hello room'),
+      80,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
     expect(find.textContaining('Bob:'), findsOneWidget);
     expect(find.textContaining('hello room'), findsOneWidget);
     expect(find.text('Rose (1)'), findsOneWidget);
@@ -229,6 +245,12 @@ void main() {
     await tester.tap(find.byIcon(Icons.send));
     await tester.pumpAndSettle();
 
+    await tester.scrollUntilVisible(
+      find.textContaining('nice stream'),
+      80,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
     expect(find.textContaining('nice stream'), findsOneWidget);
   });
 
@@ -251,6 +273,12 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    await tester.scrollUntilVisible(
+      find.text('Top up'),
+      80,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Top up'));
     await tester.pumpAndSettle();
 
@@ -342,8 +370,11 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    expect(find.byType(StreamPreview), findsOneWidget);
     expect(find.text('Room ended'), findsOneWidget);
     expect(find.text('http://cdn/live/r1.m3u8'), findsNothing);
+    expect(find.byKey(const Key('stream-preview-play-icon')), findsNothing);
+    expect(find.byKey(const Key('copy-stream-url')), findsNothing);
   });
 
   testWidgets('room page copy stream url shows snackbar', (tester) async {
@@ -367,8 +398,13 @@ void main() {
 
     final copyBtn = find.byKey(const Key('copy-stream-url'));
     expect(copyBtn, findsOneWidget);
-    await tester.ensureVisible(copyBtn);
-    await tester.tap(copyBtn, warnIfMissed: true);
+    await tester.scrollUntilVisible(
+      copyBtn,
+      80,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(copyBtn);
     await tester.pump(); // schedule snackbar
     await tester.pump(const Duration(milliseconds: 750));
 

@@ -8,12 +8,13 @@ import '../../api/reports_repository.dart';
 import '../../api/rooms_repository.dart';
 import '../../api/social_repository.dart';
 import '../../config/app_config.dart';
+import '../../player/stream_preview.dart';
 
-/// Live room detail: title/status, HLS URL, chat, gifts, wallet, follow, report.
+/// Live room detail: title/status, HLS preview, chat, gifts, wallet, follow, report.
 ///
-/// In-app video player is deferred (avoids heavy video_player dep in unit tests).
-/// P1 path: surface the HLS URL and let the user open it in an external player
-/// (VLC / browser) via "Copy stream URL".
+/// In-app video player is scaffolded without `video_player` (keeps CI free of
+/// native plugins). [StreamPreview] shows a black play placeholder + copyable
+/// HLS URL for external players (VLC / browser).
 class RoomPage extends StatefulWidget {
   const RoomPage({
     super.key,
@@ -404,26 +405,56 @@ class _RoomPageState extends State<RoomPage> {
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    if (_roomEnded)
-                      Material(
-                        color: Theme.of(context).colorScheme.errorContainer,
-                        child: const Padding(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 12,
+                    Expanded(
+                      child: CustomScrollView(
+                        slivers: [
+                          SliverToBoxAdapter(
+                            child: _RoomHeader(
+                              room: _room,
+                              hlsUrl: _roomEnded ? null : _hlsUrl,
+                              balance: _balance,
+                              onTopup: _topup,
+                              roomEnded: _roomEnded,
+                            ),
                           ),
-                          child: Text('Room ended'),
-                        ),
+                          const SliverToBoxAdapter(child: Divider(height: 1)),
+                          if (_messages.isEmpty)
+                            const SliverFillRemaining(
+                              hasScrollBody: false,
+                              child: Center(child: Text('No messages yet')),
+                            )
+                          else
+                            SliverPadding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              sliver: SliverList(
+                                delegate: SliverChildBuilderDelegate(
+                                  (context, i) {
+                                    final m = _messages[i];
+                                    final name = m.senderName.isEmpty
+                                        ? m.senderId
+                                        : m.senderName;
+                                    return Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 4,
+                                      ),
+                                      child: Text(
+                                        '$name: ${m.body}',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodyMedium,
+                                      ),
+                                    );
+                                  },
+                                  childCount: _messages.length,
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
-                    _RoomHeader(
-                      room: _room,
-                      hlsUrl: _roomEnded ? null : _hlsUrl,
-                      balance: _balance,
-                      onTopup: _topup,
-                      roomEnded: _roomEnded,
                     ),
-                    const Divider(height: 1),
-                    Expanded(child: _ChatList(messages: _messages)),
                     _GiftBar(
                       gifts: _giftsCatalog,
                       onSend: _sendGift,
@@ -501,22 +532,6 @@ class _RoomHeader extends StatelessWidget {
   final VoidCallback onTopup;
   final bool roomEnded;
 
-  void _copyStreamUrl(BuildContext context) {
-    final url = hlsUrl;
-    if (url == null || url.isEmpty) return;
-    // Fire-and-forget clipboard; do not await (plugin may hang under flutter_test).
-    // ignore: unawaited_futures
-    Clipboard.setData(ClipboardData(text: url));
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    messenger?.showSnackBar(
-      const SnackBar(
-        key: Key('stream-url-copied-snackbar'),
-        content: Text('Copied - open in VLC / browser player'),
-        duration: Duration(seconds: 4),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -545,48 +560,11 @@ class _RoomHeader extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text('Owner: ${room.ownerId}', style: theme.textTheme.bodySmall),
-          if (!roomEnded && room.isLive && hlsUrl != null) ...[
-            const SizedBox(height: 8),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('HLS stream', style: theme.textTheme.labelLarge),
-                  const SizedBox(height: 4),
-                  SelectableText(
-                    hlsUrl!,
-                    style: theme.textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '(player not embedded — open URL in external player)',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  OutlinedButton.icon(
-                    key: const Key('copy-stream-url'),
-                    onPressed: () => _copyStreamUrl(context),
-                    icon: const Icon(Icons.copy, size: 16),
-                    label: const Text('Copy stream URL'),
-                  ),
-                ],
-              ),
-            ),
-          ] else if (!roomEnded && room.isLive) ...[
-            const SizedBox(height: 8),
-            Text(
-              'Live — play URL unavailable',
-              style: theme.textTheme.bodyMedium,
-            ),
-          ],
+          const SizedBox(height: 8),
+          StreamPreview(
+            status: room.status,
+            hlsUrl: hlsUrl,
+          ),
           const SizedBox(height: 12),
           Row(
             children: [
