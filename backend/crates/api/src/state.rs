@@ -2,7 +2,10 @@
 
 use std::sync::Arc;
 
-use anylive_auth::{AuthService, JwtConfig, JwtService, OtpConfig, OtpService};
+use anylive_auth::{
+    otp_notifier_from_env, AuthService, JwtConfig, JwtService, NoopOtpNotifier, OtpConfig,
+    OtpService, SharedOtpNotifier,
+};
 use anylive_db::{
     postgres_enabled, AnyChat, AnyDeletedUsers, AnyModeration, AnyOtpStore, AnyProfileExtras,
     AnyRefreshStore, AnyReports, AnySocial, AnyUserStore, AnyWallet, PgPool,
@@ -13,7 +16,10 @@ use anylive_realtime::{
     NoopCentrifugoPublisher,
 };
 
-use crate::guards::{check_production_secrets, is_production_env};
+use crate::guards::{
+    check_production_secrets_ext, is_local_env, is_production_env, mock_topup_allowed,
+};
+use crate::rate_limit::IpRateLimiter;
 use crate::rooms::AnyRoomStore;
 
 /// Auth service with pluggable user + OTP + refresh stores (memory default, Postgres when enabled).
@@ -28,6 +34,8 @@ pub struct AppState {
     pub chat: AnyChat,
     /// Per-user chat post rate limiter (in-memory sliding window).
     pub chat_rate_limiter: ChatRateLimiter,
+    /// Per-IP rate limiter for unauthenticated OTP endpoints.
+    pub otp_ip_limiter: IpRateLimiter,
     pub centrifugo: CentrifugoConfig,
     /// Centrifugo HTTP API publisher (noop when env not set).
     pub centrifugo_publisher: Arc<dyn CentrifugoPublisher>,
@@ -40,6 +48,8 @@ pub struct AppState {
     pub profile_extras: AnyProfileExtras,
     /// Present when `USE_POSTGRES=1` + `DATABASE_URL` were used at startup.
     pub db: Option<PgPool>,
+    /// Whether mock topup is enabled for this process (`ALLOW_MOCK_TOPUP=1`).
+    pub allow_mock_topup: bool,
 }
 
 impl AppState {
@@ -50,6 +60,7 @@ impl AppState {
         wallet: AnyWallet,
         chat: AnyChat,
         chat_rate_limiter: ChatRateLimiter,
+        otp_ip_limiter: IpRateLimiter,
         centrifugo: CentrifugoConfig,
         centrifugo_publisher: Arc<dyn CentrifugoPublisher>,
         moderation: AnyModeration,
@@ -58,6 +69,7 @@ impl AppState {
         deleted_users: AnyDeletedUsers,
         profile_extras: AnyProfileExtras,
         db: Option<PgPool>,
+        allow_mock_topup: bool,
     ) -> Self {
         Self {
             auth,
@@ -66,6 +78,7 @@ impl AppState {
             wallet,
             chat,
             chat_rate_limiter,
+            otp_ip_limiter,
             centrifugo,
             centrifugo_publisher,
             moderation,
@@ -74,15 +87,22 @@ impl AppState {
             deleted_users,
             profile_extras,
             db,
+            allow_mock_topup,
         }
     }
 
     /// Local/dev defaults (fixed OTP `123456`, insecure JWT defaults allowed).
     /// Unchanged for integration tests and offline development — always memory stores.
     pub fn dev() -> Arc<Self> {
-        let jwt = JwtService::new(JwtConfig::from_env());
+        let jwt = JwtService::new(JwtConfig::default());
         let otp = OtpService::new(AnyOtpStore::memory(), OtpConfig::dev());
-        let auth = AuthService::new(AnyUserStore::memory(), otp, AnyRefreshStore::memory(), jwt);
+        let auth = AuthService::with_notifier(
+            AnyUserStore::memory(),
+            otp,
+            AnyRefreshStore::memory(),
+            jwt,
+            Arc::new(NoopOtpNotifier) as SharedOtpNotifier,
+        );
         Arc::new(Self::new(
             auth,
             AnyRoomStore::memory(),
@@ -90,6 +110,8 @@ impl AppState {
             AnyWallet::memory(),
             AnyChat::memory(),
             ChatRateLimiter::default(),
+            // High limit for tests so OTP send is not flaky under suite load.
+            IpRateLimiter::new(10_000, std::time::Duration::from_secs(60)),
             CentrifugoConfig::default(),
             // Tests/offline: never require a live Centrifugo.
             Arc::new(NoopCentrifugoPublisher::new()),
@@ -99,6 +121,7 @@ impl AppState {
             AnyDeletedUsers::memory(),
             AnyProfileExtras::memory(),
             None,
+            true, // tests exercise mock topup
         ))
     }
 
@@ -115,7 +138,9 @@ impl AppState {
     /// - `APP_ENV` — `production` / `prod` enables fail-closed secret checks
     /// - `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` via [`JwtConfig::from_env`]
     /// - `CENTRIFUGO_TOKEN_SECRET` via [`CentrifugoConfig::default`]
-    /// - OTP: fixed/dev OTP only when **not** production; store is dual memory/Postgres
+    /// - `ALLOW_DEV_OTP=1` — explicit fixed OTP (never implied by non-prod APP_ENV)
+    /// - `ALLOW_MOCK_TOPUP=1` — explicit mock wallet topup
+    /// - `OTP_NOTIFIER` — delivery backend (`log` / `smtp` / …); required in production
     /// - `USE_POSTGRES=1` + `DATABASE_URL` — optional Postgres dual stores + migrations
     ///
     /// Realtime routes are always mounted, so Centrifugo secret is always guarded
@@ -124,17 +149,33 @@ impl AppState {
         let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "local".into());
         let jwt_cfg = JwtConfig::from_env();
         let centrifugo = CentrifugoConfig::default();
-        // Secure default OTP outside production; dev fixed OTP only for non-prod.
-        let otp_cfg = if is_production_env(&app_env) {
-            OtpConfig::default()
-        } else {
+        // Fixed OTP only with explicit ALLOW_DEV_OTP — never "not production".
+        let otp_cfg = OtpConfig::from_env();
+        if otp_cfg.dev_fixed_otp && is_production_env(&app_env) {
+            return Err("ALLOW_DEV_OTP is forbidden in production".into());
+        }
+        // Local ergonomics: if neither ALLOW_DEV_OTP nor a notifier is set, default
+        // to fixed OTP for offline dogfood. Staging/dogfood without the flag gets
+        // secure random OTP and must configure OTP_NOTIFIER.
+        let otp_cfg = if !otp_cfg.dev_fixed_otp
+            && is_local_env(&app_env)
+            && std::env::var("OTP_NOTIFIER").is_err()
+            && !is_production_env(&app_env)
+        {
+            tracing::warn!(
+                "local APP_ENV without OTP_NOTIFIER: enabling fixed OTP (set ALLOW_DEV_OTP=0 and OTP_NOTIFIER to disable)"
+            );
+            // Keep secure default for staging; only auto-dev for local/dev/test.
             OtpConfig::dev()
+        } else {
+            otp_cfg
         };
 
         // Realtime token endpoint is always present in this binary.
         const REALTIME_USED: bool = true;
         let srs_webhook = std::env::var("SRS_WEBHOOK_SECRET").ok();
-        check_production_secrets(
+        let otp_notifier_kind = std::env::var("OTP_NOTIFIER").unwrap_or_default();
+        check_production_secrets_ext(
             &app_env,
             &jwt_cfg.access_secret,
             &jwt_cfg.refresh_secret,
@@ -142,9 +183,16 @@ impl AppState {
             Some(&centrifugo.token_secret),
             REALTIME_USED,
             srs_webhook.as_deref(),
+            Some(otp_notifier_kind.as_str()),
         )?;
 
         let jwt = JwtService::new(jwt_cfg);
+        let notifier = if otp_cfg.dev_fixed_otp {
+            // Fixed OTP never needs delivery of a random code.
+            Arc::new(NoopOtpNotifier) as SharedOtpNotifier
+        } else {
+            otp_notifier_from_env()
+        };
 
         let (
             users,
@@ -208,7 +256,11 @@ impl AppState {
         };
 
         let otp = OtpService::new(otp_store, otp_cfg);
-        let auth = AuthService::new(users, otp, refresh, jwt);
+        let auth = AuthService::with_notifier(users, otp, refresh, jwt, notifier);
+        let allow_mock_topup = mock_topup_allowed();
+        if allow_mock_topup {
+            tracing::warn!("ALLOW_MOCK_TOPUP=1: mock wallet topup is enabled");
+        }
 
         let state = Arc::new(Self::new(
             auth,
@@ -217,6 +269,7 @@ impl AppState {
             wallet,
             chat,
             ChatRateLimiter::default(),
+            IpRateLimiter::default(),
             centrifugo,
             publisher_from_env(),
             moderation,
@@ -225,6 +278,7 @@ impl AppState {
             deleted_users,
             profile_extras,
             db,
+            allow_mock_topup,
         ));
         state.wallet.seed_default_gifts().await;
         Ok(state)

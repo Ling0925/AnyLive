@@ -2,7 +2,10 @@
 //!
 //! When `APP_ENV` is `production` or `prod`, reject insecure defaults so a
 //! misconfigured deploy fails closed at process start rather than at first
-//! request.
+//! request. Feature flags (`ALLOW_DEV_OTP`, `ALLOW_MOCK_TOPUP`, …) are also
+//! validated here when production.
+
+use anylive_auth::env_flag_enabled;
 
 /// Default JWT access secret used by [`anylive_auth::JwtConfig::default`].
 pub const DEFAULT_JWT_ACCESS_SECRET: &str = "dev-access-secret-change-me-32chars!!";
@@ -17,6 +20,20 @@ pub fn is_production_env(app_env: &str) -> bool {
         app_env.trim().to_ascii_lowercase().as_str(),
         "production" | "prod"
     )
+}
+
+/// True when `app_env` is explicitly local/dev/test (or empty).
+pub fn is_local_env(app_env: &str) -> bool {
+    matches!(
+        app_env.trim().to_ascii_lowercase().as_str(),
+        "" | "local" | "development" | "dev" | "test"
+    )
+}
+
+/// Mock topup is allowed only with an explicit opt-in flag — never merely
+/// because `APP_ENV` is not production.
+pub fn mock_topup_allowed() -> bool {
+    env_flag_enabled("ALLOW_MOCK_TOPUP")
 }
 
 /// Reject default / weak JWT secrets in production.
@@ -36,12 +53,26 @@ pub fn check_jwt_secrets_for_production(
     Ok(())
 }
 
-/// Reject fixed/dev OTP mode in production (`OtpConfig::dev`).
+/// Reject fixed/dev OTP mode in production (`OtpConfig::dev` / `ALLOW_DEV_OTP`).
 pub fn check_otp_for_production(dev_fixed_otp: bool) -> Result<(), String> {
     if dev_fixed_otp {
-        return Err("production forbids fixed OTP mode (OtpConfig::dev)".into());
+        return Err("production forbids fixed OTP mode (OtpConfig::dev / ALLOW_DEV_OTP)".into());
     }
     Ok(())
+}
+
+/// Production must configure a real OTP notifier (not noop/unconfigured).
+pub fn check_otp_notifier_for_production(notifier_kind: &str) -> Result<(), String> {
+    match notifier_kind.trim().to_ascii_lowercase().as_str() {
+        "log" | "smtp" | "http" | "console" => Ok(()),
+        "noop" | "" | "none" | "unconfigured" => Err(
+            "production requires OTP_NOTIFIER (e.g. log|smtp|http); noop/unconfigured forbidden"
+                .into(),
+        ),
+        other => Err(format!(
+            "production OTP_NOTIFIER={other} is not a known delivery backend"
+        )),
+    }
 }
 
 /// When realtime is enabled, require a non-default Centrifugo token secret.
@@ -73,6 +104,20 @@ pub fn check_srs_webhook_for_production(webhook_secret: Option<&str>) -> Result<
     }
 }
 
+/// Reject mock topup + insecure JWT flags in production.
+pub fn check_feature_flags_for_production() -> Result<(), String> {
+    if env_flag_enabled("ALLOW_MOCK_TOPUP") {
+        return Err("production forbids ALLOW_MOCK_TOPUP".into());
+    }
+    if env_flag_enabled("ALLOW_DEV_OTP") {
+        return Err("production forbids ALLOW_DEV_OTP".into());
+    }
+    if env_flag_enabled("ALLOW_INSECURE_JWT") {
+        return Err("production forbids ALLOW_INSECURE_JWT".into());
+    }
+    Ok(())
+}
+
 /// Composite production guard used at process startup / `AppState::from_env`.
 ///
 /// No-op when `app_env` is not production. `centrifugo_token_secret` is checked
@@ -81,6 +126,8 @@ pub fn check_srs_webhook_for_production(webhook_secret: Option<&str>) -> Result<
 /// `srs_webhook_secret` is the raw `SRS_WEBHOOK_SECRET` env value (or `None` if
 /// unset). Production requires a non-empty secret so publish hooks cannot be
 /// forged without credentials.
+///
+/// `otp_notifier_kind` is the raw `OTP_NOTIFIER` env value (defaults empty).
 pub fn check_production_secrets(
     app_env: &str,
     access_secret: &str,
@@ -90,11 +137,39 @@ pub fn check_production_secrets(
     realtime_used: bool,
     srs_webhook_secret: Option<&str>,
 ) -> Result<(), String> {
+    check_production_secrets_ext(
+        app_env,
+        access_secret,
+        refresh_secret,
+        dev_fixed_otp,
+        centrifugo_token_secret,
+        realtime_used,
+        srs_webhook_secret,
+        None,
+    )
+}
+
+/// Extended production guard including OTP notifier kind.
+#[allow(clippy::too_many_arguments)]
+pub fn check_production_secrets_ext(
+    app_env: &str,
+    access_secret: &str,
+    refresh_secret: &str,
+    dev_fixed_otp: bool,
+    centrifugo_token_secret: Option<&str>,
+    realtime_used: bool,
+    srs_webhook_secret: Option<&str>,
+    otp_notifier_kind: Option<&str>,
+) -> Result<(), String> {
     if !is_production_env(app_env) {
         return Ok(());
     }
     check_jwt_secrets_for_production(access_secret, refresh_secret)?;
     check_otp_for_production(dev_fixed_otp)?;
+    check_feature_flags_for_production()?;
+    if let Some(kind) = otp_notifier_kind {
+        check_otp_notifier_for_production(kind)?;
+    }
     if let Some(secret) = centrifugo_token_secret {
         check_centrifugo_for_production(secret, realtime_used)?;
     } else if realtime_used {
@@ -106,9 +181,22 @@ pub fn check_production_secrets(
     Ok(())
 }
 
+/// Constant-time equality for secrets of equal length (timing-safe compare).
+pub fn constant_time_eq(a: &str, b: &str) -> bool {
+    use subtle::ConstantTimeEq;
+    if a.len() != b.len() {
+        return false;
+    }
+    bool::from(a.as_bytes().ct_eq(b.as_bytes()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    /// Env mutations are process-global; serialize flag tests.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn is_production_env_matches_prod_aliases() {
@@ -120,6 +208,16 @@ mod tests {
         assert!(!is_production_env("development"));
         assert!(!is_production_env("staging"));
         assert!(!is_production_env(""));
+    }
+
+    #[test]
+    fn mock_topup_requires_explicit_flag() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("ALLOW_MOCK_TOPUP");
+        assert!(!mock_topup_allowed());
+        std::env::set_var("ALLOW_MOCK_TOPUP", "1");
+        assert!(mock_topup_allowed());
+        std::env::remove_var("ALLOW_MOCK_TOPUP");
     }
 
     #[test]
@@ -187,6 +285,10 @@ mod tests {
 
     #[test]
     fn prod_rejects_default_centrifugo_when_realtime_used() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("ALLOW_MOCK_TOPUP");
+        std::env::remove_var("ALLOW_DEV_OTP");
+        std::env::remove_var("ALLOW_INSECURE_JWT");
         let err = check_production_secrets(
             "production",
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -202,6 +304,10 @@ mod tests {
 
     #[test]
     fn prod_allows_default_centrifugo_when_realtime_unused() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("ALLOW_MOCK_TOPUP");
+        std::env::remove_var("ALLOW_DEV_OTP");
+        std::env::remove_var("ALLOW_INSECURE_JWT");
         assert!(check_production_secrets(
             "production",
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -216,6 +322,10 @@ mod tests {
 
     #[test]
     fn prod_requires_centrifugo_secret_present_when_realtime_used() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("ALLOW_MOCK_TOPUP");
+        std::env::remove_var("ALLOW_DEV_OTP");
+        std::env::remove_var("ALLOW_INSECURE_JWT");
         let err = check_production_secrets(
             "production",
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -231,6 +341,10 @@ mod tests {
 
     #[test]
     fn prod_requires_srs_webhook_secret() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("ALLOW_MOCK_TOPUP");
+        std::env::remove_var("ALLOW_DEV_OTP");
+        std::env::remove_var("ALLOW_INSECURE_JWT");
         let err = check_production_secrets(
             "production",
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -258,6 +372,10 @@ mod tests {
 
     #[test]
     fn prod_ok_with_strong_secrets() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("ALLOW_MOCK_TOPUP");
+        std::env::remove_var("ALLOW_DEV_OTP");
+        std::env::remove_var("ALLOW_INSECURE_JWT");
         assert!(check_production_secrets(
             "production",
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -266,6 +384,38 @@ mod tests {
             Some("production-centrifugo-hmac-key"),
             true,
             Some("production-srs-webhook-secret"),
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn prod_requires_otp_notifier() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("ALLOW_MOCK_TOPUP");
+        std::env::remove_var("ALLOW_DEV_OTP");
+        std::env::remove_var("ALLOW_INSECURE_JWT");
+        let err = check_production_secrets_ext(
+            "production",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            false,
+            Some("production-centrifugo-hmac-key"),
+            true,
+            Some("production-srs-webhook-secret"),
+            Some(""),
+        )
+        .unwrap_err();
+        assert!(err.contains("OTP_NOTIFIER"));
+
+        assert!(check_production_secrets_ext(
+            "production",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            false,
+            Some("production-centrifugo-hmac-key"),
+            true,
+            Some("production-srs-webhook-secret"),
+            Some("log"),
         )
         .is_ok());
     }
@@ -281,5 +431,12 @@ mod tests {
         assert!(check_srs_webhook_for_production(Some("secret")).is_ok());
         assert!(check_srs_webhook_for_production(None).is_err());
         assert!(check_srs_webhook_for_production(Some("")).is_err());
+    }
+
+    #[test]
+    fn constant_time_eq_basic() {
+        assert!(constant_time_eq("abc", "abc"));
+        assert!(!constant_time_eq("abc", "abd"));
+        assert!(!constant_time_eq("ab", "abc"));
     }
 }

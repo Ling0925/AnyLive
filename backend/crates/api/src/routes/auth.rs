@@ -7,7 +7,7 @@ use anylive_auth::{
 };
 use anylive_domain::User;
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -104,7 +104,31 @@ impl From<TokenPair> for TokenPairDto {
     }
 }
 
-/// Send email OTP (dev: always 123456).
+/// Best-effort client IP for rate limiting (proxy-aware).
+fn client_ip(headers: &HeaderMap, connect: Option<&std::net::SocketAddr>) -> String {
+    if let Some(xff) = headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+    {
+        if let Some(first) = xff.split(',').next() {
+            let ip = first.trim();
+            if !ip.is_empty() {
+                return ip.to_string();
+            }
+        }
+    }
+    if let Some(real) = headers.get("x-real-ip").and_then(|v| v.to_str().ok()) {
+        let ip = real.trim();
+        if !ip.is_empty() {
+            return ip.to_string();
+        }
+    }
+    connect
+        .map(|a| a.ip().to_string())
+        .unwrap_or_else(|| "unknown".into())
+}
+
+/// Send email OTP (dev: always 123456 when ALLOW_DEV_OTP / local fixed mode).
 #[utoipa::path(
     post,
     path = "/api/v1/auth/otp/send",
@@ -114,8 +138,24 @@ impl From<TokenPair> for TokenPairDto {
 )]
 pub async fn otp_send(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(body): Json<OtpSendBody>,
 ) -> Result<StatusCode, ApiError> {
+    let ip = client_ip(&headers, None);
+    state
+        .otp_ip_limiter
+        .check(&format!("otp-send:{ip}"))
+        .await
+        .map_err(ApiError::from)?;
+    // Also throttle per email (in addition to OTP service resend cooldown).
+    let email_key = body.email.trim().to_lowercase();
+    if !email_key.is_empty() {
+        state
+            .otp_ip_limiter
+            .check(&format!("otp-send-email:{email_key}"))
+            .await
+            .map_err(ApiError::from)?;
+    }
     state
         .auth
         .send_otp(OtpSendRequest { email: body.email })
@@ -134,22 +174,44 @@ pub async fn otp_send(
 )]
 pub async fn otp_verify(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(body): Json<OtpVerifyBody>,
 ) -> Result<Json<AuthSessionResponse>, ApiError> {
-    let session = state
-        .auth
-        .verify_otp(OtpVerifyRequest {
-            email: body.email,
-            code: body.code,
-        })
+    let ip = client_ip(&headers, None);
+    state
+        .otp_ip_limiter
+        .check(&format!("otp-verify:{ip}"))
         .await
         .map_err(ApiError::from)?;
-    // Soft-deleted accounts cannot re-login via OTP (user id only known after upsert).
-    if state.deleted_users.is_deleted(session.user.id).await {
-        return Err(ApiError(anylive_common::AppError::unauthorized(
-            "account deleted",
-        )));
-    }
+
+    // Gate deleted + banned **before** issuing tokens / inserting refresh rows.
+    let session = state
+        .auth
+        .verify_otp_gated(
+            OtpVerifyRequest {
+                email: body.email,
+                code: body.code,
+            },
+            |user| {
+                let state = state.clone();
+                async move {
+                    if state.deleted_users.is_deleted(user.id).await {
+                        return Err(anylive_common::AppError::unauthorized("account deleted"));
+                    }
+                    match state.moderation.try_is_banned(user.id).await {
+                        Ok(true) => Err(anylive_common::AppError::new(
+                            anylive_common::ErrorCode::ForbiddenPolicy,
+                            "user is banned",
+                        )),
+                        Ok(false) => Ok(user),
+                        Err(e) => Err(e),
+                    }
+                }
+            },
+        )
+        .await
+        .map_err(ApiError::from)?;
+
     let extras = state.profile_extras.get(session.user.id).await;
     Ok(Json(AuthSessionResponse {
         user: UserDto::from_user(
@@ -187,11 +249,15 @@ pub async fn token_refresh(
             "account deleted",
         )));
     }
-    if state.moderation.is_banned(user_id).await {
-        return Err(ApiError(anylive_common::AppError::new(
-            anylive_common::ErrorCode::ForbiddenPolicy,
-            "user is banned",
-        )));
+    match state.moderation.try_is_banned(user_id).await {
+        Ok(true) => {
+            return Err(ApiError(anylive_common::AppError::new(
+                anylive_common::ErrorCode::ForbiddenPolicy,
+                "user is banned",
+            )));
+        }
+        Ok(false) => {}
+        Err(e) => return Err(ApiError(e)),
     }
     let pair = state
         .auth

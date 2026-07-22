@@ -30,6 +30,7 @@ utoipa = { workspace = true }
 utoipa-swagger-ui = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
+subtle = { workspace = true }
 
 [dev-dependencies]
 tower = { workspace = true }

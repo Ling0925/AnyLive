@@ -98,7 +98,12 @@ pub async fn post_message(
     Path(id): Path<String>,
     Json(body): Json<PostMessageBody>,
 ) -> Result<(axum::http::StatusCode, Json<ChatMessageDto>), ApiError> {
-    if state.moderation.is_muted(user.user_id).await {
+    if state
+        .moderation
+        .try_is_muted(user.user_id)
+        .await
+        .map_err(ApiError)?
+    {
         return Err(ApiError(anylive_common::AppError::new(
             anylive_common::ErrorCode::Forbidden,
             "user is muted",

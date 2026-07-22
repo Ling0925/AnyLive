@@ -5,6 +5,7 @@ pub mod cors;
 mod error;
 pub mod guards;
 mod profile;
+pub mod rate_limit;
 mod rooms;
 mod routes;
 mod state;
@@ -25,9 +26,11 @@ pub use cors::{cors_layer_for_env, cors_layer_from_env, is_permissive_cors};
 pub use error::ApiError;
 pub use guards::{
     check_centrifugo_for_production, check_jwt_secrets_for_production, check_otp_for_production,
-    check_production_secrets, is_production_env, DEFAULT_CENTRIFUGO_TOKEN_SECRET,
+    check_production_secrets, check_production_secrets_ext, constant_time_eq, is_local_env,
+    is_production_env, mock_topup_allowed, DEFAULT_CENTRIFUGO_TOKEN_SECRET,
     DEFAULT_JWT_ACCESS_SECRET, DEFAULT_JWT_REFRESH_SECRET,
 };
+pub use rate_limit::IpRateLimiter;
 pub use state::AppState;
 
 /// Build the Axum router with in-memory auth (binary + integration tests).
@@ -622,8 +625,13 @@ mod tests {
             .unwrap();
         assert_eq!(res.status(), StatusCode::OK);
         let pub_info = body_json(res).await;
+        let stream_key = pub_info["stream_key"].as_str().unwrap();
+        assert!(
+            stream_key.starts_with(&format!("{room_id}_")),
+            "stream_key should be signed room_exp_sig, got {stream_key}"
+        );
+        assert_ne!(stream_key, room_id, "stream_key must not be bare room uuid");
         assert!(pub_info["push_url"].as_str().unwrap().contains(&room_id));
-        assert_eq!(pub_info["stream_key"], room_id);
 
         let res = app
             .clone()
@@ -1114,6 +1122,7 @@ mod tests {
             base.wallet.clone(),
             base.chat.clone(),
             base.chat_rate_limiter.clone(),
+            base.otp_ip_limiter.clone(),
             base.centrifugo.clone(),
             recorder.clone(),
             base.moderation.clone(),
@@ -1122,6 +1131,7 @@ mod tests {
             base.deleted_users.clone(),
             base.profile_extras.clone(),
             None,
+            base.allow_mock_topup,
         ));
         let app = build_app_with_state(state);
         let token = login(&app, "chat-pub@example.com").await;
@@ -1176,6 +1186,7 @@ mod tests {
             base.wallet.clone(),
             base.chat.clone(),
             base.chat_rate_limiter.clone(),
+            base.otp_ip_limiter.clone(),
             base.centrifugo.clone(),
             recorder.clone(),
             base.moderation.clone(),
@@ -1184,6 +1195,7 @@ mod tests {
             base.deleted_users.clone(),
             base.profile_extras.clone(),
             None,
+            base.allow_mock_topup,
         ));
         let app = build_app_with_state(state);
         let host_token = login(&app, "gift-pub-host@example.com").await;
@@ -1789,7 +1801,7 @@ mod tests {
         assert_eq!(res.status(), StatusCode::CREATED);
         let room_id = body_json(res).await["id"].as_str().unwrap().to_string();
 
-        // idle -> deny (code 1)
+        // idle bare UUID -> deny (code 1); bare UUIDs are never valid publish keys now
         let res = app
             .clone()
             .oneshot(
@@ -1820,14 +1832,49 @@ mod tests {
             .unwrap();
         assert_eq!(res.status(), StatusCode::OK);
 
-        // live -> allow (code 0)
+        // Issue signed publish stream key (required by webhook).
         let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/rooms/{room_id}/media/publish"))
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let stream_key = body_json(res).await["stream_key"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        // bare UUID still denied while live
+        let res = app
+            .clone()
             .oneshot(
                 Request::builder()
                     .method("POST")
                     .uri("/api/v1/webhooks/srs/on_publish")
                     .header("content-type", "application/json")
                     .body(Body::from(format!(r#"{{"stream":"{room_id}"}}"#)))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(body_json(res).await["code"], 1);
+
+        // live + signed key -> allow (code 0)
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/webhooks/srs/on_publish")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(r#"{{"stream":"{stream_key}"}}"#)))
                     .unwrap(),
             )
             .await

@@ -162,20 +162,19 @@ pub const MAX_MOCK_TOPUP_AMOUNT: i64 = 100_000;
 
 /// POST /api/v1/wallet/topups — mock topup for local/dogfood sandbox only.
 ///
-/// Disabled when `APP_ENV` is production/prod. Amount capped at
-/// [`MAX_MOCK_TOPUP_AMOUNT`]. Prefer a unique `reference` for idempotency once
-/// the wallet layer enforces unique topup references.
+/// Enabled only when `ALLOW_MOCK_TOPUP=1` (never merely because APP_ENV is not
+/// production). Amount capped at [`MAX_MOCK_TOPUP_AMOUNT`]. Prefer a unique
+/// `reference` for idempotency.
 #[utoipa::path(post, path = "/api/v1/wallet/topups", tag = "wallet", security(("bearerAuth" = [])), request_body = TopupBody, responses((status = 200, body = WalletDto)))]
 pub async fn topup_wallet(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Json(body): Json<TopupBody>,
 ) -> Result<Json<WalletDto>, ApiError> {
-    let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "local".into());
-    if crate::guards::is_production_env(&app_env) {
+    if !state.allow_mock_topup {
         return Err(ApiError(anylive_common::AppError::new(
             anylive_common::ErrorCode::ForbiddenPolicy,
-            "mock topup disabled in production",
+            "mock topup disabled (set ALLOW_MOCK_TOPUP=1 for sandbox)",
         )));
     }
     if body.amount <= 0 {
@@ -224,7 +223,12 @@ pub async fn send_gift(
     Path(id): Path<String>,
     Json(body): Json<SendGiftBody>,
 ) -> Result<(StatusCode, Json<GiftOrderDto>), ApiError> {
-    if state.moderation.is_muted(user.user_id).await {
+    if state
+        .moderation
+        .try_is_muted(user.user_id)
+        .await
+        .map_err(ApiError)?
+    {
         return Err(ApiError(anylive_common::AppError::new(
             anylive_common::ErrorCode::Forbidden,
             "user is muted",
