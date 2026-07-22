@@ -148,6 +148,7 @@ pub async fn srs_on_unpublish(
                 tracing::info!(room = %room_id.0, "srs on_unpublish -> room stopped");
             }
         }
+        state.media.clear_active_stream(room_id).await;
     }
     Ok((StatusCode::OK, Json(SrsHookResponse { code: 0 })))
 }

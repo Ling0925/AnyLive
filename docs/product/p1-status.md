@@ -68,7 +68,7 @@ Scope: [mvp-scope.md](./mvp-scope.md). Status from `git log` + current tree (API
 
 ## Remaining for full P1 dogfood exit
 
-1. End-to-end OBS → SRS → Flutter/H5 HLS play on compose stack (control-plane + media smoke scripts ready; still needs live OBS push + multi-client play dogfood)
+1. Live OBS push week on operator machines (stack + smoke + runbook ready: `./scripts/deploy-test.sh`, `docs/runbooks/go-live-local.md`; play URLs track signed stream keys)
 2. Real email OTP provider (notifier port exists; wire SMTP/HTTP; dual store + hash done)
 
 3. Flutter media_kit / video_player embed (StreamPreview scaffolding + external copy-URL path shipped)

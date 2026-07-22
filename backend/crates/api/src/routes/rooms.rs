@@ -202,6 +202,8 @@ pub async fn stop_room(
         .stop(room_id, user.user_id)
         .await
         .map_err(ApiError::from)?;
+    // Drop active signed stream mapping so play falls back after stop.
+    state.media.clear_active_stream(room_id).await;
     Ok(Json(room.into()))
 }
 

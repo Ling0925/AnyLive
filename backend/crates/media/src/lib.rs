@@ -2,6 +2,12 @@
 //!
 //! Issues publish credentials and play URLs against an external origin (SRS).
 //! Publish stream keys are HMAC-signed so bare room UUIDs cannot push.
+//!
+//! Play URLs follow the **active** signed stream name when the owner has issued
+//! publish credentials, so OBS → SRS HLS path matches what viewers request.
+
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use anylive_common::{AppError, ErrorCode};
 use anylive_domain::{RoomId, Timestamp, UserId};
@@ -11,6 +17,7 @@ use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
+use tokio::sync::RwLock;
 use uuid::Uuid;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -52,9 +59,11 @@ pub struct SrsMediaProvider {
     rtmp_url: String,
     hls_base: String,
     publish_ttl_secs: i64,
-    /// HMAC secret for publish stream tokens. Empty only in legacy tests via
-    /// [`Self::new_unsigned`]; production must set `SRS_PUBLISH_SECRET`.
+    /// HMAC secret for publish stream tokens. Production must set `SRS_PUBLISH_SECRET`.
     publish_secret: String,
+    /// Room → last issued signed stream key (process-local). Play URLs use this
+    /// so HLS path matches the OBS RTMP stream name.
+    active_streams: Arc<RwLock<HashMap<Uuid, String>>>,
 }
 
 impl SrsMediaProvider {
@@ -65,6 +74,7 @@ impl SrsMediaProvider {
             publish_ttl_secs: DEFAULT_PUBLISH_TTL_SECS,
             publish_secret: std::env::var("SRS_PUBLISH_SECRET")
                 .unwrap_or_else(|_| default_publish_secret()),
+            active_streams: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -88,7 +98,7 @@ impl SrsMediaProvider {
         Self::new(rtmp, hls)
     }
 
-    /// Play path stream name is always the bare room id (public watch).
+    /// Default public play stream name (bare room id) when no active publish key.
     pub fn play_stream_name(room_id: RoomId) -> String {
         room_id.0.to_string()
     }
@@ -165,16 +175,34 @@ impl SrsMediaProvider {
         }
     }
 
-    pub fn build_play(&self, room_id: RoomId) -> PlayUrls {
-        // Play stays on bare room id so viewers do not need the publish token.
-        // SRS should map publish stream `{room}_{exp}_{sig}` → HLS path `{room}`
-        // via DVR/app config, or clients can rewrite; for P1 dogfood we also
-        // expose play on the same signed name when configured that way.
-        // Primary public path remains bare room UUID.
-        let id = Self::play_stream_name(room_id);
+    /// Remember the signed stream name so play URLs match OBS/SRS HLS path.
+    pub async fn remember_active_stream(&self, room_id: RoomId, stream_key: impl Into<String>) {
+        self.active_streams
+            .write()
+            .await
+            .insert(room_id.0, stream_key.into());
+    }
+
+    /// Drop active stream mapping (room stop / unpublish / force-close).
+    pub async fn clear_active_stream(&self, room_id: RoomId) {
+        self.active_streams.write().await.remove(&room_id.0);
+    }
+
+    /// Current active stream name for a room, if any.
+    pub async fn active_stream_key(&self, room_id: RoomId) -> Option<String> {
+        self.active_streams.read().await.get(&room_id.0).cloned()
+    }
+
+    /// Build play URLs. Prefer the active signed stream name (matches OBS push);
+    /// fall back to bare room id when no publish has been issued this process.
+    pub async fn build_play(&self, room_id: RoomId) -> PlayUrls {
+        let stream = self
+            .active_stream_key(room_id)
+            .await
+            .unwrap_or_else(|| Self::play_stream_name(room_id));
         PlayUrls {
-            hls: format!("{}/{}.m3u8", self.hls_base, id),
-            flv: Some(format!("{}/{}.flv", self.hls_base, id)),
+            hls: format!("{}/{}.m3u8", self.hls_base, stream),
+            flv: Some(format!("{}/{}.flv", self.hls_base, stream)),
         }
     }
 }
@@ -186,11 +214,14 @@ impl MediaProvider for SrsMediaProvider {
         room_id: RoomId,
         owner: UserId,
     ) -> Result<PublishInfo, AppError> {
-        Ok(self.build_publish(room_id, owner))
+        let info = self.build_publish(room_id, owner);
+        self.remember_active_stream(room_id, info.stream_key.clone())
+            .await;
+        Ok(info)
     }
 
     async fn play_urls(&self, room_id: RoomId) -> Result<PlayUrls, AppError> {
-        Ok(self.build_play(room_id))
+        Ok(self.build_play(room_id).await)
     }
 }
 
@@ -299,11 +330,11 @@ mod tests {
         assert!(p.validate_publish_stream(&bad).is_err());
     }
 
-    #[test]
-    fn play_urls_construction() {
+    #[tokio::test]
+    async fn play_urls_without_publish_use_bare_room() {
         let p = provider();
         let (room, _) = fixed_ids();
-        let urls = p.build_play(room);
+        let urls = p.build_play(room).await;
         assert_eq!(
             urls.hls,
             "http://localhost:8080/live/11111111-1111-1111-1111-111111111111.m3u8"
@@ -311,6 +342,29 @@ mod tests {
         assert_eq!(
             urls.flv.as_deref(),
             Some("http://localhost:8080/live/11111111-1111-1111-1111-111111111111.flv")
+        );
+    }
+
+    #[tokio::test]
+    async fn play_urls_follow_active_signed_stream_key() {
+        let p = provider();
+        let (room, owner) = fixed_ids();
+        let info = p.issue_publish(room, owner).await.unwrap();
+        let urls = p.play_urls(room).await.unwrap();
+        assert!(
+            urls.hls.contains(&info.stream_key),
+            "hls must use signed stream name for OBS/SRS match: {}",
+            urls.hls
+        );
+        assert!(urls.hls.ends_with(".m3u8"));
+        p.clear_active_stream(room).await;
+        let urls2 = p.play_urls(room).await.unwrap();
+        assert_eq!(
+            urls2.hls,
+            format!(
+                "http://localhost:8080/live/{}.m3u8",
+                room.0
+            )
         );
     }
 
@@ -338,5 +392,6 @@ mod tests {
         assert!(p.validate_publish_stream(&info.stream_key).is_ok());
         let play = p.play_urls(room).await.unwrap();
         assert!(play.hls.ends_with(".m3u8"));
+        assert!(play.hls.contains(&info.stream_key));
     }
 }

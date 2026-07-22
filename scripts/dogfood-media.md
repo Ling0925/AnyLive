@@ -25,7 +25,10 @@ Host flow:
 2. `POST /api/v1/rooms` → `POST /api/v1/rooms/{id}/start`
 3. `POST /api/v1/rooms/{id}/media/publish` → copy:
    - `push_url` — full RTMP URL (includes stream name)
-   - `stream_key` — room UUID (matches play path)
+   - `stream_key` — **signed token** `{room_id}_{exp}_{sig}` (NOT the bare room UUID)
+
+Bare room UUIDs are rejected by `on_publish`. The API remembers the issued key so
+play URLs use the same stream name SRS writes for HLS/FLV.
 
 ## 3. OBS custom RTMP
 
@@ -33,9 +36,9 @@ Host flow:
 |---|---|
 | Service | Custom… |
 | Server | `rtmp://localhost:1935/live` (or host from `push_url` without the stream name) |
-| Stream key | room UUID (`stream_key` from media/publish) |
+| Stream key | **full** `stream_key` from media/publish (`{room}_{exp}_{sig}`) |
 
-Start streaming in OBS. Stream name must equal the room UUID.
+Start streaming in OBS. Stream name must equal the full signed `stream_key`.
 
 ## 4. Play HLS (H5 or Flutter)
 
@@ -43,8 +46,12 @@ Fan / public:
 
 ```http
 GET /api/v1/rooms/{id}/media/play
-→ { "hls": "http://localhost:8080/live/{room_id}.m3u8", "flv": "..." }
+→ { "hls": "http://localhost:8080/live/{stream_key}.m3u8", "flv": "..." }
 ```
+
+While a publish credential is active, HLS/FLV use the **same signed stream name**
+OBS pushed (SRS writes `{stream_key}.m3u8`). After stop / unpublish / force-close
+the mapping is cleared and play falls back to bare room id.
 
 - **H5**: open watch page with room id; player attaches via `hls.js` (or native HLS).
 - **Flutter**: room page is control-plane only today — copy the HLS URL into an external player, or paste into Safari/VLC until in-app media_kit lands.
@@ -53,8 +60,8 @@ GET /api/v1/rooms/{id}/media/play
 
 When OBS stops, SRS should call the API webhook (configure callback URL to the API host):
 
-- `POST /api/v1/webhooks/srs/on_unpublish` → room leaves live
-- `POST /api/v1/webhooks/srs/on_publish` → optional gate / audit
+- `POST /api/v1/webhooks/srs/on_unpublish` → room leaves live + clears active stream mapping
+- `POST /api/v1/webhooks/srs/on_publish` → optional gate / audit (signed key required)
 
 Local `deploy/srs/srs.conf` enables `http_hooks` →
 `http://host.docker.internal:8088/api/v1/webhooks/srs/on_publish|on_unpublish`.
@@ -73,7 +80,7 @@ If hooks cannot reach the API, stop the room with `POST .../stop` or admin force
 
 | Piece | Path |
 |---|---|
-| Pure helpers (parse publish/play, stream_key == room_id, SRS probe URL) | `scripts/media_smoke_lib.py` |
+| Pure helpers (parse publish/play, signed stream_key form, SRS probe URL) | `scripts/media_smoke_lib.py` |
 | Unit tests | `python3 -m unittest scripts/test_media_smoke_lib.py` |
 | Live smoke script | `./scripts/dogfood-media-smoke.sh` |
 
@@ -87,5 +94,6 @@ Env:
 | `SKIP_SRS` | `0` | Set `1` to skip the SRS probe |
 
 `dogfood-media-smoke` does **not** push RTMP or wait for HLS segments — it checks that
-publish/play responses are consistent (`stream_key == room_id`, HLS path contains the room id,
-OBS server derived from `push_url`). Byte-plane verification is still OBS → SRS → player.
+publish/play responses are consistent (signed `stream_key` form, HLS path contains the
+stream key / room id, OBS server derived from `push_url`). Byte-plane verification is
+still OBS → SRS → player.

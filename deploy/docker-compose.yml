@@ -100,6 +100,12 @@ services:
       SRS_HLS_BASE: http://localhost:8080/live
       REDIS_URL: redis://redis:6379
       NATS_URL: nats://nats:4222
+      # Dogfood / sandbox flags (defaults match deploy/.env.test; never enable in prod)
+      ALLOW_MOCK_TOPUP: "${ALLOW_MOCK_TOPUP:-1}"
+      ALLOW_DEV_OTP: "${ALLOW_DEV_OTP:-1}"
+      OTP_NOTIFIER: "${OTP_NOTIFIER:-noop}"
+      SRS_PUBLISH_SECRET: "${SRS_PUBLISH_SECRET:-test-srs-publish-secret-change-me}"
+      SRS_WEBHOOK_SECRET: "${SRS_WEBHOOK_SECRET:-test-srs-webhook-secret}"
     depends_on:
       postgres:
         condition: service_healthy

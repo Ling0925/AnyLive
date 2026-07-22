@@ -220,6 +220,7 @@ pub async fn force_close_room(
         .force_close(room_id, None)
         .await
         .map_err(ApiError::from)?;
+    state.media.clear_active_stream(room_id).await;
     // If already closed, force_close may error on transition — domain allows Idle|Live -> Closed.
     let _ = RoomStatus::Closed;
     Ok(Json(room.into()))
