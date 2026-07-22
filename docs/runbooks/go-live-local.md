@@ -33,12 +33,17 @@ API 服务已注入 dogfood 开关（与 `deploy/.env.test` 一致）：
 docker compose -f deploy/docker-compose.yml --profile app down
 ```
 
-## 2. 管理后台初始化
+## 2. 管理后台初始化与网页开播
 
 1. 打开 **http://localhost:8090/**
 2. 邮箱 OTP 登录 — 验证码 **`123456`**（开发固定码）
 3. 首次启动（尚无管理员）时，UI 会对当前用户调用 `POST /api/v1/admin/grant` 做 **bootstrap 授权**
-4. 授权后可：强关直播间、封禁/禁言、处理举报、配置礼物等
+4. 侧栏进入 **「开播」**：
+   - 填写直播标题 → **一键开播**
+   - 页面直接显示 **OBS 服务器**、**串流密钥**、完整推流 URL、观众 HLS
+   - 一键复制，无需手调 API
+5. 「直播间」列表中可点 **推流信息**，对已有房间重新签发并展示 OBS 凭证
+6. 其它运营能力：强关、封禁/禁言、举报、礼物配置、审计
 
 管理端打包时的 API 地址：`http://localhost:8088`（`VITE_API_BASE`）。
 

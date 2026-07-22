@@ -10,22 +10,27 @@ import {
   banUserPath,
   buildHls,
   countByStatus,
+  createRoomPath,
   forceCloseRoomPath,
   giftsListPath,
   grantAdminPath,
-  mePath,
   muteUserPath,
   openReportCount,
   otpSendPath,
   otpVerifyPath,
+  parsePublishInfo,
   reportResolvePath,
   reportsListPath,
   roomPlayPath,
+  roomPublishPath,
+  roomStartPath,
   roomStatusTone,
+  roomStopPath,
   roomsPath,
   shortId,
   unmuteUserPath,
   type AdminNavKey,
+  type PublishInfo,
 } from './lib/admin'
 
 const apiBase = import.meta.env.VITE_API_BASE ?? 'http://localhost:8088'
@@ -86,6 +91,15 @@ const previewBusy = ref(false)
 const previewError = ref('')
 const previewVideoEl = ref<HTMLVideoElement | null>(null)
 let previewDetach: (() => void) | null = null
+
+// --- 网页开播 ---
+const goLiveTitle = ref('运营测试直播')
+const goLiveBusy = ref(false)
+const goLiveRoomId = ref('')
+const goLiveRoomStatus = ref('')
+const goLivePublish = ref<PublishInfo | null>(null)
+const goLiveHls = ref('')
+const goLiveCopyHint = ref('')
 
 const isAuthed = computed(() => Boolean(accessToken.value))
 const liveCount = computed(() => countByStatus(rooms.value, 'live'))
@@ -335,11 +349,196 @@ async function forceCloseRoom(id?: string) {
     if (!res.ok) throw new Error(`force-close ${res.status}`)
     notice.value = `已强关房间 ${shortId(roomId)}`
     roomIdInput.value = ''
+    if (goLiveRoomId.value === roomId) {
+      goLiveRoomStatus.value = 'closed'
+      goLivePublish.value = null
+      goLiveHls.value = ''
+    }
     await Promise.all([loadRooms(), loadAudit()])
   } catch (e) {
     error.value = String(e)
   } finally {
     actionBusy.value = false
+  }
+}
+
+async function copyText(label: string, text: string) {
+  goLiveCopyHint.value = ''
+  if (!text) return
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      goLiveCopyHint.value = `已复制${label}`
+      return
+    }
+  } catch {
+    // fall through
+  }
+  window.prompt(`复制${label}`, text)
+  goLiveCopyHint.value = `${label}已就绪`
+}
+
+/** 一键开播：创建房间 → 开播 → 签发推流凭证 → 拉取 HLS。 */
+async function goLiveStart() {
+  if (!accessToken.value) {
+    error.value = '请先登录'
+    return
+  }
+  const titleText = goLiveTitle.value.trim() || '运营测试直播'
+  notice.value = ''
+  error.value = ''
+  goLiveCopyHint.value = ''
+  goLiveBusy.value = true
+  try {
+    const createRes = await fetch(apiUrl(apiBase, createRoomPath()), {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ title: titleText }),
+    })
+    if (!createRes.ok) throw new Error(`创建房间失败 ${createRes.status}`)
+    const room = await createRes.json()
+    const rid = String(room.id || '')
+    if (!rid) throw new Error('创建房间未返回 id')
+    goLiveRoomId.value = rid
+
+    const startRes = await fetch(apiUrl(apiBase, roomStartPath(rid)), {
+      method: 'POST',
+      headers: authHeaders(),
+    })
+    if (!startRes.ok) throw new Error(`开播失败 ${startRes.status}`)
+    const started = await startRes.json()
+    goLiveRoomStatus.value = String(started.status || 'live')
+
+    const pubRes = await fetch(apiUrl(apiBase, roomPublishPath(rid)), {
+      method: 'POST',
+      headers: authHeaders(),
+    })
+    if (!pubRes.ok) throw new Error(`获取推流凭证失败 ${pubRes.status}`)
+    const pubJson = await pubRes.json()
+    const info = parsePublishInfo(pubJson)
+    if (!info) throw new Error('推流凭证解析失败')
+    goLivePublish.value = info
+
+    try {
+      const playRes = await fetch(apiUrl(apiBase, roomPlayPath(rid)))
+      if (playRes.ok) {
+        const play = await playRes.json()
+        goLiveHls.value = buildHls(play, rid)
+      } else {
+        goLiveHls.value = buildHls(null, rid)
+      }
+    } catch {
+      goLiveHls.value = buildHls(null, rid)
+    }
+
+    notice.value = `已开播：${titleText}（${shortId(rid)}）。请将下方服务器与串流密钥填入 OBS。`
+    await loadRooms()
+  } catch (e) {
+    error.value = String(e)
+  } finally {
+    goLiveBusy.value = false
+  }
+}
+
+/** 仅对当前开播房间刷新推流凭证（密钥过期时用）。 */
+async function goLiveRefreshPublish() {
+  const rid = goLiveRoomId.value.trim()
+  if (!accessToken.value || !rid) {
+    error.value = '请先开播或填写房间'
+    return
+  }
+  goLiveBusy.value = true
+  error.value = ''
+  try {
+    const pubRes = await fetch(apiUrl(apiBase, roomPublishPath(rid)), {
+      method: 'POST',
+      headers: authHeaders(),
+    })
+    if (!pubRes.ok) throw new Error(`刷新推流凭证失败 ${pubRes.status}`)
+    const info = parsePublishInfo(await pubRes.json())
+    if (!info) throw new Error('推流凭证解析失败')
+    goLivePublish.value = info
+    const playRes = await fetch(apiUrl(apiBase, roomPlayPath(rid)))
+    if (playRes.ok) {
+      goLiveHls.value = buildHls(await playRes.json(), rid)
+    }
+    notice.value = '已刷新推流凭证'
+  } catch (e) {
+    error.value = String(e)
+  } finally {
+    goLiveBusy.value = false
+  }
+}
+
+async function goLiveStop() {
+  const rid = goLiveRoomId.value.trim()
+  if (!accessToken.value || !rid) {
+    error.value = '没有进行中的开播房间'
+    return
+  }
+  goLiveBusy.value = true
+  error.value = ''
+  try {
+    const res = await fetch(apiUrl(apiBase, roomStopPath(rid)), {
+      method: 'POST',
+      headers: authHeaders(),
+    })
+    if (!res.ok) throw new Error(`停播失败 ${res.status}`)
+    const room = await res.json()
+    goLiveRoomStatus.value = String(room.status || 'idle')
+    goLivePublish.value = null
+    goLiveHls.value = ''
+    notice.value = `已停播 ${shortId(rid)}`
+    await loadRooms()
+  } catch (e) {
+    error.value = String(e)
+  } finally {
+    goLiveBusy.value = false
+  }
+}
+
+/** 对已有房间重新签发推流凭证并展示。 */
+async function loadPublishForRoom(id: string) {
+  if (!accessToken.value) {
+    error.value = '请先登录'
+    return
+  }
+  const rid = id.trim()
+  if (!rid) return
+  goLiveBusy.value = true
+  error.value = ''
+  nav.value = 'golive'
+  try {
+    goLiveRoomId.value = rid
+    const room = rooms.value.find((r) => r.id === rid)
+    goLiveRoomStatus.value = room?.status || ''
+    if (goLiveRoomStatus.value === 'idle') {
+      const startRes = await fetch(apiUrl(apiBase, roomStartPath(rid)), {
+        method: 'POST',
+        headers: authHeaders(),
+      })
+      if (!startRes.ok) throw new Error(`开播失败 ${startRes.status}`)
+      const started = await startRes.json()
+      goLiveRoomStatus.value = String(started.status || 'live')
+    }
+    const pubRes = await fetch(apiUrl(apiBase, roomPublishPath(rid)), {
+      method: 'POST',
+      headers: authHeaders(),
+    })
+    if (!pubRes.ok) throw new Error(`获取推流凭证失败 ${pubRes.status}`)
+    const info = parsePublishInfo(await pubRes.json())
+    if (!info) throw new Error('推流凭证解析失败')
+    goLivePublish.value = info
+    const playRes = await fetch(apiUrl(apiBase, roomPlayPath(rid)))
+    goLiveHls.value = playRes.ok
+      ? buildHls(await playRes.json(), rid)
+      : buildHls(null, rid)
+    notice.value = `已加载房间 ${shortId(rid)} 的 OBS 推流信息`
+    await loadRooms()
+  } catch (e) {
+    error.value = String(e)
+  } finally {
+    goLiveBusy.value = false
   }
 }
 
@@ -684,6 +883,147 @@ onMounted(() => {
           </div>
         </template>
 
+        <!-- 网页开播 -->
+        <section v-else-if="nav === 'golive'" class="panel">
+          <div class="panel-head">
+            <h2>网页开播</h2>
+            <span v-if="goLiveRoomStatus" class="badge" :class="roomStatusTone(goLiveRoomStatus)">
+              {{ goLiveRoomStatus }}
+            </span>
+          </div>
+          <p class="panel-desc">
+            登录后一键创建房间并开播，页面直接展示 OBS 服务器与串流密钥，无需手调 API。
+            用 OBS 自定义 RTMP 粘贴下方字段即可推流；观众用 HLS 地址或 H5 观看。
+          </p>
+
+          <div class="row">
+            <label class="field">
+              <span>直播标题</span>
+              <input v-model="goLiveTitle" type="text" placeholder="运营测试直播" maxlength="80" />
+            </label>
+            <button
+              type="button"
+              class="btn primary"
+              :disabled="goLiveBusy || !isAuthed"
+              @click="goLiveStart"
+            >
+              {{ goLiveBusy ? '处理中…' : '一键开播' }}
+            </button>
+            <button
+              type="button"
+              class="btn"
+              :disabled="goLiveBusy || !goLiveRoomId || !isAuthed"
+              @click="goLiveRefreshPublish"
+            >
+              刷新推流凭证
+            </button>
+            <button
+              type="button"
+              class="btn danger"
+              :disabled="goLiveBusy || !goLiveRoomId || goLiveRoomStatus === 'closed' || !isAuthed"
+              @click="goLiveStop"
+            >
+              停播
+            </button>
+          </div>
+          <p v-if="!isAuthed" class="flash err">请先登录（OTP 123456）后再开播。</p>
+          <p v-if="goLiveCopyHint" class="flash ok">{{ goLiveCopyHint }}</p>
+
+          <div v-if="goLiveRoomId" class="action-card" style="margin-top: 1rem">
+            <h3>房间信息</h3>
+            <p class="mono">房间 ID：{{ goLiveRoomId }}</p>
+            <p class="muted">状态：{{ goLiveRoomStatus || '—' }}</p>
+            <div class="actions" style="margin-top: 0.5rem">
+              <button type="button" class="btn sm" @click="copyText('房间 ID', goLiveRoomId)">
+                复制房间 ID
+              </button>
+              <button
+                type="button"
+                class="btn sm"
+                @click="previewRoom({ id: goLiveRoomId, status: goLiveRoomStatus || 'live' })"
+              >
+                HLS 预览
+              </button>
+            </div>
+          </div>
+
+          <div v-if="goLivePublish" class="split-actions" style="margin-top: 1rem">
+            <div class="action-card">
+              <h3>OBS 服务器（Server）</h3>
+              <p class="mono" style="word-break: break-all">{{ goLivePublish.server }}</p>
+              <button
+                type="button"
+                class="btn sm primary"
+                @click="copyText('OBS 服务器', goLivePublish.server)"
+              >
+                复制服务器
+              </button>
+            </div>
+            <div class="action-card">
+              <h3>OBS 串流密钥（Stream Key）</h3>
+              <p class="mono" style="word-break: break-all">{{ goLivePublish.streamKey }}</p>
+              <button
+                type="button"
+                class="btn sm primary"
+                @click="copyText('串流密钥', goLivePublish.streamKey)"
+              >
+                复制串流密钥
+              </button>
+              <p class="dim" style="margin-top: 0.5rem; font-size: 0.8rem">
+                格式为签名 key（room_exp_sig），不要填裸 UUID。
+              </p>
+            </div>
+            <div class="action-card">
+              <h3>完整推流 URL（可选）</h3>
+              <p class="mono" style="word-break: break-all">{{ goLivePublish.pushUrl }}</p>
+              <button
+                type="button"
+                class="btn sm"
+                @click="copyText('推流 URL', goLivePublish.pushUrl)"
+              >
+                复制完整 URL
+              </button>
+              <p v-if="goLivePublish.expiresAt" class="dim" style="margin-top: 0.5rem; font-size: 0.8rem">
+                过期：{{ goLivePublish.expiresAt }}
+              </p>
+            </div>
+            <div class="action-card">
+              <h3>观众 HLS</h3>
+              <p class="mono" style="word-break: break-all">{{ goLiveHls || '—' }}</p>
+              <div class="actions">
+                <button
+                  type="button"
+                  class="btn sm"
+                  :disabled="!goLiveHls"
+                  @click="copyText('HLS 地址', goLiveHls)"
+                >
+                  复制 HLS
+                </button>
+                <a
+                  v-if="goLiveHls"
+                  class="btn sm"
+                  :href="goLiveHls"
+                  target="_blank"
+                  rel="noopener"
+                >打开 HLS</a>
+              </div>
+              <p class="dim" style="margin-top: 0.5rem; font-size: 0.8rem">
+                H5 观看：在 h5-web 打开 ?room={{ goLiveRoomId || '房间ID' }}
+              </p>
+            </div>
+          </div>
+
+          <div class="panel" style="margin-top: 1.25rem; box-shadow: none">
+            <h3 style="margin: 0 0 0.5rem; font-size: 0.95rem">OBS 填写说明</h3>
+            <ol class="muted" style="margin: 0; padding-left: 1.2rem; font-size: 0.88rem">
+              <li>设置 → 推流 → 服务选「自定义」</li>
+              <li>服务器填上方「OBS 服务器」</li>
+              <li>串流密钥填上方「OBS 串流密钥」（完整签名串）</li>
+              <li>开始推流后，观众用 HLS 或 H5 房间页观看</li>
+            </ol>
+          </div>
+        </section>
+
         <!-- Rooms -->
         <section v-else-if="nav === 'rooms'" class="panel">
           <div class="panel-head">
@@ -695,7 +1035,7 @@ onMounted(() => {
               <button type="button" class="btn sm" :disabled="listBusy" @click="loadRooms">刷新</button>
             </div>
           </div>
-          <p class="panel-desc">查看房间状态、HLS 预览，或一键强关违规直播。</p>
+          <p class="panel-desc">查看房间状态、HLS 预览，或一键强关违规直播。点「推流信息」可在开播页查看 OBS 地址与密钥。</p>
 
           <div class="table-wrap" v-if="rooms.length">
             <table class="data">
@@ -718,6 +1058,14 @@ onMounted(() => {
                     <button type="button" class="btn sm" :disabled="previewBusy" @click="previewRoom(r)">
                       预览
                     </button>
+                    <button
+                      type="button"
+                      class="btn sm primary"
+                      :disabled="goLiveBusy || !isAuthed || r.status === 'closed'"
+                      @click="loadPublishForRoom(r.id)"
+                    >
+                      推流信息
+                    </button>
                     <button type="button" class="btn sm" @click="useRoomId(r.id)">填入强关</button>
                     <button
                       type="button"
@@ -732,7 +1080,7 @@ onMounted(() => {
               </tbody>
             </table>
           </div>
-          <p v-else class="empty">暂无房间。先通过 App / API 创建并开播。</p>
+          <p v-else class="empty">暂无房间。可到「开播」页一键创建并开播。</p>
 
           <div v-if="previewRoomId" class="preview">
             <div class="panel-head">

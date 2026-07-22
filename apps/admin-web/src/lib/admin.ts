@@ -5,7 +5,15 @@ export function adminTitle(env: string): string {
 export function canAccessModule(role: string, module: string): boolean {
   if (role === 'admin') return true
   if (role === 'moderator') {
-    return ['dashboard', 'rooms', 'reports', 'users', 'moderation', 'audit'].includes(module)
+    return [
+      'dashboard',
+      'golive',
+      'rooms',
+      'reports',
+      'users',
+      'moderation',
+      'audit',
+    ].includes(module)
   }
   return false
 }
@@ -13,6 +21,7 @@ export function canAccessModule(role: string, module: string): boolean {
 /** Sidebar nav keys used by the ops shell. */
 export type AdminNavKey =
   | 'dashboard'
+  | 'golive'
   | 'rooms'
   | 'reports'
   | 'gifts'
@@ -28,6 +37,7 @@ export type AdminNavItem = {
 
 export const ADMIN_NAV: AdminNavItem[] = [
   { key: 'dashboard', label: '总览', blurb: '直播与运营概览' },
+  { key: 'golive', label: '开播', blurb: '网页开播 / OBS 推流凭证' },
   { key: 'rooms', label: '直播间', blurb: '房间列表 / 预览 / 强关' },
   { key: 'reports', label: '举报队列', blurb: '用户举报处理' },
   { key: 'gifts', label: '礼物配置', blurb: '礼物目录管理' },
@@ -130,6 +140,71 @@ export function reportResolvePath(id: string): string {
 export function roomPlayPath(id: string): string {
   const clean = id.replace(/^\/+|\/+$/g, '')
   return `${API_PATHS.rooms}/${encodeURIComponent(clean)}/media/play`
+}
+
+/** Owner create room: `POST /api/v1/rooms`. */
+export function createRoomPath(): string {
+  return API_PATHS.rooms
+}
+
+/** Owner start live: `POST /api/v1/rooms/{id}/start`. */
+export function roomStartPath(id: string): string {
+  const clean = id.replace(/^\/+|\/+$/g, '')
+  return `${API_PATHS.rooms}/${encodeURIComponent(clean)}/start`
+}
+
+/** Owner stop live: `POST /api/v1/rooms/{id}/stop`. */
+export function roomStopPath(id: string): string {
+  const clean = id.replace(/^\/+|\/+$/g, '')
+  return `${API_PATHS.rooms}/${encodeURIComponent(clean)}/stop`
+}
+
+/** Owner publish credentials: `POST /api/v1/rooms/{id}/media/publish`. */
+export function roomPublishPath(id: string): string {
+  const clean = id.replace(/^\/+|\/+$/g, '')
+  return `${API_PATHS.rooms}/${encodeURIComponent(clean)}/media/publish`
+}
+
+/**
+ * OBS Server field from full RTMP push URL + stream key.
+ * push_url is rtmp://host/app/stream — OBS wants Server=rtmp://host/app.
+ */
+export function obsServerFromPushUrl(pushUrl: string, streamKey: string): string {
+  const push = (pushUrl || '').trim()
+  if (!push) return ''
+  const key = (streamKey || '').trim()
+  if (key) {
+    const suffix = `/${key}`
+    if (push.endsWith(suffix)) return push.slice(0, -suffix.length)
+  }
+  const schemeSep = '://'
+  const schemeI = push.indexOf(schemeSep)
+  const minI = schemeI >= 0 ? schemeI + schemeSep.length : 0
+  const i = push.lastIndexOf('/')
+  if (i > minI) return push.slice(0, i)
+  return push
+}
+
+export type PublishInfo = {
+  pushUrl: string
+  streamKey: string
+  expiresAt: string
+  server: string
+}
+
+/** Parse media/publish JSON into OBS-ready fields. */
+export function parsePublishInfo(json: unknown): PublishInfo | null {
+  if (!json || typeof json !== 'object') return null
+  const o = json as Record<string, unknown>
+  const pushUrl = typeof o.push_url === 'string' ? o.push_url.trim() : ''
+  const streamKey = typeof o.stream_key === 'string' ? o.stream_key.trim() : ''
+  if (!pushUrl || !streamKey) return null
+  return {
+    pushUrl,
+    streamKey,
+    expiresAt: typeof o.expires_at === 'string' ? o.expires_at : '',
+    server: obsServerFromPushUrl(pushUrl, streamKey),
+  }
 }
 
 /**

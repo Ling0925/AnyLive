@@ -9,6 +9,7 @@ import {
   buildHls,
   canAccessModule,
   countByStatus,
+  createRoomPath,
   forceCloseRoomPath,
   giftsListPath,
   grantAdminPath,
@@ -16,13 +17,18 @@ import {
   muteUserPath,
   navLabel,
   normalizeApiBase,
+  obsServerFromPushUrl,
   openReportCount,
   otpSendPath,
   otpVerifyPath,
+  parsePublishInfo,
   reportResolvePath,
   reportsListPath,
   roomPlayPath,
+  roomPublishPath,
+  roomStartPath,
   roomStatusTone,
+  roomStopPath,
   roomsPath,
   shortId,
   unmuteUserPath,
@@ -45,6 +51,7 @@ describe('admin helpers', () => {
   it('exposes sidebar nav items', () => {
     expect(ADMIN_NAV.map((n) => n.key)).toEqual([
       'dashboard',
+      'golive',
       'rooms',
       'reports',
       'gifts',
@@ -52,6 +59,7 @@ describe('admin helpers', () => {
       'audit',
     ])
     expect(navLabel('rooms')).toBe('直播间')
+    expect(navLabel('golive')).toBe('开播')
   })
 })
 
@@ -102,6 +110,40 @@ describe('api path helpers', () => {
   it('exposes room play path', () => {
     expect(roomPlayPath('room-1')).toBe('/api/v1/rooms/room-1/media/play')
     expect(roomPlayPath('/room-1/')).toBe('/api/v1/rooms/room-1/media/play')
+  })
+
+  it('exposes go-live room lifecycle paths', () => {
+    expect(createRoomPath()).toBe('/api/v1/rooms')
+    expect(roomStartPath('r1')).toBe('/api/v1/rooms/r1/start')
+    expect(roomStopPath('/r1/')).toBe('/api/v1/rooms/r1/stop')
+    expect(roomPublishPath('r1')).toBe('/api/v1/rooms/r1/media/publish')
+  })
+
+  it('derives OBS server from push_url and stream_key', () => {
+    const key = 'uuid_exp_sig'
+    expect(
+      obsServerFromPushUrl(`rtmp://localhost:1935/live/${key}`, key),
+    ).toBe('rtmp://localhost:1935/live')
+    expect(obsServerFromPushUrl('rtmp://host/live/foo', 'bar')).toBe(
+      'rtmp://host/live',
+    )
+    expect(obsServerFromPushUrl('', 'x')).toBe('')
+  })
+
+  it('parses publish response for OBS fields', () => {
+    const key = '11111111-1111-1111-1111-111111111111_99_abc'
+    const info = parsePublishInfo({
+      push_url: `rtmp://localhost:1935/live/${key}`,
+      stream_key: key,
+      expires_at: '2099-01-01T00:00:00Z',
+    })
+    expect(info).toEqual({
+      pushUrl: `rtmp://localhost:1935/live/${key}`,
+      streamKey: key,
+      expiresAt: '2099-01-01T00:00:00Z',
+      server: 'rtmp://localhost:1935/live',
+    })
+    expect(parsePublishInfo({})).toBeNull()
   })
 
   it('builds hls url from play response or cdn fallback', () => {
