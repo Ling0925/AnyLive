@@ -16,6 +16,8 @@
 | [04-非功能与容量](./04-非功能与容量.md) | SLO、压测门禁、容量阶梯 | 后端 / SRE |
 | [05-风险与第一刀](./05-风险与第一刀.md) | 风险、关键路径、批准后立即执行项 | TL / PM |
 | [海外合规与上架闸门](../compliance/海外合规与上架闸门.md) | App Store/Play、GDPR、支付、审核策略钩子 | 产品 / 法务对接 |
+| [架构总览](../architecture/overview.md) | 平面划分、硬约束、阶段映射 | 全员 |
+| [支付通道接入设计](../architecture/payment-channels.md) | PayProvider、Jeepay/易支付/TokenPay、订单与 webhook | 后端 / 客户端 |
 
 ## 一页纸（English）
 

@@ -51,6 +51,8 @@ Flutter / Vue H5 / Vben Admin
 | P5 | 容量阶梯 L3、on-call、发布开关 |
 | P6 | Provider 换 CN 实现（可选） |
 
+支付通道设计（Jeepay / 易支付 / TokenPay 与 `PayProvider`）：见 [支付通道接入设计](./payment-channels.md)。
+
 ## 仓库落位
 
 见产品规划 [00-规划总览 §6](../product/00-规划总览.md) 与 ADR §8。
