@@ -36,6 +36,18 @@ impl PostgresModeration {
     }
 
     pub async fn is_admin(&self, user_id: UserId) -> bool {
+        match self.try_is_admin(user_id).await {
+            Ok(v) => v,
+            // Fail closed for privilege: treat DB errors as non-admin.
+            Err(err) => {
+                tracing::error!(error = %err, "postgres is_admin failed (fail-closed)");
+                false
+            }
+        }
+    }
+
+    /// Fallible admin check — use when callers must distinguish DB failure.
+    pub async fn try_is_admin(&self, user_id: UserId) -> Result<bool, AppError> {
         let row: Option<bool> = sqlx::query_scalar(
             r#"
             SELECT true FROM admin_users WHERE user_id = $1
@@ -44,21 +56,32 @@ impl PostgresModeration {
         .bind(user_id.0)
         .fetch_optional(&self.pool)
         .await
-        .ok()
-        .flatten();
-        row.unwrap_or(false)
+        .map_err(map_db)?;
+        Ok(row.unwrap_or(false))
     }
 
     pub async fn admin_count(&self) -> usize {
+        match self.try_admin_count().await {
+            Ok(n) => n,
+            // Fail closed for bootstrap: never report 0 on DB error (would reopen self-grant).
+            Err(err) => {
+                tracing::error!(error = %err, "postgres admin_count failed (fail-closed as max)");
+                usize::MAX
+            }
+        }
+    }
+
+    /// Fallible admin count — use when callers must distinguish DB failure.
+    pub async fn try_admin_count(&self) -> Result<usize, AppError> {
         let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM admin_users")
             .fetch_one(&self.pool)
             .await
-            .unwrap_or(0);
-        count.max(0) as usize
+            .map_err(map_db)?;
+        Ok(count.max(0) as usize)
     }
 
     pub async fn require_admin(&self, user_id: UserId) -> Result<(), AppError> {
-        if self.is_admin(user_id).await {
+        if self.try_is_admin(user_id).await? {
             Ok(())
         } else {
             Err(AppError::new(ErrorCode::Forbidden, "admin only"))
@@ -94,6 +117,18 @@ impl PostgresModeration {
     }
 
     pub async fn is_banned(&self, user_id: UserId) -> bool {
+        match self.try_is_banned(user_id).await {
+            Ok(v) => v,
+            // Fail closed for policy: treat DB errors as banned so enforcement does not open.
+            Err(err) => {
+                tracing::error!(error = %err, "postgres is_banned failed (fail-closed as banned)");
+                true
+            }
+        }
+    }
+
+    /// Fallible ban check — returns `AppError` on DB failure.
+    pub async fn try_is_banned(&self, user_id: UserId) -> Result<bool, AppError> {
         let row: Option<bool> = sqlx::query_scalar(
             r#"
             SELECT true FROM banned_users WHERE user_id = $1
@@ -102,9 +137,8 @@ impl PostgresModeration {
         .bind(user_id.0)
         .fetch_optional(&self.pool)
         .await
-        .ok()
-        .flatten();
-        row.unwrap_or(false)
+        .map_err(map_db)?;
+        Ok(row.unwrap_or(false))
     }
 
     pub async fn mute_user(
@@ -168,6 +202,18 @@ impl PostgresModeration {
     }
 
     pub async fn is_muted(&self, user_id: UserId) -> bool {
+        match self.try_is_muted(user_id).await {
+            Ok(v) => v,
+            // Fail closed for policy: treat DB errors as muted.
+            Err(err) => {
+                tracing::error!(error = %err, "postgres is_muted failed (fail-closed as muted)");
+                true
+            }
+        }
+    }
+
+    /// Fallible mute check — returns `AppError` on DB failure.
+    pub async fn try_is_muted(&self, user_id: UserId) -> Result<bool, AppError> {
         let row: Option<bool> = sqlx::query_scalar(
             r#"
             SELECT true FROM muted_users WHERE user_id = $1
@@ -176,9 +222,8 @@ impl PostgresModeration {
         .bind(user_id.0)
         .fetch_optional(&self.pool)
         .await
-        .ok()
-        .flatten();
-        row.unwrap_or(false)
+        .map_err(map_db)?;
+        Ok(row.unwrap_or(false))
     }
 
     pub async fn audit_force_close(
@@ -304,10 +349,26 @@ impl AnyModeration {
         }
     }
 
+    /// Fallible admin check (Postgres maps DB errors; memory always Ok).
+    pub async fn try_is_admin(&self, user_id: UserId) -> Result<bool, AppError> {
+        match self {
+            Self::Memory(m) => Ok(m.is_admin(user_id).await),
+            Self::Postgres(m) => m.try_is_admin(user_id).await,
+        }
+    }
+
     pub async fn admin_count(&self) -> usize {
         match self {
             Self::Memory(m) => m.admin_count().await,
             Self::Postgres(m) => m.admin_count().await,
+        }
+    }
+
+    /// Fallible admin count (Postgres maps DB errors; memory always Ok).
+    pub async fn try_admin_count(&self) -> Result<usize, AppError> {
+        match self {
+            Self::Memory(m) => Ok(m.admin_count().await),
+            Self::Postgres(m) => m.try_admin_count().await,
         }
     }
 
@@ -334,6 +395,14 @@ impl AnyModeration {
         match self {
             Self::Memory(m) => m.is_banned(user_id).await,
             Self::Postgres(m) => m.is_banned(user_id).await,
+        }
+    }
+
+    /// Fallible ban check (Postgres maps DB errors; memory always Ok).
+    pub async fn try_is_banned(&self, user_id: UserId) -> Result<bool, AppError> {
+        match self {
+            Self::Memory(m) => Ok(m.is_banned(user_id).await),
+            Self::Postgres(m) => m.try_is_banned(user_id).await,
         }
     }
 
@@ -365,6 +434,14 @@ impl AnyModeration {
         match self {
             Self::Memory(m) => m.is_muted(user_id).await,
             Self::Postgres(m) => m.is_muted(user_id).await,
+        }
+    }
+
+    /// Fallible mute check (Postgres maps DB errors; memory always Ok).
+    pub async fn try_is_muted(&self, user_id: UserId) -> Result<bool, AppError> {
+        match self {
+            Self::Memory(m) => Ok(m.is_muted(user_id).await),
+            Self::Postgres(m) => m.try_is_muted(user_id).await,
         }
     }
 
@@ -454,6 +531,22 @@ mod tests {
         assert!(sql::DELETE_MUTED.contains("DELETE FROM muted_users"));
         assert!(sql::INSERT_AUDIT.contains("admin_audit"));
         assert!(sql::SELECT_RECENT_AUDIT.contains("ORDER BY created_at DESC"));
+    }
+
+    #[tokio::test]
+    async fn memory_try_helpers_match_bool_paths() {
+        let m = AnyModeration::memory();
+        let admin = UserId::new();
+        let user = UserId::new();
+        assert_eq!(m.try_admin_count().await.unwrap(), 0);
+        assert!(!m.try_is_admin(admin).await.unwrap());
+        m.grant_admin(admin).await;
+        assert_eq!(m.try_admin_count().await.unwrap(), 1);
+        assert!(m.try_is_admin(admin).await.unwrap());
+        m.ban_user(admin, user, "spam").await.unwrap();
+        assert!(m.try_is_banned(user).await.unwrap());
+        m.mute_user(admin, user, "noise").await.unwrap();
+        assert!(m.try_is_muted(user).await.unwrap());
     }
 
     #[tokio::test]

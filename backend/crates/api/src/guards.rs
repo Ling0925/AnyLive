@@ -63,10 +63,24 @@ pub fn check_centrifugo_for_production(
     Ok(())
 }
 
+/// Reject open SRS webhook auth in production (secret must be non-empty).
+pub fn check_srs_webhook_for_production(webhook_secret: Option<&str>) -> Result<(), String> {
+    match webhook_secret {
+        Some(s) if !s.trim().is_empty() => Ok(()),
+        _ => Err(
+            "production requires SRS_WEBHOOK_SECRET (open webhooks forbidden)".into(),
+        ),
+    }
+}
+
 /// Composite production guard used at process startup / `AppState::from_env`.
 ///
 /// No-op when `app_env` is not production. `centrifugo_token_secret` is checked
 /// only when `realtime_used` is true (pass `None` to skip).
+///
+/// `srs_webhook_secret` is the raw `SRS_WEBHOOK_SECRET` env value (or `None` if
+/// unset). Production requires a non-empty secret so publish hooks cannot be
+/// forged without credentials.
 pub fn check_production_secrets(
     app_env: &str,
     access_secret: &str,
@@ -74,6 +88,7 @@ pub fn check_production_secrets(
     dev_fixed_otp: bool,
     centrifugo_token_secret: Option<&str>,
     realtime_used: bool,
+    srs_webhook_secret: Option<&str>,
 ) -> Result<(), String> {
     if !is_production_env(app_env) {
         return Ok(());
@@ -87,6 +102,7 @@ pub fn check_production_secrets(
             "production requires CENTRIFUGO_TOKEN_SECRET when realtime is used".into(),
         );
     }
+    check_srs_webhook_for_production(srs_webhook_secret)?;
     Ok(())
 }
 
@@ -115,6 +131,7 @@ mod tests {
             true,
             Some(DEFAULT_CENTRIFUGO_TOKEN_SECRET),
             true,
+            None,
         )
         .is_ok());
     }
@@ -128,6 +145,7 @@ mod tests {
             false,
             Some("strong-centrifugo-secret-xyz"),
             true,
+            Some("webhook-secret"),
         )
         .unwrap_err();
         assert!(err.contains("default JWT"));
@@ -161,6 +179,7 @@ mod tests {
             true,
             Some("strong-centrifugo-secret-xyz"),
             true,
+            Some("webhook-secret"),
         )
         .unwrap_err();
         assert!(err.contains("fixed OTP"));
@@ -175,6 +194,7 @@ mod tests {
             false,
             Some(DEFAULT_CENTRIFUGO_TOKEN_SECRET),
             true,
+            Some("webhook-secret"),
         )
         .unwrap_err();
         assert!(err.contains("CENTRIFUGO_TOKEN_SECRET"));
@@ -189,6 +209,7 @@ mod tests {
             false,
             Some(DEFAULT_CENTRIFUGO_TOKEN_SECRET),
             false,
+            Some("webhook-secret"),
         )
         .is_ok());
     }
@@ -202,9 +223,37 @@ mod tests {
             false,
             None,
             true,
+            Some("webhook-secret"),
         )
         .unwrap_err();
         assert!(err.contains("CENTRIFUGO_TOKEN_SECRET"));
+    }
+
+    #[test]
+    fn prod_requires_srs_webhook_secret() {
+        let err = check_production_secrets(
+            "production",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            false,
+            Some("production-centrifugo-hmac-key"),
+            true,
+            None,
+        )
+        .unwrap_err();
+        assert!(err.contains("SRS_WEBHOOK_SECRET"));
+
+        let err_empty = check_production_secrets(
+            "production",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            false,
+            Some("production-centrifugo-hmac-key"),
+            true,
+            Some("  "),
+        )
+        .unwrap_err();
+        assert!(err_empty.contains("SRS_WEBHOOK_SECRET"));
     }
 
     #[test]
@@ -216,6 +265,7 @@ mod tests {
             false,
             Some("production-centrifugo-hmac-key"),
             true,
+            Some("production-srs-webhook-secret"),
         )
         .is_ok());
     }
@@ -228,5 +278,8 @@ mod tests {
         assert!(check_centrifugo_for_production(DEFAULT_CENTRIFUGO_TOKEN_SECRET, true).is_err());
         assert!(check_centrifugo_for_production(DEFAULT_CENTRIFUGO_TOKEN_SECRET, false).is_ok());
         assert!(check_centrifugo_for_production("short", true).is_err());
+        assert!(check_srs_webhook_for_production(Some("secret")).is_ok());
+        assert!(check_srs_webhook_for_production(None).is_err());
+        assert!(check_srs_webhook_for_production(Some("")).is_err());
     }
 }

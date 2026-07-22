@@ -56,7 +56,8 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
             return Err(ApiError(AppError::unauthorized("account deleted")));
         }
         // Enforce bans on every authenticated request (chat/gift/room/admin).
-        if state.moderation.is_banned(user_id).await {
+        // Use fallible check so DB errors surface as Internal rather than fail-open.
+        if state.moderation.try_is_banned(user_id).await.map_err(ApiError)? {
             return Err(ApiError(AppError::new(
                 ErrorCode::ForbiddenPolicy,
                 "user is banned",

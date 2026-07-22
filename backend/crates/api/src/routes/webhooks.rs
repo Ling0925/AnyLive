@@ -51,6 +51,10 @@ fn parse_room_stream(stream: &str) -> Option<RoomId> {
 }
 
 /// Validate optional shared secret for SRS callbacks.
+///
+/// When `SRS_WEBHOOK_SECRET` is unset/empty the hook is open (local/dev only).
+/// Production startup requires a non-empty secret via
+/// [`crate::guards::check_srs_webhook_for_production`].
 pub fn check_webhook_secret(headers: &HeaderMap, query: &WebhookQuery) -> Result<(), ApiError> {
     let expected = match std::env::var("SRS_WEBHOOK_SECRET") {
         Ok(s) if !s.is_empty() => s,
@@ -134,6 +138,10 @@ pub async fn srs_on_unpublish(
 mod tests {
     use super::*;
     use axum::http::HeaderValue;
+    use std::sync::Mutex;
+
+    /// Env vars are process-global; serialize webhook secret tests to avoid races.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn parse_stream_uuid() {
@@ -147,6 +155,7 @@ mod tests {
 
     #[test]
     fn webhook_secret_open_when_unset() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // Other tests may set this env var; force open mode for this case.
         std::env::remove_var("SRS_WEBHOOK_SECRET");
         // Also tolerate empty string as open.
@@ -160,6 +169,7 @@ mod tests {
 
     #[test]
     fn webhook_secret_rejects_missing() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("SRS_WEBHOOK_SECRET", "s3cret");
         let headers = HeaderMap::new();
         let q = WebhookQuery::default();
@@ -169,6 +179,7 @@ mod tests {
 
     #[test]
     fn webhook_secret_accepts_header() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("SRS_WEBHOOK_SECRET", "s3cret");
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -182,6 +193,7 @@ mod tests {
 
     #[test]
     fn webhook_secret_accepts_query() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("SRS_WEBHOOK_SECRET", "s3cret");
         let headers = HeaderMap::new();
         let q = WebhookQuery {

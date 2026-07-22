@@ -133,6 +133,7 @@ impl AppState {
 
         // Realtime token endpoint is always present in this binary.
         const REALTIME_USED: bool = true;
+        let srs_webhook = std::env::var("SRS_WEBHOOK_SECRET").ok();
         check_production_secrets(
             &app_env,
             &jwt_cfg.access_secret,
@@ -140,6 +141,7 @@ impl AppState {
             otp_cfg.dev_fixed_otp,
             Some(&centrifugo.token_secret),
             REALTIME_USED,
+            srs_webhook.as_deref(),
         )?;
 
         let jwt = JwtService::new(jwt_cfg);

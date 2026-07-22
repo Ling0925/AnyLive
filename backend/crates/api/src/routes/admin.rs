@@ -78,8 +78,17 @@ pub async fn grant_admin(
     let target = Uuid::parse_str(&body.user_id)
         .map_err(|_| ApiError(anylive_common::AppError::validation("invalid user_id")))?;
     let is_self = target == user.user_id.0;
-    let admin_count = state.moderation.admin_count().await;
-    let caller_is_admin = state.moderation.is_admin(user.user_id).await;
+    // Fallible counts/checks: DB errors must not reopen the bootstrap window.
+    let admin_count = state
+        .moderation
+        .try_admin_count()
+        .await
+        .map_err(ApiError)?;
+    let caller_is_admin = state
+        .moderation
+        .try_is_admin(user.user_id)
+        .await
+        .map_err(ApiError)?;
 
     if admin_count == 0 {
         // Bootstrap window: only self-grant is allowed (prevents granting a peer

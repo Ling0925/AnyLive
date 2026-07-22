@@ -132,6 +132,10 @@ impl<S: OtpStore> OtpService<S> {
     }
 
     /// Validate OTP for email; consumes the challenge on success.
+    ///
+    /// Uses take-first so concurrent successful verifies cannot both accept the
+    /// same code (second caller sees "not found"). Failed attempts put the
+    /// challenge back with an incremented counter under the store's write path.
     pub async fn verify(&self, email: &str, code: &str) -> Result<String, AppError> {
         let email = normalize_email(email)?;
         let submitted = OtpCode::parse(code)?;
@@ -143,19 +147,20 @@ impl<S: OtpStore> OtpService<S> {
             return Ok(email);
         }
 
+        // Atomically claim the challenge so only one verifier can succeed.
         let mut challenge = self
             .store
-            .get(&email)
+            .take(&email)
             .await?
             .ok_or_else(|| AppError::new(ErrorCode::AuthInvalidOtp, "OTP not found or expired"))?;
 
         if challenge.expires_at < Utc::now() {
-            let _ = self.store.take(&email).await;
+            // Already removed via take — do not put expired codes back.
             return Err(AppError::new(ErrorCode::AuthInvalidOtp, "OTP expired"));
         }
 
         if challenge.attempts >= OTP_MAX_ATTEMPTS {
-            let _ = self.store.take(&email).await;
+            // Already removed via take.
             return Err(AppError::new(
                 ErrorCode::AuthInvalidOtp,
                 "too many OTP attempts",
@@ -164,16 +169,14 @@ impl<S: OtpStore> OtpService<S> {
 
         if !constant_time_eq(&challenge.code, submitted.as_str()) {
             challenge.attempts += 1;
-            // Burn after the failed attempt that hits the limit.
-            if challenge.attempts >= OTP_MAX_ATTEMPTS {
-                let _ = self.store.take(&email).await;
-            } else {
+            // Burn after the failed attempt that hits the limit (leave deleted).
+            if challenge.attempts < OTP_MAX_ATTEMPTS {
                 self.store.put(&email, challenge).await?;
             }
             return Err(AppError::new(ErrorCode::AuthInvalidOtp, "invalid OTP"));
         }
 
-        let _ = self.store.take(&email).await;
+        // Success: challenge already consumed by take.
         Ok(email)
     }
 }
@@ -282,6 +285,27 @@ mod tests {
         let s = svc(true);
         let email = s.verify("solo@example.com", DEV_OTP_CODE).await.unwrap();
         assert_eq!(email, "solo@example.com");
+    }
+
+    #[tokio::test]
+    async fn concurrent_correct_verify_succeeds_only_once() {
+        // take-first: two concurrent success verifies must not both accept the code.
+        let s = svc(false);
+        let code = s.send("race@example.com").await.unwrap();
+        let (a, b) = tokio::join!(
+            s.verify("race@example.com", &code),
+            s.verify("race@example.com", &code),
+        );
+        let wins = [a.is_ok(), b.is_ok()].into_iter().filter(|x| *x).count();
+        let loses = [a.is_err(), b.is_err()]
+            .into_iter()
+            .filter(|x| *x)
+            .count();
+        assert_eq!(wins, 1, "exactly one concurrent verify may succeed");
+        assert_eq!(loses, 1, "the other must fail as consumed");
+        // Challenge fully consumed — further verify fails.
+        let err = s.verify("race@example.com", &code).await.unwrap_err();
+        assert_eq!(err.code, ErrorCode::AuthInvalidOtp);
     }
 
     #[tokio::test]
