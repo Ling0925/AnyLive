@@ -24,8 +24,8 @@ pub use jwt::{
 /// Alias matching the architecture name `TokenService`.
 pub use jwt::JwtService as TokenService;
 pub use notifier::{
-    otp_notifier_from_env, LogOtpNotifier, NoopOtpNotifier, OtpNotifier, SharedOtpNotifier,
-    UnconfiguredOtpNotifier,
+    otp_notifier_from_env, HttpOtpNotifier, LogOtpNotifier, NoopOtpNotifier, OtpNotifier,
+    SharedOtpNotifier, UnconfiguredOtpNotifier,
 };
 pub use otp::{
     env_flag_enabled, hash_otp_code, normalize_email, OtpCode, OtpConfig, OtpService,

@@ -61,12 +61,42 @@ pub fn check_otp_for_production(dev_fixed_otp: bool) -> Result<(), String> {
     Ok(())
 }
 
-/// Production must configure a real OTP notifier (not noop/unconfigured).
+/// Production must configure a real OTP notifier with a delivery endpoint.
+///
+/// - `smtp` / `http` / `webhook` require `OTP_HTTP_URL` or `OTP_SMTP_WEBHOOK_URL`
+/// - `log` / `noop` / empty are forbidden in production
 pub fn check_otp_notifier_for_production(notifier_kind: &str) -> Result<(), String> {
     match notifier_kind.trim().to_ascii_lowercase().as_str() {
-        "log" | "smtp" | "http" | "console" => Ok(()),
+        "smtp" | "http" | "webhook" => {
+            let url = std::env::var("OTP_HTTP_URL")
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .or_else(|| {
+                    std::env::var("OTP_SMTP_WEBHOOK_URL")
+                        .ok()
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                });
+            let Some(url) = url else {
+                return Err(
+                    "production OTP_NOTIFIER=smtp|http|webhook requires OTP_HTTP_URL or OTP_SMTP_WEBHOOK_URL"
+                        .into(),
+                );
+            };
+            if !(url.starts_with("https://") || url.starts_with("http://127.0.0.1") || url.starts_with("http://localhost")) {
+                return Err(
+                    "production OTP_HTTP_URL must be https:// (or localhost for emergency break-glass)"
+                        .into(),
+                );
+            }
+            Ok(())
+        }
+        "log" | "console" => Err(
+            "production forbids OTP_NOTIFIER=log (no real delivery); use smtp|http with URL".into(),
+        ),
         "noop" | "" | "none" | "unconfigured" => Err(
-            "production requires OTP_NOTIFIER (e.g. log|smtp|http); noop/unconfigured forbidden"
+            "production requires OTP_NOTIFIER=smtp|http with OTP_HTTP_URL; noop/unconfigured forbidden"
                 .into(),
         ),
         other => Err(format!(
@@ -403,6 +433,8 @@ mod tests {
         std::env::remove_var("ALLOW_MOCK_TOPUP");
         std::env::remove_var("ALLOW_DEV_OTP");
         std::env::remove_var("ALLOW_INSECURE_JWT");
+        std::env::remove_var("OTP_HTTP_URL");
+        std::env::remove_var("OTP_SMTP_WEBHOOK_URL");
         let err = check_production_secrets_ext(
             "production",
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -416,7 +448,8 @@ mod tests {
         .unwrap_err();
         assert!(err.contains("OTP_NOTIFIER"));
 
-        assert!(check_production_secrets_ext(
+        // log has no real delivery — forbidden in production.
+        let err_log = check_production_secrets_ext(
             "production",
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -426,7 +459,27 @@ mod tests {
             Some("production-srs-webhook-secret"),
             Some("log"),
         )
+        .unwrap_err();
+        assert!(err_log.contains("log") || err_log.contains("OTP_NOTIFIER"));
+
+        // smtp without URL fails.
+        let err_smtp = check_otp_notifier_for_production("smtp").unwrap_err();
+        assert!(err_smtp.contains("OTP_HTTP_URL") || err_smtp.contains("URL"));
+
+        std::env::set_var("OTP_HTTP_URL", "https://mail.example/send");
+        assert!(check_otp_notifier_for_production("http").is_ok());
+        assert!(check_production_secrets_ext(
+            "production",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            false,
+            Some("production-centrifugo-hmac-key"),
+            true,
+            Some("production-srs-webhook-secret"),
+            Some("http"),
+        )
         .is_ok());
+        std::env::remove_var("OTP_HTTP_URL");
     }
 
     #[test]
