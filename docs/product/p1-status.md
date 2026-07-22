@@ -26,10 +26,13 @@ Scope: [mvp-scope.md](./mvp-scope.md). Status from `git log` + current tree (API
 | Social follow / unfollow + following list | Done | `feat(social)` |
 | Hot + following live feeds | Done | `feat(feed)` |
 | User reports API | Done | `POST /api/v1/reports` |
-| Postgres schema 001–005 | Done | `backend/migrations/` through `005_otp_challenges.sql` |
+| Postgres schema 001–006 | Done | through `006_wallet_topup_idempotency.sql` + OTP challenges |
 | Postgres dual store (users/rooms/wallet/social/moderation/reports/chat/profile_extras/**deleted_users**/**refresh_tokens**/**otp_challenges**) | Done | `USE_POSTGRES=1`; all dual stores including OTP |
-| SRS on_publish / on_unpublish webhooks | Done | `routes/webhooks.rs` |
-| Production secret guards (OTP / JWT / etc.) | Done | API startup guards |
+| SRS on_publish / on_unpublish webhooks | Done | signed HMAC publish keys; header-only webhook secret |
+| Production secret guards (OTP / JWT / SRS webhook / feature flags) | Done | `ALLOW_DEV_OTP`, `ALLOW_MOCK_TOPUP`, `OTP_NOTIFIER`, `SRS_WEBHOOK_SECRET` |
+| OTP hash-at-rest + notifier port + IP rate limit | Done | peppered SHA-256; `OtpNotifier`; per-IP send/verify limit |
+| Moderation fail-closed + audited bootstrap | Done | try_* paths; atomic bootstrap grant |
+
 | Compliance stubs: legal privacy/terms, account export, soft-delete | Done | API + Flutter `ComplianceRepository` |
 | Chat rate limit (5 / 10s) | Done | `ChatRateLimiter` |
 | Live-only gifts + public active gift catalog | Done | `ROOM_NOT_LIVE` / filter active |
@@ -38,7 +41,8 @@ Scope: [mvp-scope.md](./mvp-scope.md). Status from `git log` + current tree (API
 | Flutter go-live OBS publish dialog + copy HLS for external player | Done | `room_list_page` publish info; room page copy stream URL |
 | Flutter in-app HLS stream preview scaffolding | Done | `StreamPreview` + `hls_player_logic` (URL stage/copy/ended; media_kit embed still open) |
 | H5 HLS watch + share deep-link + room-ended UI | Done | `hlsAttach` + `share` |
-| H5 optional login + room chat + gifts + mock topup | Done | session in localStorage; public watch still works without auth |
+| H5 optional login + room chat + gifts + mock topup | Done | session in localStorage; 8s status poll; chat/gifts gated when not live |
+
 | Admin-web dark ops console (sidebar modules) | Done | login + dashboard/rooms/reports/gifts/moderation/audit |
 | Production CORS restriction | Done | `CORS_ALLOWED_ORIGINS` required when `APP_ENV=production` |
 | 1k WS loadtest harness (dry-run) | Done | `scripts/loadtest/ws-1k-baseline.sh` + report stub (full Centrifugo run still operator) |
@@ -55,8 +59,9 @@ Scope: [mvp-scope.md](./mvp-scope.md). Status from `git log` + current tree (API
 | Centrifugo publish | Wired; needs real Centrifugo URL/secret for live fan-out |
 | Admin UI | Dark ops shell with modules; not full Vben suite |
 | Flutter player | StreamPreview scaffolding shipped; media_kit / video_player embed still open |
-| OTP delivery | Dev fixed code path; no real email provider (store is dual memory/Postgres) |
-| Top-up | Mock topup only (no Stripe/payment provider) |
+| OTP delivery | Notifier port + hash store done; real SMTP/SMS provider still open (use `OTP_NOTIFIER=log` or fixed OTP via `ALLOW_DEV_OTP`) |
+| Top-up | Mock topup only behind `ALLOW_MOCK_TOPUP=1` (no Stripe/payment provider) |
+
 | SRS webhooks in local conf | `deploy/srs/srs.conf` has `http_hooks` → API `:8088` (host.docker.internal) |
 
 ---
@@ -64,7 +69,8 @@ Scope: [mvp-scope.md](./mvp-scope.md). Status from `git log` + current tree (API
 ## Remaining for full P1 dogfood exit
 
 1. End-to-end OBS → SRS → Flutter/H5 HLS play on compose stack (control-plane + media smoke scripts ready; still needs live OBS push + multi-client play dogfood)
-2. Real email OTP provider (dev fixed code `123456` is the current harness; dual store done)
+2. Real email OTP provider (notifier port exists; wire SMTP/HTTP; dual store + hash done)
+
 3. Flutter media_kit / video_player embed (StreamPreview scaffolding + external copy-URL path shipped)
 4. Full Centrifugo 1k WS run with filled report numbers + device smoke matrix
 5. Full Vben admin modules if required beyond current dark ops shell
