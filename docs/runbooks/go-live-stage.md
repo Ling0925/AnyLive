@@ -27,6 +27,18 @@ cp deploy/.env.stage.example deploy/.env.stage
 #       OTP_NOTIFIER=http · FEATURE_PK=0 FEATURE_COHOST=0 · 无 PAY mock
 ```
 
+**本地 stage 拓扑排练（无云账号也可）：**
+
+```bash
+# 叠层 compose + 铸造密钥；无 ESP 时加 STAGE_LOCAL_ALLOW_DEV_OTP=1
+STAGE_LOCAL_ALLOW_DEV_OTP=1 ./scripts/stage-up.sh
+# 备份 / 隔离恢复
+./scripts/backup-pg.sh
+./scripts/restore-pg-drill.sh reports/pg-backup-*.dump
+```
+
+工件：`deploy/docker-compose.stage.yml` · `deploy/.env.stage.local.example` · `docs/product/p2-status.md`。
+
 本地对照默认见根目录 [.env.example](../../.env.example)；测试栈 mock 默认见 [deploy/.env.test](../../deploy/.env.test)（**勿**当 stage 用）。
 
 ---

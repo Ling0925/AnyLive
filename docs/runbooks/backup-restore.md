@@ -48,5 +48,7 @@
 - 钱包对账：`GET /api/v1/admin/wallet/reconcile`
 - Stage 发布：`docs/runbooks/go-live-stage.md`
 - 本地栈：`./scripts/deploy-test.sh`（**不替代**生产备份演练）
+- **一键 dump：** `./scripts/backup-pg.sh` → `reports/pg-backup-*.dump`
+- **隔离恢复演练：** `./scripts/restore-pg-drill.sh <dump>` → 新建 `anylive_drill_*` + `reports/backup-restore-*.md`（**不**覆盖 live `anylive`）
 
-_状态：手册已就绪；勾选「生产备份与恢复演练 1 次」需人工执行并归档报告。_
+_状态：手册 + 脚本已就绪；云上生产演练仍需你在目标环境执行并归档。_

@@ -20,6 +20,7 @@
 | [p1-git-split-plan](./p1-git-split-plan.md) | Stage 0 脏工作区拆分草案（A–F，**不自动提交**） | TL / 全员 |
 | [p1-parallel-tracks](./p1-parallel-tracks.md) | 后端 / Admin / Flutter **三轨并行**任务板与接口契约 | 研发 / TL |
 | [solo-owner-mode](./solo-owner-mode.md) | **个人项目**运作：完整实现、无签字关闸 | Owner / Agent |
+| [p2-status](./p2-status.md) | P2 Soft Launch 子里程碑（M2.1–M2.4）与工程落地 | Owner / SRE |
 | [flutter-youtube-ux](./flutter-youtube-ux.md) | Flutter **YouTube 风格**直播 UX / IA / 组件与分阶段 | 产品 / Flutter / 设计 |
 | [h5-youtube-ux](./h5-youtube-ux.md) | H5 **RoomWatch** 观播 UX / 共享 Token / 单页 IA（对齐 Flutter） | 产品 / H5 / 设计 |
 | [event-dictionary](./event-dictionary.md) | 客户端埋点事件名与 props 约定（P4） | 客户端 / 数据 |

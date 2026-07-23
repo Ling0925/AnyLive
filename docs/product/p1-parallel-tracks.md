@@ -303,7 +303,8 @@ A=执行 · R=负责结果 · C=协商 · I=知会
 | V-FL-1 | FL | optional | owner | | 真机/H5 自测即可；矩阵 prefill 可选、**不**强制 Pass |
 | V-FL-2 | FL | optional | owner | | 自己走 login→feed→play→chat→gift；**无** Recording URL 关闸 |
 | V-ALL-1 | 全员 | n/a (solo) | | | 个人项目不做缺陷会仪式 |
-| V-ALL-2 | 全员 | doing | owner | | 主题 commit 习惯；非签字门禁 |
+| V-ALL-2 | 全员 | done | owner | 2026-07-23 | dogfood 主题 commit 已收口（mobile/h5/docs）；后续按主题继续 |
+| P2-M2.1 | SRE/BE | doing | owner | 2026-07-23 | stage-up + backup/restore 脚本 + p2-status；见 [p2-status.md](./p2-status.md) |
 
 状态：`todo` / `doing` / `blocked` / `done`。
 
