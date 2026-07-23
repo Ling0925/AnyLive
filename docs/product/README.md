@@ -19,6 +19,7 @@
 | [p3-p4-experimental](./p3-p4-experimental.md) | 连麦/PK/埋点/OAuth/推送 **非 P1 退出**；默认关开关 | 决策 / 全员 |
 | [p1-git-split-plan](./p1-git-split-plan.md) | Stage 0 脏工作区拆分草案（A–F，**不自动提交**） | TL / 全员 |
 | [p1-parallel-tracks](./p1-parallel-tracks.md) | 后端 / Admin / Flutter **三轨并行**任务板与接口契约 | 研发 / TL |
+| [flutter-youtube-ux](./flutter-youtube-ux.md) | Flutter **YouTube 风格**直播 UX / IA / 组件与分阶段 | 产品 / Flutter / 设计 |
 | [event-dictionary](./event-dictionary.md) | 客户端埋点事件名与 props 约定（P4） | 客户端 / 数据 |
 | [海外合规与上架闸门](../compliance/海外合规与上架闸门.md) | App Store/Play、GDPR、支付、审核策略钩子 | 产品 / 法务对接 |
 | [架构总览](../architecture/overview.md) | 平面划分、硬约束、阶段映射 | 全员 |

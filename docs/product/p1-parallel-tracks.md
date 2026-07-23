@@ -257,41 +257,66 @@ A=执行 · R=负责结果 · C=协商 · I=知会
 
 ## 11. 进度看板（复制到 Issue / 表格）
 
+> **看板日期：** 2026-07-23  
+> **Wave 1 控制面：** 三轨任务 ID 代码侧已收口（审计 doneIds + gap-close 实现）。  
+> **Wave 1 集体 DoD：** **未整体签字通过** — 仍依赖 Wave 2 人工项（设备矩阵、缺陷会、ESP、OBS 周等）。自动化绿 ≠ 出口放行。
+
 | ID | 轨道 | 状态 | 负责人 | 目标日 | 备注 |
 |---|---|---|---|---|---|
-| BE-1 | BE | todo | | | |
-| BE-2 | BE | todo | | | |
-| BE-3 | BE | todo | | | |
-| BE-4 | BE | todo | | | |
-| BE-5 | BE | todo | | | |
-| BE-6 | BE | todo | | | |
-| BE-7 | BE | todo | | | |
-| BE-8 | BE | todo | | | |
-| BE-9 | BE | todo | | | |
-| AD-1 | AD | todo | | | |
-| AD-2 | AD | todo | | | |
-| AD-3 | AD | todo | | | |
-| AD-4 | AD | todo | | | |
-| AD-5 | AD | todo | | | |
-| AD-6 | AD | todo | | | |
-| AD-7 | AD | todo | | | |
-| AD-8 | AD | todo | | | |
-| AD-9 | AD | todo | | | |
-| FL-1 | FL | todo | | | |
-| FL-2 | FL | todo | | | |
-| FL-3 | FL | todo | | | |
-| FL-4 | FL | todo | | | |
-| FL-5 | FL | todo | | | |
-| FL-6 | FL | todo | | | |
-| FL-7 | FL | todo | | | |
-| FL-8 | FL | todo | | | |
-| FL-9 | FL | todo | | | |
-| FL-10 | FL | todo | | | |
-| FL-11 | FL | todo | | | |
-| V-ALL-1 | 全员 | todo | | | 缺陷会 |
-| V-ALL-2 | 全员 | todo | | | git 收敛 |
+| BE-1 | BE | done | | | 审计 done；dogfood 捕获 fan `refresh_token` → `POST /auth/token/refresh` 轮转断言，新 access 打 `GET /me` |
+| BE-2 | BE | done | | | 审计 done；rooms/media/publish/play 主路径在 smoke 覆盖 |
+| BE-3 | BE | done | | | 审计 done；soft chat blocklist（`spamword`）；`CHAT_BLOCKLIST` 进 `deploy/.env.test` + compose api env |
+| BE-4 | BE | done | | | 审计 done；wallet/gifts ledger 幂等 |
+| BE-5 | BE | done | | | 审计 done；pay sandbox-complete 入账路径 |
+| BE-6 | BE | done | | | 审计 done；smoke：`ensure_admin` 后 GET reports + PATCH resolve（fan 举报） |
+| BE-7 | BE | done | | | 审计 done；feed/search/presence P1 边缘 |
+| BE-8 | BE | done | | | 审计 done；compliance export/delete 实质字段 |
+| BE-9 | BE | done | | | 本地 PASS 证据 `reports/`（gitignored）：api-smoke + 10min-path 20260723；CI `dogfood-api-smoke` 非阻塞 `continue-on-error`；runbook 已对齐 |
+| BE-X | BE | done | | | 后置：openapi.yaml 为 sole client/CI 契约（`contracts/openapi/README.md` + 03 诚实注）；utoipa `paths()` 刻意不完整；FEATURE_PK/COHOST 仍 0 |
+| AD-1 | AD | done | | | 审计 done；OTP 登录 + token 持有 |
+| AD-2 | AD | done | | | 审计 done；房间表/状态 |
+| AD-3 | AD | done | | | 审计 done；OBS 推流信息复制；`data-testid` 覆盖 golive |
+| AD-4 | AD | done | | | 审计 done；mute/ban/force-close；testid 覆盖 |
+| AD-5 | AD | done | | | 审计 done + gap-close：礼物 edit/deactivate（`POST admin/gifts` optional `id`+`active`）；编辑/启用停用 UI |
+| AD-6 | AD | done | | | 审计 done；举报 resolve；testid 覆盖 |
+| AD-7 | AD | done | | | 审计 done；wallet reconcile；testid 覆盖 |
+| AD-8 | AD | done | | | 审计 done；HLS 预览可选路径 |
+| AD-9 | AD | done | | | 审计 done；`vue-tsc` clean；vitest 19/19 |
+| FL-1 | FL | done | | | 审计 done；会话持久化/恢复/Logout |
+| FL-2 | FL | done | | | 审计 done；H5 gap-close：年龄勾选必填 + 可选隐私勾选；OTP 后 best-effort `PATCH /me` |
+| FL-3 | FL | done | | | 审计 done；Feed 热门/关注 |
+| FL-4 | FL | done | | | 审计 done；房间列表 + Go live / publish |
+| FL-5 | FL | done | | | 审计 done；房间页聊天/礼物/结束态 |
+| FL-6 | FL | done | | | 审计 done；StreamPreview / 降级文案 |
+| FL-7 | FL | done | | | 审计 done；关注 + 举报入口 |
+| FL-8 | FL | done | | | 审计 done；H5 gap-close：Privacy 面板 export 剪贴板 + DELETE /me 确认清 session |
+| FL-9 | FL | done | | | 审计 done + gap-close：WalletPage ledger ≤20 条；mock topup / sandbox buy 后刷新 |
+| FL-10 | FL | done | | | 审计 done；WS + HTTP 轮询回退 |
+| FL-11 | FL | done | | | 审计 done；widget/repo 单测；`flutter test` 绿 |
+| V-BE-1 | BE | todo | | | **人工/运维：** 真 OTP 通道（ESP/HTTP）或书面接受 dev-only |
+| V-BE-2 | BE | todo | | | **人工/运维：** stage 配置 / 1k soak 或风险接受书 → `reports/` |
+| V-AD-1 | AD | todo | | | **人工：** 运营预置礼物目录、admin 账号、15min 演示走查 |
+| V-FL-1 | FL | todo | | | **人工/设备：** 中端 Android + 近两代 iPhone 矩阵模板 |
+| V-FL-2 | FL | todo | | | **人工：** 10 分钟真人路径录屏（可与 OBS 同学） |
+| V-ALL-1 | 全员 | todo | | | **人工：** 缺陷会 — 无开放 P0 纪要 |
+| V-ALL-2 | 全员 | todo | | | git 按 split-plan 收敛 → tag 候选（未要求本板提交） |
 
-状态建议：`todo` / `doing` / `blocked` / `done`。
+状态：`todo` / `doing` / `blocked` / `done`。
+
+### Wave1 gap close（automation · 2026-07-23）
+
+控制面缺口已用脚本/UI/契约补齐，**不替代** Wave 2 人工签字：
+
+| 缺口 | 动作 |
+|---|---|
+| refresh 轮转未进 smoke | dogfood-api-smoke：OTP verify → refresh → 新 access `/me` |
+| admin reports 处置未断言 | smoke：admin GET reports + PATCH resolve |
+| 敏感词仅文档 | soft blocklist assert + `CHAT_BLOCKLIST=spamword` 测试栈 |
+| dogfood 仅口头绿 | `reports/*` 本地 PASS 日志（gitignore）；CI job 非阻塞 |
+| OpenAPI vs utoipa | 契约 sole source 文档化；utoipa 不全不挡 P1 |
+| Admin 礼物仅创建 | upsert/edit/active + testid 全路径 |
+| H5 年龄/隐私/删号 | 登录门 + export/delete 面板；`chatApi` me helpers |
+| 钱包无 ledger UI | WalletPage 拉 ledger，topup/buy 后刷新 |
 
 ---
 
@@ -305,7 +330,10 @@ A=执行 · R=负责结果 · C=协商 · I=知会
 4. 三轨约定的 OpenAPI 无未同步 breaking change；  
 5. PK/连麦未出现在 Demo 脚本。  
 
-→ 可进入 Wave 2 出口验证，并按 split-plan 推进 **A/B/C** 合入。
+**2026-07-23 状态：** 上表 1–5 的**自动化/代码侧**已基本满足（BE-9 本地 PASS + CI 非阻塞；AD/FL 主路径与 gap-close 完成；OpenAPI 为 sole contract；FEATURE_PK/COHOST 关）。  
+**尚未**把 Wave 1 集体 DoD 标为「全员签字通过」：Wave 2 人工项（V-BE-1/2、V-AD-1、V-FL-1/2、V-ALL-1）仍为 `todo`，设备矩阵 / 缺陷会 / ESP / OBS 周不得伪造。
+
+→ 可**进入** Wave 2 出口验证流程，并按 split-plan 推进 **A/B/C** 合入；出口 tag 仍卡人工项。
 
 ---
 
