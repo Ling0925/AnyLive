@@ -4,6 +4,7 @@ import 'api/session_store.dart';
 import 'config/app_config.dart';
 import 'features/home/home_page.dart';
 import 'navigation/app_routes.dart';
+import 'theme/any_theme.dart';
 
 class AnyLiveApp extends StatefulWidget {
   const AnyLiveApp({
@@ -64,14 +65,9 @@ class _AnyLiveAppState extends State<AnyLiveApp> {
       // OS task switcher title encodes flavor (WBS E8.1); UI chrome stays "AnyLive".
       title: flavor == 'local' ? 'AnyLive' : 'AnyLive ($flavor)',
       debugShowCheckedModeBanner: widget.config.isLocal,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF6C5CE7),
-          brightness: Brightness.dark,
-        ),
-        useMaterial3: true,
-      ),
+      theme: anyDarkTheme(),
       // [AppRoutes.home] documents the shell root for a future go_router map.
+      // HomePage is a thin MainShell shim (preserves login / test entry).
       home: _loading
           ? const Scaffold(
               body: Center(child: CircularProgressIndicator()),

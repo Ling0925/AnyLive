@@ -12,6 +12,9 @@ class AppRoutes {
   static const wallet = '/wallet';
   static const feed = '/feed';
   static const rooms = '/rooms';
+  static const following = '/following';
+  static const goLive = '/go-live';
+  static const you = '/you';
 
   /// Room detail: `/rooms/:roomId`
   static String room(String roomId) => '/rooms/$roomId';

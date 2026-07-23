@@ -214,21 +214,9 @@ void main() {
     expect(find.byType(StreamPreview), findsOneWidget);
     expect(find.byKey(const Key('stream-preview-play-icon')), findsOneWidget);
     expect(find.text('http://cdn/live/r1.m3u8'), findsOneWidget);
-    // Scroll so wallet / chat below the tall preview enter the viewport.
-    await tester.scrollUntilVisible(
-      find.textContaining('Balance: 42'),
-      80,
-      scrollable: find.byType(Scrollable).first,
-    );
-    await tester.pumpAndSettle();
+    // RoomWatch pins balance/gifts at the bottom (no scroll needed).
     expect(find.textContaining('Balance: 42'), findsOneWidget);
     expect(find.text('Top up'), findsOneWidget);
-    await tester.scrollUntilVisible(
-      find.textContaining('hello room'),
-      80,
-      scrollable: find.byType(Scrollable).first,
-    );
-    await tester.pumpAndSettle();
     expect(find.textContaining('Bob:'), findsOneWidget);
     expect(find.textContaining('hello room'), findsOneWidget);
     expect(find.text('Rose (1)'), findsOneWidget);
@@ -259,12 +247,6 @@ void main() {
     await tester.tap(find.byIcon(Icons.send));
     await tester.pumpAndSettle();
 
-    await tester.scrollUntilVisible(
-      find.textContaining('nice stream'),
-      80,
-      scrollable: find.byType(Scrollable).first,
-    );
-    await tester.pumpAndSettle();
     expect(find.textContaining('nice stream'), findsOneWidget);
   });
 
@@ -287,12 +269,6 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.scrollUntilVisible(
-      find.text('Top up'),
-      80,
-      scrollable: find.byType(Scrollable).first,
-    );
-    await tester.pumpAndSettle();
     await tester.tap(find.text('Top up'));
     await tester.pumpAndSettle();
 
@@ -343,7 +319,10 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byIcon(Icons.flag_outlined));
+    // Report moved into AppBar ⋯ menu (RoomWatch).
+    await tester.tap(find.byIcon(Icons.more_vert));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Report'));
     await tester.pumpAndSettle();
 
     expect(find.text('Report room'), findsOneWidget);
@@ -412,12 +391,6 @@ void main() {
 
     final copyBtn = find.byKey(const Key('copy-stream-url'));
     expect(copyBtn, findsOneWidget);
-    await tester.scrollUntilVisible(
-      copyBtn,
-      80,
-      scrollable: find.byType(Scrollable).first,
-    );
-    await tester.pumpAndSettle();
     await tester.tap(copyBtn);
     await tester.pump(); // schedule snackbar
     await tester.pump(const Duration(milliseconds: 750));

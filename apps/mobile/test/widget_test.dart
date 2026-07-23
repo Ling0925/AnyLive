@@ -22,7 +22,9 @@ void main() {
     // Session restore Future completes.
     await tester.pumpAndSettle();
     expect(find.text('AnyLive'), findsOneWidget);
+    // Logged-out MainShell welcome (or legacy "AnyLive Mobile" if present).
     expect(find.textContaining('AnyLive Mobile'), findsOneWidget);
+    expect(find.textContaining('Sign in'), findsWidgets);
     expect(find.textContaining('http://localhost:8088'), findsOneWidget);
   });
 
@@ -41,8 +43,16 @@ void main() {
         sessionStore: SessionStore(),
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump(); // first frame of MainShell / feeds loading
+    // Bottom nav shell is rooted after session restore.
+    expect(find.text('Home'), findsWidgets);
+    expect(find.text('You'), findsOneWidget);
+    expect(find.text('Go Live'), findsOneWidget);
+    // Open You tab to confirm session label surface.
+    await tester.tap(find.text('You'));
+    // Feeds may still be loading; pump without settle to avoid network hang.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
     expect(find.textContaining('signed in as Restored'), findsOneWidget);
-    expect(find.text('Browse live rooms'), findsOneWidget);
   });
 }

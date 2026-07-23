@@ -4,12 +4,11 @@ import 'package:flutter/material.dart';
 
 import '../../api/session_store.dart';
 import '../../config/app_config.dart';
-import '../auth/login_page.dart';
-import '../feed/feed_page.dart';
-import '../profile/profile_page.dart';
-import '../rooms/room_list_page.dart';
-import '../wallet/wallet_page.dart';
+import '../../navigation/main_shell.dart';
 
+/// Root entry shim — always embeds [MainShell] so login + 4-tab IA stay in one place.
+///
+/// Kept as a compatibility type so login / existing tests keep working.
 class HomePage extends StatefulWidget {
   const HomePage({
     super.key,
@@ -57,7 +56,9 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _hydrateUserId() async {
     final store = widget.sessionStore;
-    if (store == null || !_loggedIn) {
+    if (store == null ||
+        _accessToken == null ||
+        _accessToken!.isEmpty) {
       if (mounted) setState(() => _userId = null);
       return;
     }
@@ -66,158 +67,37 @@ class _HomePageState extends State<HomePage> {
     setState(() => _userId = session?.userId);
   }
 
-  bool get _loggedIn =>
-      _accessToken != null && _accessToken!.isNotEmpty;
-
-  Future<void> _openLogin() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => LoginPage(
-          config: widget.config,
-          sessionStore: widget.sessionStore,
-          onLoggedIn: (session) {
-            final label = session.displayName.isEmpty
-                ? (session.email ?? session.userId)
-                : session.displayName;
-            setState(() {
-              _accessToken = session.accessToken;
-              _sessionLabel = label;
-              _userId = session.userId;
-            });
-            widget.onSessionRestored?.call(session.accessToken, label);
-          },
-        ),
-      ),
-    );
+  Future<void> _handleLogout() async {
+    await widget.onLogout?.call();
+    if (!mounted) return;
+    setState(() {
+      _accessToken = null;
+      _sessionLabel = null;
+      _userId = null;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('AnyLive'),
-        actions: [
-          if (_loggedIn) ...[
-            TextButton(
-              onPressed: () async {
-                await Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => ProfilePage(
-                      config: widget.config,
-                      accessToken: _accessToken!,
-                      sessionStore: widget.sessionStore,
-                      onDisplayNameChanged: (name) {
-                        setState(() => _sessionLabel = name);
-                      },
-                      onAccountDeleted: () async {
-                        await widget.onLogout?.call();
-                        if (!mounted) return;
-                        setState(() {
-                          _accessToken = null;
-                          _sessionLabel = null;
-                          _userId = null;
-                        });
-                      },
-                    ),
-                  ),
-                );
-              },
-              child: const Text('Profile'),
-            ),
-            TextButton(
-              key: const Key('home-logout'),
-              onPressed: () async {
-                await widget.onLogout?.call();
-                if (!mounted) return;
-                setState(() {
-                  _accessToken = null;
-                  _sessionLabel = null;
-                  _userId = null;
-                });
-              },
-              child: const Text('Logout'),
-            ),
-          ] else
-            TextButton(
-              onPressed: _openLogin,
-              child: const Text('Login'),
-            ),
-        ],
-      ),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'AnyLive Mobile',
-                style: Theme.of(context).textTheme.headlineMedium,
-              ),
-              const SizedBox(height: 12),
-              Text('env: ${widget.config.environment}'),
-              Text('flavor: ${widget.config.flavorLabel}'),
-              Text('api: ${widget.config.normalizedApiBaseUrl}'),
-              if (_sessionLabel != null) ...[
-                const SizedBox(height: 12),
-                Text('signed in as $_sessionLabel'),
-              ],
-              const SizedBox(height: 24),
-              if (_loggedIn) ...[
-                FilledButton(
-                  onPressed: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => RoomListPage(
-                          config: widget.config,
-                          accessToken: _accessToken!,
-                          userId: _userId,
-                        ),
-                      ),
-                    );
-                  },
-                  child: const Text('Browse live rooms'),
-                ),
-                const SizedBox(height: 12),
-                FilledButton.tonal(
-                  onPressed: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => FeedPage(
-                          config: widget.config,
-                          accessToken: _accessToken!,
-                          userId: _userId,
-                        ),
-                      ),
-                    );
-                  },
-                  child: const Text('Discover'),
-                ),
-                const SizedBox(height: 12),
-                FilledButton.tonal(
-                  key: const Key('home-wallet'),
-                  onPressed: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => WalletPage(
-                          config: widget.config,
-                          accessToken: _accessToken!,
-                        ),
-                      ),
-                    );
-                  },
-                  child: const Text('Wallet'),
-                ),
-              ] else
-                Text(
-                  'Sign in with email OTP (dev code 123456).',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                  textAlign: TextAlign.center,
-                ),
-            ],
-          ),
-        ),
-      ),
+    return MainShell(
+      config: widget.config,
+      accessToken: _accessToken,
+      userId: _userId,
+      sessionLabel: _sessionLabel,
+      sessionStore: widget.sessionStore,
+      onLogout: _handleLogout,
+      onSessionRestored: (token, label) {
+        setState(() {
+          _accessToken = token;
+          _sessionLabel = label;
+        });
+        widget.onSessionRestored?.call(token, label);
+        unawaited(_hydrateUserId());
+      },
+      onDisplayNameChanged: (name) {
+        setState(() => _sessionLabel = name);
+      },
+      onAccountDeleted: _handleLogout,
     );
   }
 }

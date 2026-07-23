@@ -95,7 +95,7 @@ void main() {
     expect(find.text('No hot rooms'), findsOneWidget);
   });
 
-  testWidgets('home shows Discover when logged in', (tester) async {
+  testWidgets('home shows MainShell tabs when logged in', (tester) async {
     await tester.pumpWidget(
       const MaterialApp(
         home: HomePage(
@@ -105,7 +105,10 @@ void main() {
         ),
       ),
     );
-    expect(find.text('Discover'), findsOneWidget);
-    expect(find.text('Browse live rooms'), findsOneWidget);
+    await tester.pump();
+    expect(find.text('Home'), findsWidgets);
+    expect(find.text('Following'), findsOneWidget);
+    expect(find.text('Go Live'), findsOneWidget);
+    expect(find.text('You'), findsOneWidget);
   });
 }

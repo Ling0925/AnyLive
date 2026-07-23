@@ -190,7 +190,7 @@ void main() {
     }
   });
 
-  testWidgets('home shows Profile action when logged in', (tester) async {
+  testWidgets('You tab shows Profile and Logout when logged in', (tester) async {
     await tester.pumpWidget(
       const MaterialApp(
         home: HomePage(
@@ -200,9 +200,15 @@ void main() {
         ),
       ),
     );
-    expect(find.text('Profile'), findsOneWidget);
-    expect(find.text('Logout'), findsOneWidget);
-    expect(find.text('signed in as Ada'), findsOneWidget);
+    await tester.pump();
+    // You tab is in IndexedStack so Profile/Logout are already built; also
+    // switch the bottom nav for realism.
+    await tester.tap(find.text('You'));
+    await tester.pump();
+    expect(find.text('Profile & privacy'), findsOneWidget);
+    expect(find.byKey(const Key('you-logout')), findsOneWidget);
+    expect(find.byKey(const Key('home-logout')), findsOneWidget);
+    expect(find.textContaining('signed in as Ada'), findsOneWidget);
     expect(find.text('Login'), findsNothing);
   });
 }
