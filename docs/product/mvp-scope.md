@@ -87,6 +87,8 @@
 6. C 举报 → Admin 处理 → 可选强关  
 7. 展示钱包流水与审计日志  
 
+**可执行走查（预检 + Admin `data-testid` + 签字）：** [admin-ops-15min-demo.md](../runbooks/admin-ops-15min-demo.md)（V-AD-1；仅人工签字关闭）。本地栈：[go-live-local.md](../runbooks/go-live-local.md) §2。
+
 ---
 
 ## 5. 范围变更规则

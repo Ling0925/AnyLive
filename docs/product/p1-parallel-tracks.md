@@ -154,11 +154,11 @@ FL      repo/session ──►   登录Feed房间播放钱包 ──►  真机�
 
 | ID | 轨道 | 任务 | DoD |
 |---|---|---|---|
-| V-BE-1 | BE | 真 OTP 通道（ESP/HTTP）或书面接受 dev-only | 非仅口头 |
-| V-BE-2 | BE | stage 配置 / 1k soak 或风险接受书 | 报告落 `reports/` |
+| V-BE-1 | BE | 真 OTP 通道（ESP/HTTP）或书面接受 dev-only | 非仅口头；草案 [otp-dev-only-risk-accept.md](../runbooks/otp-dev-only-risk-accept.md)（**未签字 ≠ done**；签后归档 `reports/risk-accept/`） |
+| V-BE-2 | BE | stage 配置 / 1k soak 或风险接受书 | 报告落 `reports/`；草案 [ws-1k-soak-risk-accept.md](../runbooks/ws-1k-soak-risk-accept.md)（**未签字 ≠ done**）；stage env 见 [deploy/.env.stage.example](../../deploy/.env.stage.example) |
 | V-AD-1 | AD | 运营预置：礼物目录、admin 账号、演示脚本走查 | 15 分钟演示可跟 |
-| V-FL-1 | FL | 设备矩阵：中端 Android + 近两代 iPhone | 填模板 |
-| V-FL-2 | FL | 10 分钟真人路径录屏（可与 OBS 同学一起） | 链接进 dogfood 纪要 |
+| V-FL-1 | FL | 设备矩阵：中端 Android + 近两代 iPhone（+ H5 Safari/Chrome 行） | 填 `reports/device-matrix-TEMPLATE.md` 或 `./scripts/device-matrix-prefill.sh` 产出的 `reports/device-matrix-YYYYMMDD-*.md`；**Pass 仅人工勾选，prefill 不签字** |
+| V-FL-2 | FL | 10 分钟真人路径录屏（可与 OBS 同学一起） | **先** `./scripts/dogfood-10min-path.sh` PASS，再人工 login→feed→HLS→chat→gift→end-state；**Recording URL 进** [dogfood-cohort.md](../runbooks/dogfood-cohort.md) V-FL-2 表 / 纪要；**无 URL 不得标 done** |
 | V-ALL-1 | 全员 | 缺陷会：无开放 P0 | 纪要 |
 | V-ALL-2 | 全员 | git 按 [p1-git-split-plan](./p1-git-split-plan.md) 收敛 | 可打 tag 候选 |
 
@@ -293,11 +293,11 @@ A=执行 · R=负责结果 · C=协商 · I=知会
 | FL-9 | FL | done | | | 审计 done + gap-close：WalletPage ledger ≤20 条；mock topup / sandbox buy 后刷新 |
 | FL-10 | FL | done | | | 审计 done；WS + HTTP 轮询回退 |
 | FL-11 | FL | done | | | 审计 done；widget/repo 单测；`flutter test` 绿 |
-| V-BE-1 | BE | todo | | | **人工/运维：** 真 OTP 通道（ESP/HTTP）或书面接受 dev-only |
-| V-BE-2 | BE | todo | | | **人工/运维：** stage 配置 / 1k soak 或风险接受书 → `reports/` |
+| V-BE-1 | BE | todo | | | **人工/运维：** 真 OTP 或书面接受 → [otp-dev-only-risk-accept.md](../runbooks/otp-dev-only-risk-accept.md)（**unsigned draft**；CI/脚本不得改 done） |
+| V-BE-2 | BE | todo | | | **人工/运维：** stage soak 或风险接受 → [ws-1k-soak-risk-accept.md](../runbooks/ws-1k-soak-risk-accept.md) + `reports/`；stage env [`.env.stage.example`](../../deploy/.env.stage.example) |
 | V-AD-1 | AD | todo | | | **人工：** 运营预置礼物目录、admin 账号、15min 演示走查 |
-| V-FL-1 | FL | todo | | | **人工/设备：** 中端 Android + 近两代 iPhone 矩阵模板 |
-| V-FL-2 | FL | todo | | | **人工：** 10 分钟真人路径录屏（可与 OBS 同学） |
+| V-FL-1 | FL | todo | | | **人工/设备：** 矩阵模板 + prefill（`reports/device-matrix-TEMPLATE.md` · `scripts/device-matrix-prefill.sh`）；既有装机笔记非全路径；**不得自动 Pass** |
+| V-FL-2 | FL | todo | | | **人工：** 控制面 10min-path PASS → 真人路径录屏；清单与 **Recording URL** 见 [dogfood-cohort.md](../runbooks/dogfood-cohort.md) §V-FL-2；无 URL 不 done |
 | V-ALL-1 | 全员 | todo | | | **人工：** 缺陷会 — 无开放 P0 纪要 |
 | V-ALL-2 | 全员 | todo | | | git 按 split-plan 收敛 → tag 候选（未要求本板提交） |
 
