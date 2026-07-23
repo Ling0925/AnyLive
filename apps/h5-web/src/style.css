@@ -169,3 +169,52 @@ input:focus:not(:focus-visible) {
   border: 1px solid var(--border-accent);
   color: var(--text);
 }
+
+/* UX-2: skeleton pulse + stage loading */
+@keyframes skeleton-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+
+.skeleton-block {
+  border-radius: var(--radius-md);
+  background: linear-gradient(90deg, #1a1a1a, #2a2a2a, #1a1a1a);
+  background-size: 200% 100%;
+  animation: skeleton-pulse 1.2s ease-in-out infinite;
+}
+
+.player-skeleton {
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  max-width: var(--stage-max);
+  margin: 0 auto;
+  border-radius: var(--radius-md);
+  background: #141414;
+  border: 1px solid var(--border);
+  display: grid;
+  place-items: center;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  animation: skeleton-pulse 1.2s ease-in-out infinite;
+}
+
+.share-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 40;
+  padding: 0.55rem 1rem;
+  border-radius: var(--radius-pill);
+  background: rgba(33, 33, 33, 0.95);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  box-shadow: var(--shadow-md);
+  pointer-events: none;
+}

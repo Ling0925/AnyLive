@@ -1140,9 +1140,10 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
           </li>
         </ul>
       </section>
-      <p v-if="shareHint" class="hint">{{ shareHint }}</p>
       <p class="muted api-line mono">API · {{ apiBase }}</p>
     </details>
+
+    <div v-if="shareHint" class="share-toast" role="status">{{ shareHint }}</div>
 
     <p v-if="authHint && authed" class="hint">{{ authHint }}</p>
     <p v-if="error" class="err">{{ error }}</p>
@@ -1184,6 +1185,10 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
               <span v-if="giftOverlay" class="gift-overlay">🎁 {{ giftOverlay }}</span>
             </div>
           </section>
+
+          <div v-else-if="loading" class="player-skeleton" aria-busy="true">
+            Loading room…
+          </div>
 
           <div v-else class="player player-placeholder">
             <p class="muted">{{ status ? `status: ${status}` : 'Load a room to watch' }}</p>
@@ -1812,32 +1817,34 @@ button.danger {
   top: 12px;
   right: 12px;
   z-index: 3;
-  padding: 0.35rem 0.7rem;
+  padding: 0.4rem 0.85rem;
   border-radius: var(--radius-pill);
-  background: rgba(255, 61, 154, 0.18);
-  border: 1px solid rgba(255, 61, 154, 0.45);
-  color: var(--accent-hot);
+  background: rgba(200, 80, 255, 0.22);
+  border: 1px solid rgba(200, 80, 255, 0.5);
+  color: #f0d4ff;
   font-weight: 650;
   font-size: var(--fs-sm);
-  box-shadow: 0 0 18px rgba(255, 61, 154, 0.35);
-  animation: gift-fade 1.8s ease-out forwards;
+  box-shadow: 0 0 20px rgba(200, 80, 255, 0.4);
+  animation: gift-pop 1.6s ease-out forwards;
   pointer-events: none;
 }
 
-@keyframes gift-fade {
+@keyframes gift-pop {
   0% {
     opacity: 0;
-    transform: translateY(4px);
+    transform: scale(0.85) translateY(6px);
   }
-  15% {
+  18% {
     opacity: 1;
-    transform: translateY(0);
+    transform: scale(1.06) translateY(0);
   }
   70% {
     opacity: 1;
+    transform: scale(1);
   }
   100% {
     opacity: 0;
+    transform: scale(0.98) translateY(-4px);
   }
 }
 
