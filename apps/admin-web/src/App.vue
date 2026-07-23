@@ -65,6 +65,9 @@ const actionBusy = ref(false)
 const giftName = ref('')
 const giftPrice = ref('')
 const giftBusy = ref(false)
+/** When set, gift form upserts this catalog id instead of creating a new item. */
+const giftEditId = ref<string | null>(null)
+const giftEditActive = ref(true)
 
 const rooms = ref<Array<{ id: string; title: string; status: string; owner_id?: string }>>([])
 const gifts = ref<Array<{ id: string; name: string; price: number; active?: boolean }>>([])
@@ -495,6 +498,7 @@ function logout() {
   userId.value = ''
   isAdmin.value = null
   notice.value = '已退出登录'
+  cancelEditGift()
   closePreview()
   void refreshLists()
 }
@@ -821,13 +825,41 @@ async function unmuteUser() {
   }
 }
 
-async function createGift() {
+function beginEditGift(g: { id: string; name: string; price: number; active?: boolean }) {
+  giftEditId.value = g.id
+  giftName.value = g.name
+  giftPrice.value = String(g.price)
+  giftEditActive.value = g.active !== false
+  notice.value = `正在编辑礼物 ${shortId(g.id)}`
+  error.value = ''
+}
+
+function cancelEditGift() {
+  giftEditId.value = null
+  giftName.value = ''
+  giftPrice.value = ''
+  giftEditActive.value = true
+}
+
+/**
+ * Create or update gift via POST /api/v1/admin/gifts.
+ * Optional body.id targets an existing catalog row; active toggles visibility.
+ */
+async function upsertGift(opts?: {
+  id?: string
+  name?: string
+  price?: number
+  active?: boolean
+  successLabel?: string
+}) {
   if (!accessToken.value) {
     error.value = '请先登录'
     return
   }
-  const name = giftName.value.trim()
-  const price = Number(giftPrice.value)
+  const id = opts?.id
+  const name = (opts?.name ?? giftName.value).trim()
+  const price = opts?.price ?? Number(giftPrice.value)
+  const active = opts?.active ?? (id ? giftEditActive.value : true)
   if (!name || !Number.isFinite(price) || price <= 0) {
     error.value = '请填写礼物名称和正整数价格'
     return
@@ -836,21 +868,65 @@ async function createGift() {
   error.value = ''
   giftBusy.value = true
   try {
+    const body: { name: string; price: number; active: boolean; id?: string } = {
+      name,
+      price,
+      active,
+    }
+    if (id) body.id = id
     const res = await fetch(apiUrl(apiBase, adminGiftsPath()), {
       method: 'POST',
       headers: authHeaders(),
-      body: JSON.stringify({ name, price, active: true }),
+      body: JSON.stringify(body),
     })
-    if (res.status !== 201 && !res.ok) throw new Error(`create gift ${res.status}`)
-    notice.value = `已创建礼物「${name}」`
-    giftName.value = ''
-    giftPrice.value = ''
+    if (isAdminForbidden(res.status)) {
+      isAdmin.value = false
+      error.value = adminGateHint.value || adminGateMessage({ apiBase, email: email.value })
+      return
+    }
+    if (res.status !== 201 && !res.ok) throw new Error(`upsert gift ${res.status}`)
+    const label =
+      opts?.successLabel ??
+      (id ? `已更新礼物「${name}」` : `已创建礼物「${name}」`)
+    notice.value = label
+    cancelEditGift()
     await loadGifts()
   } catch (e) {
     error.value = String(e)
   } finally {
     giftBusy.value = false
   }
+}
+
+async function createGift() {
+  await upsertGift()
+}
+
+async function saveGiftEdit() {
+  if (!giftEditId.value) {
+    error.value = '没有正在编辑的礼物'
+    return
+  }
+  await upsertGift({ id: giftEditId.value })
+}
+
+/** Toggle active flag on a gift row without leaving the list. */
+async function toggleGiftActive(g: {
+  id: string
+  name: string
+  price: number
+  active?: boolean
+}) {
+  const next = g.active === false
+  await upsertGift({
+    id: g.id,
+    name: g.name,
+    price: g.price,
+    active: next,
+    successLabel: next
+      ? `已启用礼物「${g.name}」`
+      : `已停用礼物「${g.name}」`,
+  })
 }
 
 async function resolveReport(reportId: string) {
@@ -887,8 +963,8 @@ onMounted(() => {
 
 <template>
   <!-- Login -->
-  <div v-if="!isAuthed" class="login-screen">
-    <div class="login-card">
+  <div v-if="!isAuthed" class="login-screen" data-testid="login-screen">
+    <div class="login-card" data-testid="login-card">
       <div class="brand" style="margin-bottom: 1rem; padding: 0">
         <div class="brand-mark">AL</div>
         <div class="brand-text">
@@ -899,25 +975,44 @@ onMounted(() => {
       <h1>登录</h1>
       <p class="lead">使用邮箱 OTP 登录。开发环境验证码一般为 <code class="mono">123456</code>。</p>
 
-      <p v-if="notice" class="flash ok">{{ notice }}</p>
-      <p v-if="error" class="flash err">{{ error }}</p>
+      <p v-if="notice" class="flash ok" data-testid="login-notice">{{ notice }}</p>
+      <p v-if="error" class="flash err" data-testid="login-error">{{ error }}</p>
 
       <label class="field">
         <span>邮箱</span>
-        <input v-model="email" type="email" autocomplete="username" placeholder="ops@anylive.local" />
+        <input
+          v-model="email"
+          type="email"
+          autocomplete="username"
+          placeholder="ops@anylive.local"
+          data-testid="login-email"
+        />
       </label>
       <div class="row">
-        <button type="button" class="btn" :disabled="loginBusy || !email.trim()" @click="sendOtp">
+        <button
+          type="button"
+          class="btn"
+          data-testid="login-send-otp"
+          :disabled="loginBusy || !email.trim()"
+          @click="sendOtp"
+        >
           发送验证码
         </button>
       </div>
       <label class="field">
         <span>验证码</span>
-        <input v-model="otpCode" type="text" autocomplete="one-time-code" placeholder="123456" />
+        <input
+          v-model="otpCode"
+          type="text"
+          autocomplete="one-time-code"
+          placeholder="123456"
+          data-testid="login-otp"
+        />
       </label>
       <button
         type="button"
         class="btn primary"
+        data-testid="login-submit"
         :disabled="loginBusy || !email.trim() || !otpCode.trim()"
         @click="verifyOtp"
       >
@@ -928,8 +1023,8 @@ onMounted(() => {
   </div>
 
   <!-- Ops shell -->
-  <div v-else class="shell">
-    <aside class="sidebar">
+  <div v-else class="shell" data-testid="ops-shell">
+    <aside class="sidebar" data-testid="sidebar">
       <div class="brand">
         <div class="brand-mark">AL</div>
         <div class="brand-text">
@@ -938,13 +1033,14 @@ onMounted(() => {
         </div>
       </div>
 
-      <nav class="nav">
+      <nav class="nav" data-testid="sidebar-nav">
         <button
           v-for="item in ADMIN_NAV"
           :key="item.key"
           type="button"
           class="nav-item"
           :class="{ active: nav === item.key }"
+          :data-testid="`nav-${item.key}`"
           @click="go(item.key)"
         >
           <span>{{ item.label }}</span>
@@ -953,10 +1049,18 @@ onMounted(() => {
 
       <div class="sidebar-foot">
         <div class="api-pill">{{ apiBase }}</div>
-        <button type="button" class="btn ghost" :disabled="listBusy" @click="refreshLists">
+        <button
+          type="button"
+          class="btn ghost"
+          data-testid="refresh-lists"
+          :disabled="listBusy"
+          @click="refreshLists"
+        >
           刷新数据
         </button>
-        <button type="button" class="btn ghost" @click="logout">退出登录</button>
+        <button type="button" class="btn ghost" data-testid="logout" @click="logout">
+          退出登录
+        </button>
       </div>
     </aside>
 
@@ -977,33 +1081,38 @@ onMounted(() => {
         </div>
       </header>
 
-      <div class="content">
-        <p v-if="isAdmin === false" class="flash err">{{ adminGateHint }}</p>
-        <p v-if="notice" class="flash ok">{{ notice }}</p>
-        <p v-if="error && isAdmin !== false" class="flash err">{{ error }}</p>
+      <div class="content" data-testid="content">
+        <p v-if="isAdmin === false" class="flash err" data-testid="admin-gate">{{ adminGateHint }}</p>
+        <p v-if="notice" class="flash ok" data-testid="notice">{{ notice }}</p>
+        <p v-if="error && isAdmin !== false" class="flash err" data-testid="error">{{ error }}</p>
 
         <!-- Dashboard -->
         <template v-if="nav === 'dashboard'">
-          <div class="kpis">
-            <div class="kpi">
+          <div class="kpis" data-testid="dashboard-kpis">
+            <div class="kpi" data-testid="kpi-live">
               <div class="kpi-label">直播中</div>
               <div class="kpi-value live">{{ liveCount }}</div>
             </div>
-            <div class="kpi">
+            <div class="kpi" data-testid="kpi-idle">
               <div class="kpi-label">空闲房间</div>
               <div class="kpi-value">{{ idleCount }}</div>
             </div>
-            <div class="kpi">
+            <div class="kpi" data-testid="kpi-reports">
               <div class="kpi-label">待处理举报</div>
               <div class="kpi-value">{{ reportOpen }}</div>
             </div>
-            <div class="kpi">
+            <div class="kpi" data-testid="kpi-gifts">
               <div class="kpi-label">礼物种类</div>
               <div class="kpi-value">{{ gifts.length }}</div>
             </div>
           </div>
 
-          <section v-if="isAuthed" class="panel" style="margin-bottom: 1rem">
+          <section
+            v-if="isAuthed"
+            class="panel"
+            style="margin-bottom: 1rem"
+            data-testid="panel-wallet-ops"
+          >
             <div class="panel-head">
               <h2>资金运维</h2>
             </div>
@@ -1011,6 +1120,7 @@ onMounted(() => {
               <button
                 type="button"
                 class="btn primary"
+                data-testid="wallet-reconcile"
                 :disabled="reconcileBusy"
                 @click="runWalletReconcile"
               >
@@ -1019,6 +1129,7 @@ onMounted(() => {
               <button
                 type="button"
                 class="btn"
+                data-testid="pay-expire-orders"
                 :disabled="expireBusy"
                 @click="runExpirePayOrders"
               >
@@ -1027,17 +1138,23 @@ onMounted(() => {
               <button
                 type="button"
                 class="btn"
+                data-testid="metrics-scrape"
                 :disabled="metricsBusy"
                 @click="runMetricsScrape"
               >
                 {{ metricsBusy ? '抓取中…' : '抓取 /metrics' }}
               </button>
             </div>
-            <p v-if="reconcileHint" class="hint" :class="{ err: reconcileBalanced === false }">
+            <p
+              v-if="reconcileHint"
+              class="hint"
+              data-testid="wallet-reconcile-hint"
+              :class="{ err: reconcileBalanced === false }"
+            >
               {{ reconcileHint }}
             </p>
-            <p v-if="expireHint" class="hint">{{ expireHint }}</p>
-            <p v-if="metricsHint" class="hint">{{ metricsHint }}</p>
+            <p v-if="expireHint" class="hint" data-testid="pay-expire-hint">{{ expireHint }}</p>
+            <p v-if="metricsHint" class="hint" data-testid="metrics-hint">{{ metricsHint }}</p>
             <pre
               v-if="metricsText"
               class="mono"
@@ -1148,7 +1265,7 @@ onMounted(() => {
         </template>
 
         <!-- 网页开播 -->
-        <section v-else-if="nav === 'golive'" class="panel">
+        <section v-else-if="nav === 'golive'" class="panel" data-testid="panel-golive">
           <div class="panel-head">
             <h2>网页开播</h2>
             <span v-if="goLiveRoomStatus" class="badge" :class="roomStatusTone(goLiveRoomStatus)">
@@ -1163,11 +1280,18 @@ onMounted(() => {
           <div class="row">
             <label class="field">
               <span>直播标题</span>
-              <input v-model="goLiveTitle" type="text" placeholder="运营测试直播" maxlength="80" />
+              <input
+                v-model="goLiveTitle"
+                type="text"
+                placeholder="运营测试直播"
+                maxlength="80"
+                data-testid="golive-title"
+              />
             </label>
             <button
               type="button"
               class="btn primary"
+              data-testid="golive-start"
               :disabled="goLiveBusy || !isAuthed"
               @click="goLiveStart"
             >
@@ -1176,6 +1300,7 @@ onMounted(() => {
             <button
               type="button"
               class="btn"
+              data-testid="golive-refresh-publish"
               :disabled="goLiveBusy || !goLiveRoomId || !isAuthed"
               @click="goLiveRefreshPublish"
             >
@@ -1184,6 +1309,7 @@ onMounted(() => {
             <button
               type="button"
               class="btn danger"
+              data-testid="golive-stop"
               :disabled="goLiveBusy || !goLiveRoomId || goLiveRoomStatus === 'closed' || !isAuthed"
               @click="goLiveStop"
             >
@@ -1191,19 +1317,30 @@ onMounted(() => {
             </button>
           </div>
           <p v-if="!isAuthed" class="flash err">请先登录（OTP 123456）后再开播。</p>
-          <p v-if="goLiveCopyHint" class="flash ok">{{ goLiveCopyHint }}</p>
+          <p v-if="goLiveCopyHint" class="flash ok" data-testid="golive-copy-hint">{{ goLiveCopyHint }}</p>
 
-          <div v-if="goLiveRoomId" class="action-card" style="margin-top: 1rem">
+          <div
+            v-if="goLiveRoomId"
+            class="action-card"
+            style="margin-top: 1rem"
+            data-testid="golive-room-info"
+          >
             <h3>房间信息</h3>
-            <p class="mono">房间 ID：{{ goLiveRoomId }}</p>
+            <p class="mono" data-testid="golive-room-id">房间 ID：{{ goLiveRoomId }}</p>
             <p class="muted">状态：{{ goLiveRoomStatus || '—' }}</p>
             <div class="actions" style="margin-top: 0.5rem">
-              <button type="button" class="btn sm" @click="copyText('房间 ID', goLiveRoomId)">
+              <button
+                type="button"
+                class="btn sm"
+                data-testid="golive-copy-room-id"
+                @click="copyText('房间 ID', goLiveRoomId)"
+              >
                 复制房间 ID
               </button>
               <button
                 type="button"
                 class="btn sm"
+                data-testid="golive-preview"
                 @click="previewRoom({ id: goLiveRoomId, status: goLiveRoomStatus || 'live' })"
               >
                 HLS 预览
@@ -1211,13 +1348,21 @@ onMounted(() => {
             </div>
           </div>
 
-          <div v-if="goLivePublish" class="split-actions" style="margin-top: 1rem">
+          <div
+            v-if="goLivePublish"
+            class="split-actions"
+            style="margin-top: 1rem"
+            data-testid="golive-obs"
+          >
             <div class="action-card">
               <h3>OBS 服务器（Server）</h3>
-              <p class="mono" style="word-break: break-all">{{ goLivePublish.server }}</p>
+              <p class="mono" style="word-break: break-all" data-testid="golive-obs-server">
+                {{ goLivePublish.server }}
+              </p>
               <button
                 type="button"
                 class="btn sm primary"
+                data-testid="golive-copy-server"
                 @click="copyText('OBS 服务器', goLivePublish.server)"
               >
                 复制服务器
@@ -1225,10 +1370,13 @@ onMounted(() => {
             </div>
             <div class="action-card">
               <h3>OBS 串流密钥（Stream Key）</h3>
-              <p class="mono" style="word-break: break-all">{{ goLivePublish.streamKey }}</p>
+              <p class="mono" style="word-break: break-all" data-testid="golive-obs-stream-key">
+                {{ goLivePublish.streamKey }}
+              </p>
               <button
                 type="button"
                 class="btn sm primary"
+                data-testid="golive-copy-stream-key"
                 @click="copyText('串流密钥', goLivePublish.streamKey)"
               >
                 复制串流密钥
@@ -1239,10 +1387,13 @@ onMounted(() => {
             </div>
             <div class="action-card">
               <h3>完整推流 URL（可选）</h3>
-              <p class="mono" style="word-break: break-all">{{ goLivePublish.pushUrl }}</p>
+              <p class="mono" style="word-break: break-all" data-testid="golive-push-url">
+                {{ goLivePublish.pushUrl }}
+              </p>
               <button
                 type="button"
                 class="btn sm"
+                data-testid="golive-copy-push-url"
                 @click="copyText('推流 URL', goLivePublish.pushUrl)"
               >
                 复制完整 URL
@@ -1253,11 +1404,14 @@ onMounted(() => {
             </div>
             <div class="action-card">
               <h3>观众 HLS</h3>
-              <p class="mono" style="word-break: break-all">{{ goLiveHls || '—' }}</p>
+              <p class="mono" style="word-break: break-all" data-testid="golive-hls">
+                {{ goLiveHls || '—' }}
+              </p>
               <div class="actions">
                 <button
                   type="button"
                   class="btn sm"
+                  data-testid="golive-copy-hls"
                   :disabled="!goLiveHls"
                   @click="copyText('HLS 地址', goLiveHls)"
                 >
@@ -1269,6 +1423,7 @@ onMounted(() => {
                   :href="goLiveHls"
                   target="_blank"
                   rel="noopener"
+                  data-testid="golive-open-hls"
                 >打开 HLS</a>
               </div>
               <p class="dim" style="margin-top: 0.5rem; font-size: 0.8rem">
@@ -1289,19 +1444,27 @@ onMounted(() => {
         </section>
 
         <!-- Rooms -->
-        <section v-else-if="nav === 'rooms'" class="panel">
+        <section v-else-if="nav === 'rooms'" class="panel" data-testid="panel-rooms">
           <div class="panel-head">
             <h2>直播间管理</h2>
             <div class="toolbar">
               <span class="badge live">live {{ liveCount }}</span>
               <span class="badge idle">idle {{ idleCount }}</span>
               <span class="badge closed">closed {{ closedCount }}</span>
-              <button type="button" class="btn sm" :disabled="listBusy" @click="loadRooms">刷新</button>
+              <button
+                type="button"
+                class="btn sm"
+                data-testid="rooms-refresh"
+                :disabled="listBusy"
+                @click="loadRooms"
+              >
+                刷新
+              </button>
             </div>
           </div>
           <p class="panel-desc">查看房间状态、HLS 预览，或一键强关违规直播。点「推流信息」可在开播页查看 OBS 地址与密钥。</p>
 
-          <div class="table-wrap" v-if="rooms.length">
+          <div class="table-wrap" v-if="rooms.length" data-testid="rooms-table">
             <table class="data">
               <thead>
                 <tr>
@@ -1313,27 +1476,42 @@ onMounted(() => {
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="r in rooms" :key="r.id">
+                <tr v-for="r in rooms" :key="r.id" :data-testid="`room-row-${r.id}`">
                   <td>{{ r.title }}</td>
                   <td><span class="badge" :class="roomStatusTone(r.status)">{{ r.status }}</span></td>
                   <td class="mono">{{ shortId(r.owner_id || '') }}</td>
                   <td class="mono" :title="r.id">{{ shortId(r.id) }}</td>
                   <td class="actions">
-                    <button type="button" class="btn sm" :disabled="previewBusy" @click="previewRoom(r)">
+                    <button
+                      type="button"
+                      class="btn sm"
+                      data-testid="room-preview"
+                      :disabled="previewBusy"
+                      @click="previewRoom(r)"
+                    >
                       预览
                     </button>
                     <button
                       type="button"
                       class="btn sm primary"
+                      data-testid="room-publish-info"
                       :disabled="goLiveBusy || !isAuthed || r.status === 'closed'"
                       @click="loadPublishForRoom(r.id)"
                     >
                       推流信息
                     </button>
-                    <button type="button" class="btn sm" @click="useRoomId(r.id)">填入强关</button>
+                    <button
+                      type="button"
+                      class="btn sm"
+                      data-testid="room-fill-force-close"
+                      @click="useRoomId(r.id)"
+                    >
+                      填入强关
+                    </button>
                     <button
                       type="button"
                       class="btn sm danger"
+                      data-testid="room-force-close"
                       :disabled="actionBusy || r.status === 'closed'"
                       @click="forceCloseRoom(r.id)"
                     >
@@ -1344,12 +1522,14 @@ onMounted(() => {
               </tbody>
             </table>
           </div>
-          <p v-else class="empty">暂无房间。可到「开播」页一键创建并开播。</p>
+          <p v-else class="empty" data-testid="rooms-empty">暂无房间。可到「开播」页一键创建并开播。</p>
 
-          <div v-if="previewRoomId" class="preview">
+          <div v-if="previewRoomId" class="preview" data-testid="room-preview-panel">
             <div class="panel-head">
               <h2>HLS 预览 · {{ shortId(previewRoomId, 12) }}</h2>
-              <button type="button" class="btn sm ghost" @click="closePreview">关闭</button>
+              <button type="button" class="btn sm ghost" data-testid="room-preview-close" @click="closePreview">
+                关闭
+              </button>
             </div>
             <p v-if="previewError" class="flash err">{{ previewError }}</p>
             <p v-if="previewHlsUrl" class="preview-url mono">
@@ -1360,17 +1540,30 @@ onMounted(() => {
         </section>
 
         <!-- Reports -->
-        <section v-else-if="nav === 'reports'" class="panel">
+        <section v-else-if="nav === 'reports'" class="panel" data-testid="panel-reports">
           <div class="panel-head">
             <h2>举报队列</h2>
-            <button type="button" class="btn sm" :disabled="listBusy" @click="loadReports">刷新</button>
+            <button
+              type="button"
+              class="btn sm"
+              data-testid="reports-refresh"
+              :disabled="listBusy"
+              @click="loadReports"
+            >
+              刷新
+            </button>
           </div>
           <p class="panel-desc">处理用户提交的房间 / 用户举报。可选填写处理备注（使用下方通用原因框）。</p>
           <label class="field" style="max-width: 420px">
             <span>处理备注（可选）</span>
-            <input v-model="actionReason" type="text" placeholder="已核实违规 / 误报等" />
+            <input
+              v-model="actionReason"
+              type="text"
+              placeholder="已核实违规 / 误报等"
+              data-testid="report-note"
+            />
           </label>
-          <div class="table-wrap" v-if="reports.length">
+          <div class="table-wrap" v-if="reports.length" data-testid="reports-table">
             <table class="data">
               <thead>
                 <tr>
@@ -1383,7 +1576,7 @@ onMounted(() => {
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="r in reports" :key="r.id">
+                <tr v-for="r in reports" :key="r.id" :data-testid="`report-row-${r.id}`">
                   <td class="mono">{{ r.target_type }}:{{ shortId(r.target_id) }}</td>
                   <td>{{ r.reason }}</td>
                   <td>{{ r.status || 'open' }}</td>
@@ -1393,6 +1586,7 @@ onMounted(() => {
                     <button
                       type="button"
                       class="btn sm primary"
+                      data-testid="report-resolve"
                       :disabled="actionBusy || r.status === 'resolved'"
                       @click="resolveReport(r.id)"
                     >
@@ -1402,6 +1596,7 @@ onMounted(() => {
                       v-if="r.target_type === 'room'"
                       type="button"
                       class="btn sm"
+                      data-testid="report-to-force-close"
                       @click="useRoomId(r.target_id)"
                     >
                       去强关
@@ -1410,6 +1605,7 @@ onMounted(() => {
                       v-if="r.target_type === 'user'"
                       type="button"
                       class="btn sm"
+                      data-testid="report-to-moderation"
                       @click="useUserId(r.target_id)"
                     >
                       去处置
@@ -1419,35 +1615,90 @@ onMounted(() => {
               </tbody>
             </table>
           </div>
-          <p v-else class="empty">队列为空</p>
+          <p v-else class="empty" data-testid="reports-empty">队列为空</p>
         </section>
 
         <!-- Gifts -->
-        <section v-else-if="nav === 'gifts'" class="panel">
+        <section v-else-if="nav === 'gifts'" class="panel" data-testid="panel-gifts">
           <div class="panel-head">
             <h2>礼物配置</h2>
-            <button type="button" class="btn sm" :disabled="listBusy" @click="loadGifts">刷新</button>
+            <button
+              type="button"
+              class="btn sm"
+              data-testid="gifts-refresh"
+              :disabled="listBusy"
+              @click="loadGifts"
+            >
+              刷新
+            </button>
           </div>
-          <p class="panel-desc">维护礼物目录（名称、价格）。公开接口仅返回 active 礼物。</p>
-          <div class="row">
+          <p class="panel-desc">
+            维护礼物目录（名称、价格、启用状态）。公开接口仅返回 active 礼物。编辑时 POST
+            同一接口并带 <code class="mono">id</code> 更新。
+          </p>
+          <div class="row" data-testid="gift-form">
             <label class="field">
               <span>名称</span>
-              <input v-model="giftName" type="text" placeholder="Rose" />
+              <input
+                v-model="giftName"
+                type="text"
+                placeholder="Rose"
+                data-testid="gift-name"
+              />
             </label>
             <label class="field" style="max-width: 160px">
               <span>价格（币）</span>
-              <input v-model="giftPrice" type="number" min="1" step="1" placeholder="10" />
+              <input
+                v-model="giftPrice"
+                type="number"
+                min="1"
+                step="1"
+                placeholder="10"
+                data-testid="gift-price"
+              />
+            </label>
+            <label v-if="giftEditId" class="field" style="max-width: 140px">
+              <span>状态</span>
+              <select v-model="giftEditActive" data-testid="gift-active">
+                <option :value="true">active</option>
+                <option :value="false">inactive</option>
+              </select>
             </label>
             <button
+              v-if="!giftEditId"
               type="button"
               class="btn primary"
+              data-testid="gift-create"
               :disabled="giftBusy || !giftName.trim() || !giftPrice"
               @click="createGift"
             >
               新增礼物
             </button>
+            <template v-else>
+              <button
+                type="button"
+                class="btn primary"
+                data-testid="gift-save"
+                :disabled="giftBusy || !giftName.trim() || !giftPrice"
+                @click="saveGiftEdit"
+              >
+                保存修改
+              </button>
+              <button
+                type="button"
+                class="btn"
+                data-testid="gift-cancel-edit"
+                :disabled="giftBusy"
+                @click="cancelEditGift"
+              >
+                取消
+              </button>
+            </template>
           </div>
-          <div class="table-wrap" v-if="gifts.length">
+          <p v-if="giftEditId" class="hint" data-testid="gift-edit-hint">
+            正在编辑 {{ shortId(giftEditId, 12) }}
+          </p>
+          <div class="table-wrap" v-if="gifts.length" data-testid="gifts-table">
             <table class="data">
               <thead>
                 <tr>
@@ -1455,23 +1706,53 @@ onMounted(() => {
                   <th>价格</th>
                   <th>状态</th>
                   <th>ID</th>
+                  <th>操作</th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="g in gifts" :key="g.id">
+                <tr v-for="g in gifts" :key="g.id" :data-testid="`gift-row-${g.id}`">
                   <td>{{ g.name }}</td>
                   <td>{{ g.price }}</td>
-                  <td>{{ g.active === false ? 'inactive' : 'active' }}</td>
+                  <td>
+                    <span
+                      class="badge"
+                      :class="g.active === false ? 'closed' : 'live'"
+                      data-testid="gift-status"
+                    >
+                      {{ g.active === false ? 'inactive' : 'active' }}
+                    </span>
+                  </td>
                   <td class="mono">{{ shortId(g.id, 12) }}</td>
+                  <td class="actions">
+                    <button
+                      type="button"
+                      class="btn sm"
+                      data-testid="gift-edit"
+                      :disabled="giftBusy"
+                      @click="beginEditGift(g)"
+                    >
+                      编辑
+                    </button>
+                    <button
+                      type="button"
+                      class="btn sm"
+                      :class="g.active === false ? 'primary' : 'danger'"
+                      data-testid="gift-toggle-active"
+                      :disabled="giftBusy"
+                      @click="toggleGiftActive(g)"
+                    >
+                      {{ g.active === false ? '启用' : '停用' }}
+                    </button>
+                  </td>
                 </tr>
               </tbody>
             </table>
           </div>
-          <p v-else class="empty">暂无礼物</p>
+          <p v-else class="empty" data-testid="gifts-empty">暂无礼物</p>
         </section>
 
         <!-- Moderation -->
-        <section v-else-if="nav === 'moderation'" class="panel">
+        <section v-else-if="nav === 'moderation'" class="panel" data-testid="panel-moderation">
           <div class="panel-head">
             <h2>处置中心</h2>
           </div>
@@ -1479,19 +1760,31 @@ onMounted(() => {
 
           <label class="field" style="max-width: 480px">
             <span>通用原因 / 备注</span>
-            <input v-model="actionReason" type="text" placeholder="违反社区规范 / 垃圾广告…" />
+            <input
+              v-model="actionReason"
+              type="text"
+              placeholder="违反社区规范 / 垃圾广告…"
+              data-testid="moderation-reason"
+            />
           </label>
 
           <div class="split-actions">
-            <div class="action-card">
+            <div class="action-card" data-testid="moderation-force-close">
               <h3>强关房间</h3>
               <label class="field">
                 <span>Room ID</span>
-                <input v-model="roomIdInput" class="mono" type="text" placeholder="uuid" />
+                <input
+                  v-model="roomIdInput"
+                  class="mono"
+                  type="text"
+                  placeholder="uuid"
+                  data-testid="moderation-room-id"
+                />
               </label>
               <button
                 type="button"
                 class="btn danger"
+                data-testid="moderation-force-close-submit"
                 :disabled="actionBusy || !roomIdInput.trim()"
                 @click="forceCloseRoom()"
               >
@@ -1499,37 +1792,68 @@ onMounted(() => {
               </button>
             </div>
 
-            <div class="action-card">
+            <div class="action-card" data-testid="moderation-ban">
               <h3>封禁用户</h3>
               <label class="field">
                 <span>User ID</span>
-                <input v-model="userIdInput" class="mono" type="text" placeholder="uuid" />
+                <input
+                  v-model="userIdInput"
+                  class="mono"
+                  type="text"
+                  placeholder="uuid"
+                  data-testid="moderation-ban-user-id"
+                />
               </label>
-              <button type="button" class="btn danger" :disabled="actionBusy || !userIdInput.trim()" @click="banUser">
+              <button
+                type="button"
+                class="btn danger"
+                data-testid="moderation-ban-submit"
+                :disabled="actionBusy || !userIdInput.trim()"
+                @click="banUser"
+              >
                 封禁
               </button>
             </div>
 
-            <div class="action-card">
+            <div class="action-card" data-testid="moderation-mute">
               <h3>禁言</h3>
               <label class="field">
                 <span>User ID</span>
-                <input v-model="muteUserIdInput" class="mono" type="text" placeholder="uuid" />
+                <input
+                  v-model="muteUserIdInput"
+                  class="mono"
+                  type="text"
+                  placeholder="uuid"
+                  data-testid="moderation-mute-user-id"
+                />
               </label>
-              <button type="button" class="btn danger" :disabled="actionBusy || !muteUserIdInput.trim()" @click="muteUser">
+              <button
+                type="button"
+                class="btn danger"
+                data-testid="moderation-mute-submit"
+                :disabled="actionBusy || !muteUserIdInput.trim()"
+                @click="muteUser"
+              >
                 禁言
               </button>
             </div>
 
-            <div class="action-card">
+            <div class="action-card" data-testid="moderation-unmute">
               <h3>解除禁言</h3>
               <label class="field">
                 <span>User ID</span>
-                <input v-model="unmuteUserIdInput" class="mono" type="text" placeholder="uuid" />
+                <input
+                  v-model="unmuteUserIdInput"
+                  class="mono"
+                  type="text"
+                  placeholder="uuid"
+                  data-testid="moderation-unmute-user-id"
+                />
               </label>
               <button
                 type="button"
                 class="btn primary"
+                data-testid="moderation-unmute-submit"
                 :disabled="actionBusy || !unmuteUserIdInput.trim()"
                 @click="unmuteUser"
               >
@@ -1540,13 +1864,21 @@ onMounted(() => {
         </section>
 
         <!-- Audit -->
-        <section v-else-if="nav === 'audit'" class="panel">
+        <section v-else-if="nav === 'audit'" class="panel" data-testid="panel-audit">
           <div class="panel-head">
             <h2>审计日志</h2>
-            <button type="button" class="btn sm" :disabled="listBusy" @click="loadAudit">刷新</button>
+            <button
+              type="button"
+              class="btn sm"
+              data-testid="audit-refresh"
+              :disabled="listBusy"
+              @click="loadAudit"
+            >
+              刷新
+            </button>
           </div>
           <p class="panel-desc">运营写操作记录（封禁、禁言、强关等）。</p>
-          <div class="table-wrap" v-if="audit.length">
+          <div class="table-wrap" v-if="audit.length" data-testid="audit-table">
             <table class="data">
               <thead>
                 <tr>
@@ -1558,7 +1890,7 @@ onMounted(() => {
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="a in audit" :key="a.id">
+                <tr v-for="a in audit" :key="a.id" :data-testid="`audit-row-${a.id}`">
                   <td>{{ a.action }}</td>
                   <td class="mono">{{ shortId(a.actor_id) }}</td>
                   <td class="mono">{{ shortId(a.target) }}</td>
@@ -1568,7 +1900,7 @@ onMounted(() => {
               </tbody>
             </table>
           </div>
-          <p v-else class="empty">暂无审计记录</p>
+          <p v-else class="empty" data-testid="audit-empty">暂无审计记录</p>
         </section>
       </div>
     </div>
