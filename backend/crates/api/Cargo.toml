@@ -32,6 +32,11 @@ utoipa-swagger-ui = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 subtle = { workspace = true }
+hex = { workspace = true }
+hmac = { workspace = true }
+sha2 = { workspace = true }
+async-trait = { workspace = true }
+reqwest = { workspace = true }
 
 [dev-dependencies]
 tower = { workspace = true }

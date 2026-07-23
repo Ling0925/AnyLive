@@ -15,9 +15,6 @@ use crate::error::ApiError;
 use crate::routes::auth::UserDto;
 use crate::state::AppState;
 
-/// Re-export dual soft-delete store for call sites / tests.
-pub use anylive_db::AnyDeletedUsers as DeletedUsers;
-
 /// Cap ledger / room list size in a single export response.
 const EXPORT_LEDGER_LIMIT: usize = 200;
 const EXPORT_ROOMS_LIMIT: usize = 100;
@@ -172,7 +169,7 @@ pub async fn export_me(
     Ok(Json(AccountExportDto {
         schema_version: "1.0".into(),
         exported_at: chrono::Utc::now().to_rfc3339(),
-        user: UserDto::from_user(u, age_confirmed, privacy_accepted),
+        user: UserDto::from_user(u, age_confirmed, privacy_accepted, extras.avatar_url.clone(), extras.region.clone()),
         profile: ExportProfileDto {
             age_confirmed,
             privacy_accepted,
@@ -435,9 +432,10 @@ mod tests {
 
     #[tokio::test]
     async fn deleted_users_set_works() {
+        use anylive_db::MemoryDeletedUsers;
         use anylive_domain::UserId;
 
-        let set = DeletedUsers::new();
+        let set = MemoryDeletedUsers::new();
         let id = UserId::new();
         assert!(!set.is_deleted(id).await);
         set.mark_deleted(id).await;

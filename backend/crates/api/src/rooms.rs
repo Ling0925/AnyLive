@@ -47,6 +47,35 @@ impl MemoryRoomStore {
         items
     }
 
+    /// Case-insensitive substring match on title.
+    pub async fn search_title(&self, q: &str, limit: usize) -> Vec<Room> {
+        let needle = q.trim().to_ascii_lowercase();
+        if needle.is_empty() || limit == 0 {
+            return Vec::new();
+        }
+        let guard = self.inner.read().await;
+        let mut items: Vec<Room> = guard
+            .values()
+            .filter(|r| r.title.to_ascii_lowercase().contains(&needle))
+            .cloned()
+            .collect();
+        items.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        items.into_iter().take(limit).collect()
+    }
+
+    /// Rooms owned by a user (any status unless filtered).
+    pub async fn list_by_owner(&self, owner_id: UserId, status: Option<RoomStatus>) -> Vec<Room> {
+        let guard = self.inner.read().await;
+        let mut items: Vec<Room> = guard
+            .values()
+            .filter(|r| r.owner_id == owner_id)
+            .filter(|r| status.map(|s| r.status == s).unwrap_or(true))
+            .cloned()
+            .collect();
+        items.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        items
+    }
+
     /// Owner-only: Idle -> Live.
     pub async fn start(&self, id: RoomId, actor: UserId) -> Result<Room, AppError> {
         self.mutate(id, actor, true, |room| room.transition(RoomStatus::Live))
@@ -143,6 +172,20 @@ impl AnyRoomStore {
         match self {
             Self::Memory(s) => s.list(status).await,
             Self::Postgres(s) => s.list(status).await,
+        }
+    }
+
+    pub async fn search_title(&self, q: &str, limit: usize) -> Vec<Room> {
+        match self {
+            Self::Memory(s) => s.search_title(q, limit).await,
+            Self::Postgres(s) => s.search_title(q, limit).await,
+        }
+    }
+
+    pub async fn list_by_owner(&self, owner_id: UserId, status: Option<RoomStatus>) -> Vec<Room> {
+        match self {
+            Self::Memory(s) => s.list_by_owner(owner_id, status).await,
+            Self::Postgres(s) => s.list_by_owner(owner_id, status).await,
         }
     }
 

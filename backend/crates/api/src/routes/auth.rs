@@ -3,14 +3,15 @@
 use std::sync::Arc;
 
 use anylive_auth::{
-    LogoutRequest, OtpSendRequest, OtpVerifyRequest, RefreshRequest, TokenPair,
+    LogoutRequest, OtpSendRequest, OtpVerifyRequest, RefreshRequest, RefreshStore, TokenPair,
 };
 use anylive_domain::User;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
+use uuid::Uuid;
 
 use crate::auth_user::AuthUser;
 use crate::error::ApiError;
@@ -25,6 +26,19 @@ pub struct OtpSendBody {
 pub struct OtpVerifyBody {
     pub email: String,
     pub code: String,
+    /// Soft-launch invite code (required when INVITE_ONLY=1 and email not allowlisted).
+    #[serde(default)]
+    pub invite_code: Option<String>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct OauthExchangeBody {
+    /// google | apple
+    pub provider: String,
+    /// Provider ID token. Local/dogfood: `stub:<email>` when OAUTH_STUB/local.
+    pub id_token: String,
+    #[serde(default)]
+    pub invite_code: Option<String>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -56,10 +70,22 @@ pub struct UserDto {
     pub age_confirmed: bool,
     /// True when the user has accepted the privacy policy.
     pub privacy_accepted: bool,
+    /// Public avatar object URL when set (WBS E2.3).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
+    /// Optional ISO 3166-1 alpha-2 region code (WBS E2.5).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
 }
 
 impl UserDto {
-    pub fn from_user(u: User, age_confirmed: bool, privacy_accepted: bool) -> Self {
+    pub fn from_user(
+        u: User,
+        age_confirmed: bool,
+        privacy_accepted: bool,
+        avatar_url: Option<String>,
+        region: Option<String>,
+    ) -> Self {
         Self {
             id: u.id.0.to_string(),
             display_name: u.display_name,
@@ -67,13 +93,15 @@ impl UserDto {
             created_at: u.created_at.to_rfc3339(),
             age_confirmed,
             privacy_accepted,
+            avatar_url,
+            region,
         }
     }
 }
 
 impl From<User> for UserDto {
     fn from(u: User) -> Self {
-        Self::from_user(u, false, false)
+        Self::from_user(u, false, false, None, None)
     }
 }
 
@@ -85,6 +113,9 @@ pub struct PatchMeBody {
     pub age_confirmed: Option<bool>,
     #[serde(default)]
     pub privacy_accepted: Option<bool>,
+    /// ISO region code; empty string clears.
+    #[serde(default)]
+    pub region: Option<String>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -184,6 +215,18 @@ pub async fn otp_verify(
         .await
         .map_err(ApiError::from)?;
 
+    if !state.features.public_register && !state.invite.is_enabled() {
+        return Err(ApiError(anylive_common::AppError::new(
+            anylive_common::ErrorCode::ForbiddenPolicy,
+            "public registration disabled (FEATURE_PUBLIC_REGISTER=0); enable INVITE_ONLY allowlist/codes or re-enable the flag",
+        )));
+    }
+
+    state
+        .invite
+        .check(&body.email, body.invite_code.as_deref())
+        .map_err(ApiError::from)?;
+
     // Gate deleted + banned **before** issuing tokens / inserting refresh rows.
     let session = state
         .auth
@@ -218,6 +261,86 @@ pub async fn otp_verify(
             session.user,
             extras.age_confirmed(),
             extras.privacy_accepted(),
+            extras.avatar_url.clone(),
+            extras.region.clone(),
+        ),
+        access_token: session.tokens.access_token,
+        refresh_token: session.tokens.refresh_token,
+        expires_in: session.tokens.expires_in,
+    }))
+}
+
+/// OAuth exchange scaffold (WBS E2.1).
+///
+/// Local/dogfood: `id_token = "stub:<email>"` when stub mode is on.
+/// Production: stub disabled; real JWKS verification still requires vendor config.
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/oauth/exchange",
+    tag = "auth",
+    request_body = OauthExchangeBody,
+    responses((status = 200, description = "Session", body = AuthSessionResponse))
+)]
+pub async fn oauth_exchange(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<OauthExchangeBody>,
+) -> Result<Json<AuthSessionResponse>, ApiError> {
+    let ip = client_ip(&headers, None);
+    state
+        .otp_ip_limiter
+        .check(&format!("oauth-exchange:{ip}"))
+        .await
+        .map_err(ApiError::from)?;
+
+    if !state.features.public_register && !state.invite.is_enabled() {
+        return Err(ApiError(anylive_common::AppError::new(
+            anylive_common::ErrorCode::ForbiddenPolicy,
+            "public registration disabled (FEATURE_PUBLIC_REGISTER=0)",
+        )));
+    }
+
+    let email = crate::oauth::resolve_oauth_email(
+        &state.oauth,
+        &body.provider,
+        &body.id_token,
+    )
+    .map_err(ApiError::from)?;
+
+    state
+        .invite
+        .check(&email, body.invite_code.as_deref())
+        .map_err(ApiError::from)?;
+
+    let session = state
+        .auth
+        .login_by_email_gated(&email, |user| {
+            let state = state.clone();
+            async move {
+                if state.deleted_users.is_deleted(user.id).await {
+                    return Err(anylive_common::AppError::unauthorized("account deleted"));
+                }
+                match state.moderation.try_is_banned(user.id).await {
+                    Ok(true) => Err(anylive_common::AppError::new(
+                        anylive_common::ErrorCode::ForbiddenPolicy,
+                        "user is banned",
+                    )),
+                    Ok(false) => Ok(user),
+                    Err(e) => Err(e),
+                }
+            }
+        })
+        .await
+        .map_err(ApiError::from)?;
+
+    let extras = state.profile_extras.get(session.user.id).await;
+    Ok(Json(AuthSessionResponse {
+        user: UserDto::from_user(
+            session.user,
+            extras.age_confirmed(),
+            extras.privacy_accepted(),
+            extras.avatar_url.clone(),
+            extras.region.clone(),
         ),
         access_token: session.tokens.access_token,
         refresh_token: session.tokens.refresh_token,
@@ -295,6 +418,108 @@ pub async fn logout(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SessionDto {
+    pub jti: String,
+    pub expires_at: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SessionListResponse {
+    pub items: Vec<SessionDto>,
+}
+
+/// List active refresh sessions for the current user (WBS E2.4, jti-only, no device meta).
+#[utoipa::path(
+    get,
+    path = "/api/v1/me/sessions",
+    tag = "auth",
+    security(("bearerAuth" = [])),
+    responses((status = 200, body = SessionListResponse))
+)]
+pub async fn list_sessions(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+) -> Result<Json<SessionListResponse>, ApiError> {
+    let items = state
+        .auth
+        .refresh_store()
+        .list_for_user(user.user_id)
+        .await
+        .map_err(ApiError::from)?
+        .into_iter()
+        .map(|s| SessionDto {
+            jti: s.jti.to_string(),
+            expires_at: chrono::DateTime::<chrono::Utc>::from_timestamp(s.exp, 0)
+                .map(|t| t.to_rfc3339())
+                .unwrap_or_else(|| s.exp.to_string()),
+        })
+        .collect();
+    Ok(Json(SessionListResponse { items }))
+}
+
+/// Revoke all refresh sessions for the current user (logout-all).
+#[utoipa::path(
+    delete,
+    path = "/api/v1/me/sessions",
+    tag = "auth",
+    security(("bearerAuth" = [])),
+    responses((status = 200, description = "Revoked count", body = LogoutAllResponse))
+)]
+pub async fn logout_all_sessions(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+) -> Result<Json<LogoutAllResponse>, ApiError> {
+    let revoked = state
+        .auth
+        .refresh_store()
+        .revoke_all_for_user(user.user_id)
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(LogoutAllResponse {
+        revoked: revoked as u64,
+    }))
+}
+
+/// Revoke a single refresh session by jti (must belong to the caller).
+#[utoipa::path(
+    delete,
+    path = "/api/v1/me/sessions/{jti}",
+    tag = "auth",
+    security(("bearerAuth" = [])),
+    params(("jti" = String, Path, description = "Refresh token jti (uuid)")),
+    responses(
+        (status = 204, description = "Session revoked"),
+        (status = 404, description = "Session not found or not owned")
+    )
+)]
+pub async fn revoke_session(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(jti): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    let jti = Uuid::parse_str(jti.trim()).map_err(|_| {
+        ApiError::from(anylive_common::AppError::validation("invalid session jti"))
+    })?;
+    let revoked = state
+        .auth
+        .refresh_store()
+        .revoke_for_user(jti, user.user_id)
+        .await
+        .map_err(ApiError::from)?;
+    if !revoked {
+        return Err(ApiError::from(anylive_common::AppError::not_found(
+            "session not found",
+        )));
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct LogoutAllResponse {
+    pub revoked: u64,
+}
+
 /// Current user profile.
 #[utoipa::path(
     get,
@@ -313,10 +538,30 @@ pub async fn me(
         u,
         extras.age_confirmed(),
         extras.privacy_accepted(),
+        extras.avatar_url.clone(),
+        extras.region.clone(),
     )))
 }
 
-/// Patch current user profile (display name, age/privacy declarations).
+/// Normalize optional region code: empty → clear; else uppercase 2-letter-ish.
+fn normalize_region(raw: Option<String>) -> Result<Option<Option<String>>, ApiError> {
+    let Some(s) = raw else {
+        return Ok(None);
+    };
+    let t = s.trim();
+    if t.is_empty() {
+        return Ok(Some(None));
+    }
+    let upper = t.to_ascii_uppercase();
+    if upper.len() < 2 || upper.len() > 8 || !upper.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err(ApiError::from(anylive_common::AppError::validation(
+            "region must be 2–8 alphanumeric characters (e.g. US, SG)",
+        )));
+    }
+    Ok(Some(Some(upper)))
+}
+
+/// Patch current user profile (display name, age/privacy declarations, region).
 #[utoipa::path(
     patch,
     path = "/api/v1/me",
@@ -333,6 +578,7 @@ pub async fn patch_me(
     if body.display_name.is_none()
         && body.age_confirmed.is_none()
         && body.privacy_accepted.is_none()
+        && body.region.is_none()
     {
         return Err(ApiError::from(anylive_common::AppError::validation(
             "at least one field required",
@@ -349,14 +595,22 @@ pub async fn patch_me(
         state.auth.me(user.user_id).await.map_err(ApiError::from)?
     };
 
+    let region = normalize_region(body.region)?;
     let extras = state
         .profile_extras
-        .patch(user.user_id, body.age_confirmed, body.privacy_accepted)
+        .patch(
+            user.user_id,
+            body.age_confirmed,
+            body.privacy_accepted,
+            region,
+        )
         .await;
 
     Ok(Json(UserDto::from_user(
         u,
         extras.age_confirmed(),
         extras.privacy_accepted(),
+        extras.avatar_url.clone(),
+        extras.region.clone(),
     )))
 }

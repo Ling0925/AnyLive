@@ -31,6 +31,8 @@ tags:
     description: gifts
   - name: wallet
     description: wallet
+  - name: pay
+    description: PayProvider control plane (channels, products, orders, webhooks)
   - name: compliance
     description: Account export/delete and legal documents
 paths:
@@ -58,6 +60,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReadyResponse"
+  /metrics:
+    get:
+      tags: [system]
+      operationId: metrics
+      summary: Minimal Prometheus text metrics
+      responses:
+        "200":
+          description: Prometheus text exposition
+          content:
+            text/plain:
+              schema:
+                type: string
   /api/v1/meta:
     get:
       tags: [system]
@@ -107,6 +121,31 @@ paths:
                 $ref: "#/components/schemas/AuthSession"
         "401":
           $ref: "#/components/responses/Error"
+  /api/v1/auth/oauth/exchange:
+    post:
+      tags: [auth]
+      operationId: authOauthExchange
+      summary: Exchange OAuth id_token for session (WBS E2.1 scaffold)
+      description: |
+        Local/dogfood: `id_token = "stub:<email>"` when OAUTH_STUB=1 or local APP_ENV.
+        Production forbids stub. Real Google/Apple JWKS verification still needs vendor config.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OauthExchangeRequest"
+      responses:
+        "200":
+          description: Tokens + user issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSession"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
   /api/v1/auth/token/refresh:
     post:
       tags: [auth]
@@ -144,6 +183,204 @@ paths:
         "204":
           description: Logged out
         "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/me/sessions:
+    get:
+      tags: [auth]
+      operationId: listMySessions
+      summary: List active refresh sessions (jti only; WBS E2.4)
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Active sessions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionListResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+    delete:
+      tags: [auth]
+      operationId: logoutAllSessions
+      summary: Revoke all refresh sessions for the current user
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Revoked count
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogoutAllResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/me/sessions/{jti}:
+    delete:
+      tags: [auth]
+      operationId: revokeSession
+      summary: Revoke a single refresh session by jti (must belong to caller)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: jti
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Session revoked
+        "404":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/me/push-tokens:
+    get:
+      tags: [users]
+      operationId: listPushTokens
+      summary: List registered device push tokens (WBS E8.9 scaffold; no delivery)
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: Tokens
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushDeviceListResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [users]
+      operationId: registerPushToken
+      summary: Register or upsert a device push token
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PushRegisterRequest"
+      responses:
+        "200":
+          description: Registered device
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushDevice"
+        "401":
+          $ref: "#/components/responses/Error"
+    delete:
+      tags: [users]
+      operationId: unregisterPushToken
+      summary: Unregister a device push token owned by the caller
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PushRegisterRequest"
+      responses:
+        "204":
+          description: Unregistered
+        "404":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/me/push-tokens/test:
+    post:
+      tags: [users]
+      operationId: testPush
+      summary: Fire a test push via configured delivery backend (noop by default)
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PushTestRequest"
+      responses:
+        "200":
+          description: Delivery attempt summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushTestResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/v1/me/avatar/presign:
+    post:
+      tags: [users]
+      operationId: avatarPresign
+      summary: Issue short-lived avatar upload URL (MinIO or synthetic)
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AvatarPresignRequest"
+      responses:
+        "200":
+          description: Presigned upload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AvatarPresignResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/me/avatar/confirm:
+    post:
+      tags: [users]
+      operationId: avatarConfirm
+      summary: Confirm avatar URL after client PUT
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AvatarConfirmRequest"
+      responses:
+        "200":
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/me/avatar/blob:
+    put:
+      tags: [users]
+      operationId: avatarBlobPut
+      summary: Synthetic avatar blob sink when MinIO is disabled
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: object_key
+          in: query
+          required: true
+          schema: {type: string}
+        - name: expires
+          in: query
+          required: true
+          schema: {type: integer, format: int64}
+        - name: token
+          in: query
+          required: true
+          schema: {type: string}
+      responses:
+        "204":
+          description: Blob accepted
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
           $ref: "#/components/responses/Error"
   /api/v1/me:
     get:
@@ -211,6 +448,20 @@ paths:
                 $ref: "#/components/schemas/AccountExport"
         "401":
           $ref: "#/components/responses/Error"
+  /api/v1/me/creator:
+    get:
+      tags: [users]
+      operationId: creatorStats
+      summary: Creator center stats (followers, rooms, gift income)
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: Creator dashboard
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatorStatsResponse"
+
   /api/v1/legal/privacy:
     get:
       tags: [compliance]
@@ -390,6 +641,112 @@ paths:
         - $ref: "#/components/parameters/RoomId"
       responses:
         "200": {description: Idle}
+  /api/v1/rooms/{roomId}/stats:
+    get:
+      tags: [rooms]
+      operationId: roomStats
+      summary: Online count (heartbeat TTL) + like total (WBS E4.4)
+      parameters:
+        - $ref: "#/components/parameters/RoomId"
+      responses:
+        "200":
+          description: Room stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoomStats"
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/v1/rooms/{roomId}/presence:
+    post:
+      tags: [rooms]
+      operationId: roomPresenceHeartbeat
+      summary: Presence heartbeat while viewer is in room
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/RoomId"
+      responses:
+        "200":
+          description: Current online count after heartbeat
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PresenceHeartbeatResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/v1/rooms/{roomId}/likes:
+    post:
+      tags: [rooms]
+      operationId: roomLike
+      summary: Increment room like counter (light per-user cooldown)
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/RoomId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                client_request_id:
+                  type: string
+      responses:
+        "200":
+          description: Like result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LikeRoomResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/v1/rooms/{roomId}/recording:
+    get:
+      tags: [rooms]
+      operationId: getRecording
+      summary: Room recording flag (control plane, no media egress)
+      parameters:
+        - $ref: "#/components/parameters/RoomId"
+      responses:
+        "200":
+          description: Recording status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecordingStatus"
+        "404":
+          $ref: "#/components/responses/Error"
+    put:
+      tags: [rooms]
+      operationId: setRecording
+      summary: Owner-only recording enable/disable switch
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/RoomId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: {type: boolean}
+      responses:
+        "200":
+          description: Updated recording status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecordingStatus"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
   /api/v1/rooms/{roomId}/media/publish:
     post:
       tags: [rooms]
@@ -407,6 +764,178 @@ paths:
         - $ref: "#/components/parameters/RoomId"
       responses:
         "200": {description: Play URLs}
+  /api/v1/rooms/{roomId}/livekit/join:
+    post:
+      tags: [rooms]
+      operationId: livekitJoin
+      summary: Issue LiveKit join credentials (P3 interactive scaffold)
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/RoomId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LiveKitJoinRequest"
+      responses:
+        "200":
+          description: Join credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LiveKitJoinResponse"
+        "403":
+          description: Host role restricted to room owner
+        "503":
+          description: LiveKit not configured
+  /api/v1/rooms/{roomId}/interactive/invite:
+    post:
+      tags: [rooms]
+      operationId: interactiveInvite
+      summary: Host invites a user to co-host (P3)
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/RoomId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InteractiveInviteRequest"
+      responses:
+        "201":
+          description: Invite created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InteractiveSession"
+        "403": {description: Not room owner}
+        "409": {description: Conflict / seat full}
+  /api/v1/rooms/{roomId}/interactive/respond:
+    post:
+      tags: [rooms]
+      operationId: interactiveRespond
+      summary: Invitee accepts or declines co-host invite
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/RoomId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InteractiveRespondRequest"
+      responses:
+        "200":
+          description: Session updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InteractiveSession"
+        "404": {description: No pending invite}
+  /api/v1/rooms/{roomId}/interactive/leave:
+    post:
+      tags: [rooms]
+      operationId: interactiveLeave
+      summary: Leave or end co-host session
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/RoomId"
+      responses:
+        "200":
+          description: Session ended
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InteractiveSession"
+        "404": {description: No active session}
+  /api/v1/rooms/{roomId}/interactive:
+    get:
+      tags: [rooms]
+      operationId: listInteractiveSessions
+      summary: List interactive sessions for a room
+      parameters:
+        - $ref: "#/components/parameters/RoomId"
+      responses:
+        "200":
+          description: Sessions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InteractiveSessionList"
+  /api/v1/rooms/{roomId}/pk:
+    get:
+      tags: [rooms]
+      operationId: getPkSession
+      summary: Current PK session for room (if any)
+      parameters:
+        - $ref: "#/components/parameters/RoomId"
+      responses:
+        "200":
+          description: PK state (null session when idle)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PkSessionResponse"
+  /api/v1/rooms/{roomId}/pk/start:
+    post:
+      tags: [rooms]
+      operationId: startPk
+      summary: Start a timed PK against another live room
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/RoomId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartPkRequest"
+      responses:
+        "201":
+          description: PK started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PkSession"
+        "403": {description: Not room owner}
+        "409": {description: Already in PK or opponent not live}
+  /api/v1/rooms/{roomId}/pk/end:
+    post:
+      tags: [rooms]
+      operationId: endPk
+      summary: End active PK early (host) or when timer expires
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/RoomId"
+      responses:
+        "200":
+          description: PK ended with scores
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PkSession"
+        "404": {description: No active PK}
+  /api/v1/events:
+    post:
+      tags: [analytics]
+      operationId: ingestClientEvents
+      summary: Client analytics event batch (P4 scaffold)
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClientEventBatch"
+      responses:
+        "202":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClientEventIngestResponse"
   /api/v1/rooms/{roomId}/messages:
     get:
       tags: [realtime]
@@ -452,7 +981,14 @@ paths:
     post:
       tags: [admin]
       operationId: adminGrant
+      summary: Bootstrap or grant admin role (admin | moderator | ops)
       security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GrantAdminRequest"
       responses:
         "204": {description: Granted}
   /api/v1/admin/ban:
@@ -520,6 +1056,51 @@ paths:
       security: [{bearerAuth: []}]
       responses:
         "200": {description: Audit list}
+  /api/v1/admin/wallet/reconcile:
+    get:
+      tags: [admin]
+      operationId: adminWalletReconcile
+      summary: Run wallet ledger/balance consistency scan
+      description: >
+        Compares each user's stored balance to the sum of ledger amounts.
+        P1 dogfood gate requires imbalance_count == 0 after gift/topup flows.
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: Reconcile report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WalletReconcileResponse"
+  /api/v1/admin/pay/expire-orders:
+    post:
+      tags: [admin]
+      operationId: adminExpirePayOrders
+      summary: Expire unpaid pay orders past expires_at
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: Expire result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExpirePayOrdersResponse"
+  /api/v1/admin/analytics/summary:
+    get:
+      tags: [admin]
+      operationId: adminAnalyticsSummary
+      summary: Dogfood client-event buffer summary (not warehouse DAU)
+      description: >
+        Aggregates the in-process analytics ring buffer by event name.
+        Use during soft launch to verify client ingest; full DAU/paid boards stay external.
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: Analytics summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyticsSummaryResponse"
   /api/v1/admin/gifts:
     get:
       tags: [admin]
@@ -617,6 +1198,41 @@ paths:
       security: [{bearerAuth: []}]
       responses:
         "200": {description: Following live rooms}
+  /api/v1/search:
+    get:
+      tags: [social]
+      operationId: search
+      summary: Search users by display name and rooms by title (WBS E6.3)
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+        - name: type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [all, users, rooms]
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+      responses:
+        "200":
+          description: Search hits
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResponse"
+        "400":
+          $ref: "#/components/responses/Error"
   /api/v1/reports:
     post:
       tags: [moderation]
@@ -636,6 +1252,141 @@ paths:
       operationId: srsOnUnpublish
       responses:
         "200": {description: OK}
+  /api/v1/pay/channels:
+    get:
+      tags: [pay]
+      operationId: listPayChannels
+      summary: List enabled payment channels
+      responses:
+        "200":
+          description: Channel list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayChannelListResponse"
+  /api/v1/pay/products:
+    get:
+      tags: [pay]
+      operationId: listPayProducts
+      summary: List coin packages
+      responses:
+        "200":
+          description: Product list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayProductListResponse"
+  /api/v1/pay/orders:
+    post:
+      tags: [pay]
+      operationId: createPayOrder
+      summary: Create a pay order for a coin product
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePayOrderRequest"
+      responses:
+        "201":
+          description: Order created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayOrder"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/pay/orders/{orderId}:
+    get:
+      tags: [pay]
+      operationId: getPayOrder
+      summary: Get pay order by id
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Order
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayOrder"
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/v1/pay/orders/{orderId}/sandbox-complete:
+    post:
+      tags: [pay]
+      operationId: sandboxCompletePayOrder
+      summary: Mock-channel sandbox complete (dogfood only)
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Credited order
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayOrder"
+        "400":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/v1/webhooks/pay/mock:
+    post:
+      tags: [webhooks, pay]
+      operationId: payWebhookMock
+      summary: Mock pay provider webhook
+      responses:
+        "200": {description: Acknowledged}
+  /api/v1/webhooks/pay/jeepay:
+    post:
+      tags: [webhooks, pay]
+      operationId: payWebhookJeepay
+      summary: Jeepay webhook (adapter stub)
+      responses:
+        "200": {description: Acknowledged}
+  /api/v1/webhooks/pay/epay:
+    post:
+      tags: [webhooks, pay]
+      operationId: payWebhookEpay
+      summary: EPay webhook (adapter stub)
+      responses:
+        "200": {description: Acknowledged}
+  /api/v1/webhooks/pay/tokenpay:
+    post:
+      tags: [webhooks, pay]
+      operationId: payWebhookTokenpay
+      summary: TokenPay webhook (adapter stub)
+      responses:
+        "200": {description: Acknowledged}
+  /api/v1/webhooks/pay/stripe:
+    post:
+      tags: [webhooks, pay]
+      operationId: payWebhookStripe
+      summary: Stripe Checkout / PaymentIntent webhook (sandbox + Stripe-Signature)
+      responses:
+        "200": {description: Acknowledged}
+  /api/v1/webhooks/pay/iap:
+    post:
+      tags: [webhooks, pay]
+      operationId: payWebhookIap
+      summary: App Store / Play IAP sandbox receipt webhook
+      responses:
+        "200": {description: Acknowledged}
 
 components:
   securitySchemes:
@@ -675,9 +1426,25 @@ components:
       properties:
         ready:
           type: boolean
+    MetaFeatures:
+      type: object
+      required: [public_register, real_pay, pk, cohost, client_events]
+      properties:
+        public_register:
+          type: boolean
+        real_pay:
+          type: boolean
+        pk:
+          type: boolean
+          description: P3 PK; default false when unset
+        cohost:
+          type: boolean
+          description: P3 co-host; default false when unset
+        client_events:
+          type: boolean
     MetaResponse:
       type: object
-      required: [name, version, api_version]
+      required: [name, version, api_version, media_provider, features]
       properties:
         name:
           type: string
@@ -685,7 +1452,12 @@ components:
           type: string
         api_version:
           type: string
-          example: v1
+        media_provider:
+          type: string
+          description: Broadcast backend (srs | cloudflare_stream)
+          example: srs
+        features:
+          $ref: "#/components/schemas/MetaFeatures"
     ApiError:
       type: object
       required: [code, message, retryable]
@@ -716,6 +1488,18 @@ components:
           type: string
           minLength: 4
           maxLength: 8
+    OauthExchangeRequest:
+      type: object
+      required: [provider, id_token]
+      properties:
+        provider:
+          type: string
+          description: google | apple
+        id_token:
+          type: string
+          description: Provider ID token; local dogfood may use stub:<email>
+        invite_code:
+          type: string
     TokenPair:
       type: object
       required: [access_token, refresh_token, expires_in]
@@ -750,6 +1534,168 @@ components:
       properties:
         refresh_token:
           type: string
+    Session:
+      type: object
+      required: [jti, expires_at]
+      properties:
+        jti:
+          type: string
+          format: uuid
+        expires_at:
+          type: string
+          format: date-time
+    SessionListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Session"
+    LogoutAllResponse:
+      type: object
+      required: [revoked]
+      properties:
+        revoked:
+          type: integer
+          format: int64
+    PushRegisterRequest:
+      type: object
+      required: [token, platform]
+      properties:
+        token:
+          type: string
+          maxLength: 512
+        platform:
+          type: string
+          description: ios | android | web | other
+    PushDevice:
+      type: object
+      required: [id, platform, token, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        platform:
+          type: string
+        token:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    PushDeviceListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PushDevice"
+    PushTestRequest:
+      type: object
+      required: [title, body]
+      properties:
+        title:
+          type: string
+        body:
+          type: string
+        token:
+          type: string
+          description: Optional single device token; omit to fan out to all of user
+    PushTestResponse:
+      type: object
+      required: [delivery, attempted, succeeded]
+      properties:
+        delivery:
+          type: string
+          description: noop | log | http
+        attempted:
+          type: integer
+        succeeded:
+          type: integer
+    RoomStats:
+      type: object
+      required: [room_id, online_count, like_count, recording_enabled]
+      properties:
+        room_id:
+          type: string
+          format: uuid
+        online_count:
+          type: integer
+          format: int64
+        like_count:
+          type: integer
+          format: int64
+        recording_enabled:
+          type: boolean
+    RecordingStatus:
+      type: object
+      required: [room_id, recording_enabled]
+      properties:
+        room_id:
+          type: string
+          format: uuid
+        recording_enabled:
+          type: boolean
+    AvatarPresignRequest:
+      type: object
+      properties:
+        content_type:
+          type: string
+    AvatarPresignResponse:
+      type: object
+      required: [object_key, upload_url, public_url, method, expires_in, headers]
+      properties:
+        object_key: {type: string}
+        upload_url: {type: string}
+        public_url: {type: string}
+        method: {type: string}
+        expires_in: {type: integer, format: int64}
+        headers:
+          type: array
+          items:
+            type: object
+            required: [name, value]
+            properties:
+              name: {type: string}
+              value: {type: string}
+    AvatarConfirmRequest:
+      type: object
+      required: [object_key]
+      properties:
+        object_key: {type: string}
+        public_url: {type: string}
+    PresenceHeartbeatResponse:
+      type: object
+      required: [online_count]
+      properties:
+        online_count:
+          type: integer
+          format: int64
+    LikeRoomResponse:
+      type: object
+      required: [accepted, like_count]
+      properties:
+        accepted:
+          type: boolean
+        like_count:
+          type: integer
+          format: int64
+    SearchResponse:
+      type: object
+      required: [users, rooms]
+      properties:
+        users:
+          type: array
+          items:
+            $ref: "#/components/schemas/User"
+        rooms:
+          type: array
+          items:
+            $ref: "#/components/schemas/Room"
     User:
       type: object
       required: [id, display_name, created_at, age_confirmed, privacy_accepted]
@@ -769,6 +1715,13 @@ components:
           type: boolean
         privacy_accepted:
           type: boolean
+        avatar_url:
+          type: string
+          format: uri
+          description: Public avatar object URL when set
+        region:
+          type: string
+          description: Optional ISO 3166-1 alpha-2 region / country code
     PatchMeRequest:
       type: object
       properties:
@@ -778,6 +1731,9 @@ components:
           type: boolean
         privacy_accepted:
           type: boolean
+        region:
+          type: string
+          description: ISO region code; empty string clears
       description: At least one field is required
     AccountExport:
       type: object
@@ -839,6 +1795,17 @@ components:
           format: uuid
         reason:
           type: string
+    GrantAdminRequest:
+      type: object
+      required: [user_id]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          description: admin | moderator | ops (default admin)
+          enum: [admin, moderator, ops]
     MuteUserRequest:
       type: object
       required: [user_id]
@@ -898,6 +1865,112 @@ components:
           type: string
           minLength: 1
           maxLength: 80
+    PayChannel:
+      type: object
+      required: [id, title, pay_modes]
+      properties:
+        id:
+          type: string
+          example: mock
+        title:
+          type: string
+        pay_modes:
+          type: array
+          items:
+            type: string
+    PayChannelListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PayChannel"
+    PayProduct:
+      type: object
+      required: [id, sku, title, coins, amount, currency]
+      properties:
+        id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+        title:
+          type: string
+        coins:
+          type: integer
+          format: int64
+        amount:
+          type: string
+          description: Display amount (e.g. "0.99")
+        currency:
+          type: string
+          example: USD
+    PayProductListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PayProduct"
+    CreatePayOrderRequest:
+      type: object
+      required: [product_id, channel]
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        channel:
+          type: string
+          example: mock
+        client_request_id:
+          type: string
+        return_url:
+          type: string
+          format: uri
+        extra:
+          type: object
+          additionalProperties: true
+    PayOrder:
+      type: object
+      required: [id, status, coins, amount, currency, channel]
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          example: pending
+        coins:
+          type: integer
+          format: int64
+        amount:
+          type: string
+        currency:
+          type: string
+        channel:
+          type: string
+        pay_mode:
+          type: string
+        pay_url:
+          type: string
+        qr_content:
+          type: string
+        jsapi_params:
+          type: object
+          additionalProperties: true
+        mock_hint:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+        paid_at:
+          type: string
+          format: date-time
+        credited_at:
+          type: string
+          format: date-time
     Room:
       type: object
       required: [id, owner_id, title, status, created_at, updated_at]
@@ -919,3 +1992,226 @@ components:
         updated_at:
           type: string
           format: date-time
+    WalletReconcileResponse:
+      type: object
+      required: [checked_users, imbalance_count, balanced, mismatches, mismatches_truncated]
+      properties:
+        checked_users:
+          type: integer
+          format: int64
+        imbalance_count:
+          type: integer
+          format: int64
+        balanced:
+          type: boolean
+        mismatches:
+          type: array
+          items:
+            $ref: "#/components/schemas/BalanceMismatch"
+        mismatches_truncated:
+          type: boolean
+    BalanceMismatch:
+      type: object
+      required: [user_id, stored_balance, ledger_sum]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        stored_balance:
+          type: integer
+          format: int64
+        ledger_sum:
+          type: integer
+          format: int64
+    LiveKitJoinRequest:
+      type: object
+      properties:
+        role:
+          type: string
+          description: host | cohost | viewer
+          enum: [host, cohost, viewer]
+    LiveKitJoinResponse:
+      type: object
+      required: [url, room_name, token, identity, expires_at]
+      properties:
+        url: {type: string}
+        room_name: {type: string}
+        token: {type: string}
+        identity: {type: string}
+        expires_at: {type: string, format: date-time}
+    InteractiveInviteRequest:
+      type: object
+      required: [invitee_id]
+      properties:
+        invitee_id:
+          type: string
+          format: uuid
+    InteractiveRespondRequest:
+      type: object
+      required: [accept]
+      properties:
+        accept: {type: boolean}
+    InteractiveSession:
+      type: object
+      required: [id, room_id, host_id, invitee_id, status, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        room_id: {type: string, format: uuid}
+        host_id: {type: string, format: uuid}
+        invitee_id: {type: string, format: uuid}
+        status:
+          type: string
+          enum: [invited, active, declined, ended]
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        ended_at: {type: string, format: date-time}
+    InteractiveSessionList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/InteractiveSession"
+    StartPkRequest:
+      type: object
+      required: [opponent_room_id]
+      properties:
+        opponent_room_id:
+          type: string
+          format: uuid
+        duration_secs:
+          type: integer
+          format: int64
+          description: Default 180
+    PkSession:
+      type: object
+      required:
+        - id
+        - room_a_id
+        - room_b_id
+        - host_a_id
+        - host_b_id
+        - status
+        - score_a
+        - score_b
+        - started_at
+        - ends_at
+        - updated_at
+      properties:
+        id: {type: string, format: uuid}
+        room_a_id: {type: string, format: uuid}
+        room_b_id: {type: string, format: uuid}
+        host_a_id: {type: string, format: uuid}
+        host_b_id: {type: string, format: uuid}
+        status:
+          type: string
+          enum: [active, ended]
+        score_a: {type: integer, format: int64}
+        score_b: {type: integer, format: int64}
+        winner_room_id:
+          type: string
+          format: uuid
+        started_at: {type: string, format: date-time}
+        ends_at: {type: string, format: date-time}
+        ended_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    PkSessionResponse:
+      type: object
+      properties:
+        session:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/PkSession"
+    ClientEventBatch:
+      type: object
+      required: [events]
+      properties:
+        events:
+          type: array
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/ClientEvent"
+    ClientEvent:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: Event name from client dictionary (e.g. room.view, gift.tap)
+        occurred_at:
+          type: string
+          format: date-time
+        props:
+          type: object
+          additionalProperties: true
+        client_event_id:
+          type: string
+          description: Optional idempotency key
+    ClientEventIngestResponse:
+      type: object
+      required: [accepted, dropped]
+      properties:
+        accepted: {type: integer, format: int64}
+        dropped: {type: integer, format: int64}
+    CreatorStatsResponse:
+      type: object
+      required:
+        - follower_count
+        - following_count
+        - live_rooms
+        - total_rooms
+        - gift_coins_received
+        - gift_credit_entries
+        - rooms
+      properties:
+        follower_count: {type: integer, format: int64}
+        following_count: {type: integer, format: int64}
+        live_rooms: {type: integer, format: int64}
+        total_rooms: {type: integer, format: int64}
+        gift_coins_received: {type: integer, format: int64}
+        gift_credit_entries: {type: integer, format: int64}
+        rooms:
+          type: array
+          items:
+            $ref: "#/components/schemas/Room"
+
+    ExpirePayOrdersResponse:
+      type: object
+      required: [expired_count]
+      properties:
+        expired_count:
+          type: integer
+          format: int64
+
+    AnalyticsNameCount:
+      type: object
+      required: [name, count]
+      properties:
+        name: {type: string}
+        count: {type: integer, format: int64}
+
+    AnalyticsRecentEvent:
+      type: object
+      required: [id, user_id, name, occurred_at, received_at]
+      properties:
+        id: {type: string}
+        user_id: {type: string}
+        name: {type: string}
+        occurred_at: {type: string}
+        received_at: {type: string}
+
+    AnalyticsSummaryResponse:
+      type: object
+      required: [retained_events, distinct_users, by_name, recent]
+      properties:
+        retained_events: {type: integer, format: int64}
+        distinct_users: {type: integer, format: int64}
+        by_name:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsNameCount"
+        recent:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsRecentEvent"

@@ -1,18 +1,13 @@
 //! AnyLive HTTP API binary.
 
-use anylive_api::{build_app_with_state_and_cors, cors_layer_from_env, AppState};
+use anylive_api::{
+    build_app_with_state_and_cors, cors_layer_from_env, init_tracing, AppState,
+};
 use std::net::SocketAddr;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info,anylive_api=debug".into()),
-        )
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+    init_tracing();
 
     let bind = std::env::var("API_BIND").unwrap_or_else(|_| "0.0.0.0:8088".to_string());
     let addr: SocketAddr = bind.parse()?;

@@ -148,6 +148,9 @@ pub fn check_feature_flags_for_production() -> Result<(), String> {
     if env_flag_enabled("PAY_ENABLE_MOCK") {
         return Err("production forbids PAY_ENABLE_MOCK".into());
     }
+    if env_flag_enabled("OAUTH_STUB") {
+        return Err("production forbids OAUTH_STUB".into());
+    }
     if anylive_pay::mock_pay_enabled_from_env() {
         return Err(
             "production forbids mock pay channel (PAY_CHANNELS=mock / PAY_ENABLE_MOCK / ALLOW_MOCK_TOPUP)"

@@ -289,6 +289,44 @@ pub async fn send_gift(
         if let Err(e) = state.centrifugo_publisher.publish(&channel, data).await {
             tracing::warn!(error = %e, %channel, "centrifugo gift publish failed");
         }
+        // WBS E1.3 / E5.3: optional NATS gift.sent domain event (never fails debit).
+        let nats_ev = anylive_realtime::gift_sent_nats_event(
+            order.id,
+            order.room_id,
+            order.sender_id.0,
+            order.receiver_id.0,
+            order.gift_id,
+            order.count,
+            order.total_coins,
+        );
+        if let Err(e) = state
+            .nats
+            .publish(anylive_realtime::SUBJECT_GIFT_SENT, nats_ev)
+            .await
+        {
+            tracing::warn!(error = %e, "nats gift.sent publish failed");
+        }
+        // P3: gifts count toward PK score when room is in an active battle.
+        if let Some(pk) = state
+            .interactive
+            .add_gift_score(RoomId(room_id), order.total_coins)
+            .await
+        {
+            let pk_data = serde_json::json!({
+                "type": "pk.score",
+                "payload": {
+                    "id": pk.id.to_string(),
+                    "room_a_id": pk.room_a_id.0.to_string(),
+                    "room_b_id": pk.room_b_id.0.to_string(),
+                    "score_a": pk.score_a,
+                    "score_b": pk.score_b,
+                    "status": pk.status.as_str(),
+                }
+            });
+            if let Err(e) = state.centrifugo_publisher.publish(&channel, pk_data).await {
+                tracing::warn!(error = %e, %channel, "centrifugo pk.score publish failed");
+            }
+        }
     }
 
     let status = if replayed {

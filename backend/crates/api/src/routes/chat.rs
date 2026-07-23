@@ -120,6 +120,10 @@ pub async fn post_message(
     let room_id = RoomId(room_uuid);
     let _ = state.rooms.get(room_id).await.map_err(ApiError::from)?;
     let me = state.auth.me(user.user_id).await.map_err(ApiError::from)?;
+    state
+        .word_filter
+        .check(&body.body)
+        .map_err(ApiError::from)?;
     let msg = state
         .chat
         .post(room_id, user.user_id, me.display_name, body.body)

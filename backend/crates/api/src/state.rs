@@ -13,8 +13,8 @@ use anylive_db::{
 use anylive_media::SrsMediaProvider;
 use anylive_pay::{PayChannelRegistry, PayStore};
 use anylive_realtime::{
-    publisher_from_env, CentrifugoConfig, CentrifugoPublisher, ChatRateLimiter,
-    NoopCentrifugoPublisher,
+    nats_publisher_from_env, publisher_from_env, CentrifugoConfig, CentrifugoPublisher,
+    ChatRateLimiter, NatsPublisher, NoopCentrifugoPublisher, NoopNatsPublisher,
 };
 
 use crate::guards::{
@@ -61,6 +61,32 @@ pub struct AppState {
     pub pay_mock_secret: Option<String>,
     /// Rate limit sandbox-complete minting (per user id).
     pub pay_sandbox_limiter: IpRateLimiter,
+    /// Soft-launch invite / email allowlist gate (P2).
+    pub invite: crate::invite::InviteGate,
+    /// Chat content policy word filter (empty = open).
+    pub word_filter: anylive_moderation::WordFilter,
+    /// Optional LiveKit interactive provider (P3 co-host).
+    pub livekit: Option<anylive_media::LiveKitProvider>,
+    /// Co-host invites + PK sessions (in-memory control plane).
+    pub interactive: crate::interactive::InteractiveStore,
+    /// Client analytics event buffer (P4 scaffold).
+    pub analytics: crate::analytics::AnalyticsStore,
+    /// Room online presence + likes (WBS E4.4, in-process).
+    pub presence: crate::presence::PresenceStore,
+    /// Room recording enable flags (WBS E3.5 control plane).
+    pub recording: crate::recording::RecordingStore,
+    /// Device push tokens (WBS E8.9 scaffold, in-process; no delivery).
+    pub push: crate::push::PushStore,
+    /// Push delivery backend (noop / log / http).
+    pub push_delivery: crate::push_delivery::SharedPushDelivery,
+    /// OAuth exchange config (stub / providers).
+    pub oauth: crate::oauth::OauthConfig,
+    /// Optional object storage for avatars (WBS E2.3).
+    pub object_storage: crate::object_storage::ObjectStorageConfig,
+    /// Optional NATS domain-event publisher (WBS E1.3 / E5.3).
+    pub nats: Arc<dyn NatsPublisher>,
+    /// GA / soft-launch kill switches.
+    pub features: crate::features::FeatureFlags,
 }
 
 impl AppState {
@@ -86,6 +112,12 @@ impl AppState {
         pay_public_base: String,
         pay_mock_secret: Option<String>,
         pay_sandbox_limiter: IpRateLimiter,
+        invite: crate::invite::InviteGate,
+        word_filter: anylive_moderation::WordFilter,
+        livekit: Option<anylive_media::LiveKitProvider>,
+        interactive: crate::interactive::InteractiveStore,
+        analytics: crate::analytics::AnalyticsStore,
+        features: crate::features::FeatureFlags,
     ) -> Self {
         Self {
             auth,
@@ -109,6 +141,26 @@ impl AppState {
             pay_public_base,
             pay_mock_secret,
             pay_sandbox_limiter,
+            invite,
+            word_filter,
+            livekit,
+            interactive,
+            analytics,
+            presence: crate::presence::PresenceStore::new(),
+            recording: crate::recording::RecordingStore::new(),
+            push: crate::push::PushStore::new(),
+            // For tests: deterministic defaults (not from env).
+            push_delivery: std::sync::Arc::new(crate::push_delivery::NoopPushDelivery),
+            oauth: crate::oauth::OauthConfig {
+                stub_enabled: true,
+                enabled: crate::oauth::OAUTH_PROVIDERS
+                    .iter()
+                    .map(|s| (*s).to_string())
+                    .collect(),
+            },
+            object_storage: crate::object_storage::ObjectStorageConfig::dev(),
+            nats: Arc::new(NoopNatsPublisher::new()),
+            features,
         }
     }
 
@@ -144,11 +196,17 @@ impl AppState {
             None,
             true, // tests exercise mock topup
             AnyPayStore::memory(),
-            PayChannelRegistry::mock_only("anylive-dev-pay-mock-secret-change-me"),
+            PayChannelRegistry::sandbox_channels("anylive-dev-pay-mock-secret-change-me"),
             "http://localhost:8088".into(),
             Some("anylive-dev-pay-mock-secret-change-me".into()),
             // High limit for tests; production forbids mock entirely.
             IpRateLimiter::new(10_000, std::time::Duration::from_secs(60)),
+            crate::invite::InviteGate::open(),
+            anylive_moderation::WordFilter::empty(),
+            None,
+            crate::interactive::InteractiveStore::new(),
+            crate::analytics::AnalyticsStore::new(),
+            crate::features::FeatureFlags::all_enabled(),
         ))
     }
 
@@ -334,7 +392,7 @@ impl AppState {
             None
         };
 
-        let state = Arc::new(Self::new(
+        let mut state = Self::new(
             auth,
             rooms,
             SrsMediaProvider::from_env(),
@@ -357,7 +415,22 @@ impl AppState {
             pay_mock_secret,
             // Dogfood mint guard: 10 sandbox completes / user / hour.
             IpRateLimiter::new(10, std::time::Duration::from_secs(3600)),
-        ));
+            crate::invite::InviteGate::from_env(),
+            anylive_moderation::WordFilter::from_env(),
+            anylive_media::LiveKitProvider::from_env(),
+            crate::interactive::InteractiveStore::new(),
+            crate::analytics::AnalyticsStore::new(),
+            crate::features::FeatureFlags::from_env(),
+        );
+        // Env-backed object storage + NATS (dev() defaults used by tests).
+        state.object_storage = crate::object_storage::ObjectStorageConfig::from_env();
+        state.nats = nats_publisher_from_env();
+        state.push_delivery = crate::push_delivery::push_delivery_from_env();
+        state.oauth = crate::oauth::OauthConfig::from_env();
+        if state.oauth.stub_enabled {
+            tracing::warn!("oauth stub mode enabled (OAUTH_STUB / local APP_ENV)");
+        }
+        let state = Arc::new(state);
         state.wallet.seed_default_gifts().await;
         state.pay.seed_default_products().await;
         Ok(state)

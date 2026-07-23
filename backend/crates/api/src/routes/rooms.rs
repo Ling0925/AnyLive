@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use anylive_common::{AppError, ErrorCode};
 use anylive_domain::{Room, RoomId, RoomStatus};
-use anylive_media::{MediaProvider, PlayUrls, PublishInfo};
+use anylive_media::{InteractiveMediaProvider, MediaProvider, PlayUrls, PublishInfo};
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
@@ -263,4 +263,71 @@ pub async fn media_play(
         .await
         .map_err(ApiError::from)?;
     Ok(Json(urls.into()))
+}
+
+
+/// Issue LiveKit join credentials for co-host / interactive (P3 scaffold).
+///
+/// Requires `LIVEKIT_URL` + `LIVEKIT_API_KEY` + `LIVEKIT_API_SECRET` at process start.
+#[utoipa::path(
+    post,
+    path = "/api/v1/rooms/{id}/livekit/join",
+    tag = "rooms",
+    security(("bearerAuth" = [])),
+    responses((status = 200, body = LiveKitJoinDto), (status = 503, description = "LiveKit not configured"))
+)]
+pub async fn livekit_join(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(id): Path<String>,
+    Json(body): Json<LiveKitJoinBody>,
+) -> Result<Json<LiveKitJoinDto>, ApiError> {
+    let room_uuid = Uuid::parse_str(&id)
+        .map_err(|_| ApiError(anylive_common::AppError::validation("invalid room id")))?;
+    let room_id = RoomId(room_uuid);
+    let room = state.rooms.get(room_id).await.map_err(ApiError::from)?;
+    let role = match body.role.as_deref().unwrap_or("viewer") {
+        "host" => anylive_media::LiveKitRole::Host,
+        "cohost" | "co_host" => anylive_media::LiveKitRole::CoHost,
+        _ => anylive_media::LiveKitRole::Viewer,
+    };
+    // Host role only for room owner; cohost/viewer for authenticated users.
+    if matches!(role, anylive_media::LiveKitRole::Host) && room.owner_id != user.user_id {
+        return Err(ApiError(anylive_common::AppError::new(
+            anylive_common::ErrorCode::Forbidden,
+            "only room owner may join as host",
+        )));
+    }
+    let lk = state.livekit.as_ref().ok_or_else(|| {
+        ApiError(anylive_common::AppError::new(
+            anylive_common::ErrorCode::MediaProviderError,
+            "LiveKit not configured (set LIVEKIT_URL/API_KEY/API_SECRET)",
+        ))
+    })?;
+    let info = lk
+        .issue_join(room_id, user.user_id, role)
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(LiveKitJoinDto {
+        url: info.url,
+        room_name: info.room_name,
+        token: info.token,
+        identity: info.identity,
+        expires_at: info.expires_at.to_rfc3339(),
+    }))
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct LiveKitJoinBody {
+    #[serde(default)]
+    pub role: Option<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct LiveKitJoinDto {
+    pub url: String,
+    pub room_name: String,
+    pub token: String,
+    pub identity: String,
+    pub expires_at: String,
 }
