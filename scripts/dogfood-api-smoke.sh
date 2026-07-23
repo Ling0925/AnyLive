@@ -165,8 +165,50 @@ label "Fan OTP send + verify (${FAN_EMAIL})"
 api POST /api/v1/auth/otp/send "{\"email\":\"${FAN_EMAIL}\"}"
 api POST /api/v1/auth/otp/verify "{\"email\":\"${FAN_EMAIL}\",\"code\":\"${OTP_CODE}\"}"
 FAN_TOKEN="$(json_get "$HTTP_BODY" "obj['access_token']")"
+FAN_REFRESH="$(json_get "$HTTP_BODY" "obj['refresh_token']")"
 FAN_ID="$(json_get "$HTTP_BODY" "obj['user']['id']")"
 echo "fan_id=${FAN_ID}"
+
+# ---------------------------------------------------------------------------
+label "Fan token refresh (rotate + use new access on /me)"
+# BE-1: session refresh path must be control-plane covered, not only GET /me/sessions.
+if [[ -z "$FAN_REFRESH" || "$FAN_REFRESH" == "None" ]]; then
+  echo "FAIL: OTP verify missing refresh_token" >&2
+  exit 1
+fi
+OLD_FAN_TOKEN="$FAN_TOKEN"
+OLD_FAN_REFRESH="$FAN_REFRESH"
+api POST /api/v1/auth/token/refresh "{\"refresh_token\":\"${FAN_REFRESH}\"}"
+FAN_TOKEN="$(json_get "$HTTP_BODY" "obj['access_token']")"
+FAN_REFRESH="$(json_get "$HTTP_BODY" "obj['refresh_token']")"
+REFRESH_EXPIRES="$(json_get "$HTTP_BODY" "obj.get('expires_in','')")"
+echo "refresh rotated expires_in=${REFRESH_EXPIRES}"
+if [[ -z "$FAN_TOKEN" || "$FAN_TOKEN" == "None" ]]; then
+  echo "FAIL: refresh missing access_token" >&2
+  exit 1
+fi
+if [[ -z "$FAN_REFRESH" || "$FAN_REFRESH" == "None" ]]; then
+  echo "FAIL: refresh missing new refresh_token" >&2
+  exit 1
+fi
+if [[ "$FAN_REFRESH" == "$OLD_FAN_REFRESH" ]]; then
+  echo "FAIL: refresh_token did not rotate" >&2
+  exit 1
+fi
+# Access JWT may be byte-identical if re-issued in the same second without access jti;
+# require rotation of refresh only. Old access may still verify until its exp.
+if [[ "$FAN_TOKEN" == "$OLD_FAN_TOKEN" ]]; then
+  echo "NOTE: access_token payload identical after refresh (same-second reissue); refresh rotated"
+fi
+# Drop unused var noise
+: "$OLD_FAN_TOKEN"
+api GET /api/v1/me "" "$FAN_TOKEN"
+ME_ID="$(json_get "$HTTP_BODY" "obj['id']")"
+echo "me after refresh user_id=${ME_ID}"
+if [[ "$ME_ID" != "$FAN_ID" ]]; then
+  echo "FAIL: /me after refresh user id mismatch (${ME_ID} vs ${FAN_ID})" >&2
+  exit 1
+fi
 
 # ---------------------------------------------------------------------------
 label "Host creates room + starts live"
@@ -258,6 +300,27 @@ api POST /api/v1/reports \
 REPORT_ID="$(json_get "$HTTP_BODY" "obj['id']")"
 REPORT_STATUS="$(json_get "$HTTP_BODY" "obj['status']")"
 echo "report_id=${REPORT_ID} status=${REPORT_STATUS}"
+
+# ---------------------------------------------------------------------------
+label "Chat blocklist soft assert (CHAT_BLOCKLIST=spamword when configured)"
+# BE-3: soft — server must set CHAT_BLOCKLIST (e.g. deploy/.env.test). Empty filter = open chat.
+api_soft POST "/api/v1/rooms/${ROOM_ID}/messages" \
+  "{\"body\":\"dogfood contains spamword term\"}" \
+  "$FAN_TOKEN"
+if [[ "$HTTP_STATUS" == "403" ]]; then
+  if echo "$HTTP_BODY" | grep -qi 'blocked\|content policy\|FORBIDDEN'; then
+    echo "chat blocklist active: blocked spamword (HTTP 403)"
+  else
+    echo "chat blocked HTTP 403 (body=${HTTP_BODY})"
+  fi
+elif [[ "$HTTP_STATUS" =~ ^2[0-9][0-9]$ ]]; then
+  echo "SKIP: CHAT_BLOCKLIST not active on API (message accepted HTTP ${HTTP_STATUS})"
+  echo "  To enable: CHAT_BLOCKLIST=spamword on API process (see deploy/.env.test)"
+else
+  echo "FAIL: unexpected status for blocklist probe: HTTP ${HTTP_STATUS}" >&2
+  echo "Body: ${HTTP_BODY}" >&2
+  exit 1
+fi
 
 # ---------------------------------------------------------------------------
 if ! skip_mock; then
@@ -445,6 +508,40 @@ if [[ "$RECON_BALANCED" != "True" && "$RECON_BALANCED" != "true" ]]; then
 fi
 if [[ "$RECON_IMBALANCE" != "0" ]]; then
   echo "FAIL: expected imbalance_count=0, got ${RECON_IMBALANCE}" >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
+label "Admin reports queue list + resolve (BE-6 disposition path)"
+# Fan already POSTed a room report above; admin must see it and resolve.
+api GET /api/v1/admin/reports "" "$ADMIN_TOKEN"
+REPORT_LIST_N="$(json_get "$HTTP_BODY" "len(obj.get('items') or [])")"
+echo "admin reports count=${REPORT_LIST_N}"
+if [[ "$REPORT_LIST_N" -lt 1 ]]; then
+  echo "FAIL: expected admin reports list >= 1 after fan report" >&2
+  exit 1
+fi
+# Prefer the dogfood report_id when present; else first open item.
+FOUND_REPORT="$(python3 -c "
+import json,sys
+obj=json.loads(sys.argv[1])
+want=sys.argv[2]
+items=obj.get('items') or []
+ids=[i.get('id') for i in items]
+print(want if want in ids else (ids[0] if ids else ''))
+" "$HTTP_BODY" "$REPORT_ID")"
+if [[ -z "$FOUND_REPORT" ]]; then
+  echo "FAIL: no report id in admin list" >&2
+  exit 1
+fi
+echo "resolving report_id=${FOUND_REPORT}"
+api PATCH "/api/v1/admin/reports/${FOUND_REPORT}" \
+  "{\"status\":\"resolved\",\"note\":\"dogfood admin resolve\"}" \
+  "$ADMIN_TOKEN"
+RESOLVED_STATUS="$(json_get "$HTTP_BODY" "obj.get('status')")"
+echo "report after resolve status=${RESOLVED_STATUS}"
+if [[ "$RESOLVED_STATUS" != "resolved" ]]; then
+  echo "FAIL: expected report status resolved, got ${RESOLVED_STATUS}" >&2
   exit 1
 fi
 

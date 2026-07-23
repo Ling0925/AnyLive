@@ -23,6 +23,7 @@ API 服务已注入 dogfood 开关（与 `deploy/.env.test` 一致）：
 | `SRS_WEBHOOK_SECRET` | 测试值 | SRS 回调鉴权（请求头） |
 | `PAY_CHANNELS` / `PAY_MOCK_SECRET` | mock / 测试值 | Mock 充值通道 + sandbox-complete |
 | `FEATURE_PK` / `FEATURE_COHOST` | `0` | **P1-safe 默认关**；连麦/PK 属 P3 实验，见 [p3-p4-experimental](../product/p3-p4-experimental.md) |
+| `CHAT_BLOCKLIST` | `spamword` | 聊天词过滤；`dogfood-api-smoke` soft-assert 403 |
 
 启动成功后会打印 OBS 说明，并自动跑：
 
@@ -45,9 +46,14 @@ API 服务已注入 dogfood 开关（与 `deploy/.env.test` 一致）：
 # → 可选 admin force-close
 ./scripts/dogfood-10min-path.sh
 
-# 全量控制面冒烟（含 mute→chat/gift 403→unmute；ban→authed 403 + re-login 403；P3 invite/PK 在 FEATURE_*=0 时 soft-skip）
+# 全量控制面冒烟（含 token refresh→/me；mute→chat/gift 403→unmute；ban→authed 403 + re-login 403；
+# admin reports list+resolve；CHAT_BLOCKLIST soft-assert；P3 invite/PK 在 FEATURE_*=0 时 soft-skip）
 ./scripts/dogfood-api-smoke.sh
 ```
+
+通过时 stdout 末行含 `DOGFOOD_API_SMOKE_PASS` / `DOGFOOD_10MIN_PATH_PASS`。
+本地证据样例：`reports/dogfood-api-smoke-*.log`、`reports/dogfood-10min-path-*.log`。
+CI 非阻塞 job：`dogfood-api-smoke`（memory API + smoke，`continue-on-error: true`）。
 
 环境变量与 `dogfood-api-smoke.sh` 一致：`API_BASE`（默认 `http://localhost:8088`）、`OTP_CODE`（默认 `123456`）、`DOGFOOD_STRICT=1`（跳过 mock topup/pay）、`DOGFOOD_ADMIN_EMAIL`、`DOGFOOD_PG_CONTAINER`。force-close 可跳过：`SKIP_FORCE_CLOSE=1`。
 

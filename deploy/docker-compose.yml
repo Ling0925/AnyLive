@@ -110,6 +110,10 @@ services:
       PAY_ENABLE_MOCK: "${PAY_ENABLE_MOCK:-1}"
       PAY_MOCK_SECRET: "${PAY_MOCK_SECRET:-test-pay-mock-secret-change-me}"
       PAY_PUBLIC_BASE_URL: "${PAY_PUBLIC_BASE_URL:-http://localhost:8088}"
+      # Dogfood chat blocklist term (scripts/dogfood-api-smoke.sh soft-asserts 403)
+      CHAT_BLOCKLIST: "${CHAT_BLOCKLIST:-spamword}"
+      FEATURE_PK: "${FEATURE_PK:-0}"
+      FEATURE_COHOST: "${FEATURE_COHOST:-0}"
     depends_on:
       postgres:
         condition: service_healthy

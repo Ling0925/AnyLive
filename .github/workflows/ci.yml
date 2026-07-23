@@ -75,3 +75,63 @@ jobs:
           cache: true
       - run: flutter pub get
       - run: flutter test
+
+  # Non-blocking: boots memory-mode API and runs control-plane dogfood smoke.
+  # Does not gate merge; evidence for Wave1 collective DoD §12 control-plane green.
+  dogfood-api-smoke:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build anylive-api
+        working-directory: backend
+        run: cargo build -p anylive-api --release
+      - name: Start memory API + dogfood-api-smoke
+        env:
+          APP_ENV: local
+          ALLOW_DEV_OTP: "1"
+          ALLOW_MOCK_TOPUP: "1"
+          OTP_NOTIFIER: noop
+          PAY_CHANNELS: mock
+          PAY_ENABLE_MOCK: "1"
+          PAY_MOCK_SECRET: ci-pay-mock-secret-change-me
+          PAY_PUBLIC_BASE_URL: http://127.0.0.1:8088
+          CHAT_BLOCKLIST: spamword
+          FEATURE_PK: "0"
+          FEATURE_COHOST: "0"
+          JWT_ACCESS_SECRET: ci-access-secret-change-me-32ch
+          JWT_REFRESH_SECRET: ci-refresh-secret-change-me-32ch
+          API_BIND: 127.0.0.1:8088
+          RUST_LOG: warn
+        run: |
+          set -euo pipefail
+          mkdir -p reports
+          ./backend/target/release/anylive-api > reports/ci-api.log 2>&1 &
+          API_PID=$!
+          trap 'kill $API_PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8088/health >/dev/null 2>&1; then
+              echo "API ready after ${i}s"
+              break
+            fi
+            if ! kill -0 "$API_PID" 2>/dev/null; then
+              echo "API process exited early" >&2
+              tail -n 80 reports/ci-api.log || true
+              exit 1
+            fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8088/health
+          API_BASE=http://127.0.0.1:8088 OTP_CODE=123456 \
+            ./scripts/dogfood-api-smoke.sh | tee reports/dogfood-api-smoke-ci.txt
+          grep -q DOGFOOD_API_SMOKE_PASS reports/dogfood-api-smoke-ci.txt
+      - name: Upload dogfood smoke log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dogfood-api-smoke
+          path: |
+            reports/dogfood-api-smoke-ci.txt
+            reports/ci-api.log
+          if-no-files-found: ignore
