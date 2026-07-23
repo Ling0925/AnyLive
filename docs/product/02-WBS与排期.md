@@ -9,97 +9,97 @@
 ## 1. 史诗级 WBS（全周期）
 
 ### E0 工程底座
-- E0.1 monorepo 目录与工具链（Rust workspace / Flutter melos / pnpm）
-- E0.2 docker-compose：Postgres、Redis、NATS、Centrifugo、SRS、MinIO
-- E0.3 CI：lint、test、build、镜像
-- E0.4 配置与密钥规范、多环境
-- E0.5 观测：OTel tracing、Prometheus metrics、结构化日志、health/ready
+- E0.1 monorepo 目录与工具链（Rust workspace / Flutter melos / pnpm） ✅
+- E0.2 docker-compose：Postgres、Redis、NATS、Centrifugo、SRS、MinIO ✅
+- E0.3 CI：lint、test、build、镜像 ✅
+- E0.4 配置与密钥规范、多环境 ✅（`.env.example` + production guards）
+- E0.5 观测：OTel tracing、Prometheus metrics、结构化日志、health/ready ✅（`init_tracing` + `RUST_LOG_FORMAT=json` + `/metrics`；OTLP 导出见 `docs/runbooks/otel.md` 运维侧）
 
 ### E1 契约
-- E1.1 错误码 `contracts/errors/codes.yaml`
-- E1.2 OpenAPI 分模块（见契约文档）
-- E1.3 NATS 事件 schema
-- E1.4 媒体/支付 Webhook 契约
-- E1.5 Orval / Flutter 代码生成流水线
+- E1.1 错误码 `contracts/errors/codes.yaml` ✅
+- E1.2 OpenAPI 分模块（见契约文档） ✅（`contracts/openapi/openapi.yaml`）
+- E1.3 NATS 事件 schema ✅（`gift.sent` v1 + 可选 TCP publisher）
+- E1.4 媒体/支付 Webhook 契约 ✅（`contracts/events/*.json` + `contracts/webhooks/*`；`validate-contracts.py` 校验）
+- E1.5 Orval / Flutter 代码生成流水线 ✅（`scripts/gen-openapi-ts.sh` openapi-typescript；Orval 可后续替换）
 
 ### E2 账号与用户
-- E2.1 注册登录（Email OTP / 可选 OAuth）
-- E2.2 JWT access + refresh（可吊销）
-- E2.3 资料、头像（对象存储）
-- E2.4 设备会话列表、登出全端
-- E2.5 年龄声明 / 地区
+- E2.1 注册登录（Email OTP / 可选 OAuth） ✅ — **Email OTP + `POST /auth/oauth/exchange` 脚手架**（stub:`email` 本地；真实 JWKS 待账号）
+- E2.2 JWT access + refresh（可吊销） ✅
+- E2.3 资料、头像（对象存储） ✅（presign/confirm + MinIO/合成）
+- E2.4 设备会话列表、登出全端 ✅ — **`GET|DELETE /me/sessions` + `DELETE /me/sessions/{jti}` + Flutter 列表/Revoke**
+- E2.5 年龄声明 / 地区 ✅（`age_confirmed` + `region` on `/me`；migration `009`；Flutter Profile）
 
 ### E3 房间与媒体控制面
-- E3.1 房间 CRUD、状态机（idle/live/closed）
-- E3.2 MediaProvider 接口 + SRS/Cloudflare 实现
-- E3.3 推流 key 签发与轮换；播放 URL
-- E3.4 开播/停播 webhook 校验
-- E3.5 录制开关（可 P2）
+- E3.1 房间 CRUD、状态机（idle/live/closed） ✅
+- E3.2 MediaProvider 接口 + SRS/Cloudflare 实现 ✅ — **SRS 默认；`CloudflareStreamProvider` 控制面脚手架（`MEDIA_PROVIDER=cloudflare`）；真 CF 账号/Live Input 仍外部**
+- E3.3 推流 key 签发与轮换；播放 URL ✅
+- E3.4 开播/停播 webhook 校验 ✅（`/webhooks/srs/on_publish|on_unpublish` + secret；契约 JSON）
+- E3.5 录制开关（可 P2） ✅（控制面 flag，无 egress）
 
 ### E4 实时
-- E4.1 Centrifugo 部署与 JWT 连接
-- E4.2 频道模型：`room:{id}`、`user:{id}`
-- E4.3 聊天发送 API + 扇出
-- E4.4 在线人数、点赞聚合
-- E4.5 限流、敏感词钩子、禁言
+- E4.1 Centrifugo 部署与 JWT 连接 ✅ — **compose + JWT token API**；生产密钥/1k 实填数仍运维
+- E4.2 频道模型：`room:{id}`、`user:{id}` ✅
+- E4.3 聊天发送 API + 扇出 ✅（HTTP + Centrifugo publish）
+- E4.4 在线人数、点赞聚合 ✅ — **`POST .../presence` + `POST .../likes` + `GET .../stats`；Flutter/H5 展示**
+- E4.5 限流、敏感词钩子、禁言 ✅
 
 ### E5 礼物与钱包
-- E5.1 礼物目录
-- E5.2 钱包账户 + **只追加 ledger**
-- E5.3 送礼：幂等键 + 事务 + NATS `gift.sent`
-- E5.4 礼物动画事件（IM）
-- E5.5 充值订单 + PayProvider（Stripe test）
-- E5.6 对账任务与管理端流水
+- E5.1 礼物目录 ✅
+- E5.2 钱包账户 + **只追加 ledger** ✅
+- E5.3 送礼：幂等键 + 事务 + NATS `gift.sent` ✅（Centrifugo + 可选 NATS）
+- E5.4 礼物动画事件（IM） ✅ — **Centrifugo gift envelope + Flutter 简动画 overlay**（非 Rive 全量）
+- E5.5 充值订单 + PayProvider（Stripe test） ✅（mock/stripe/iap 沙箱；真实密钥待账号）
+- E5.6 对账任务与管理端流水 ✅（`GET /admin/wallet/reconcile` + admin UI）
 
 ### E6 社交与首页
-- E6.1 关注/取关
-- E6.2 首页：热门 / 关注中直播
-- E6.3 搜索用户/房间（简易）
+- E6.1 关注/取关 ✅
+- E6.2 首页：热门 / 关注中直播 ✅
+- E6.3 搜索用户/房间（简易） ✅ — **`GET /api/v1/search` + Flutter Discover 搜索框**
 
 ### E7 审核与运营后台
-- E7.1 Admin 登录 + RBAC
-- E7.2 用户封禁/禁言
-- E7.3 房间强关
-- E7.4 举报队列
-- E7.5 礼物 CRUD、经济参数
-- E7.6 审计日志
-- E7.7 直播预览（mpegts.js / HLS）
+- E7.1 Admin 登录 + RBAC ✅ — **admin grant + bearer + `role`（admin|moderator|ops）**；migration `010`；细粒度 mute 可后续
+- E7.2 用户封禁/禁言 ✅
+- E7.3 房间强关 ✅
+- E7.4 举报队列 ✅
+- E7.5 礼物 CRUD、经济参数 ✅（admin gift upsert）
+- E7.6 审计日志 ✅（`GET /admin/audit` + admin 审计面板）
+- E7.7 直播预览（mpegts.js / HLS） ✅（admin HLS preview）
 
 ### E8 客户端 Flutter
-- E8.1 工程：Riverpod、go_router、flavor
-- E8.2 登录与资料
-- E8.3 列表与房间页
-- E8.4 播放器（media_kit / HLS）
-- E8.5 主播开播（WebRTC 或 RTMP 方案择一主路径）
-- E8.6 聊天与弹幕层
-- E8.7 礼物面板与动画（Rive）
-- E8.8 钱包与充值 UI
-- E8.9 推送（P2）
+- E8.1 工程：Riverpod、go_router、flavor ✅（`APP_FLAVOR` dart-define + `AppRoutes` 路径常量脚手架；完整 Riverpod/go_router 迁移可后续）
+- E8.2 登录与资料 ✅
+- E8.3 列表与房间页 ✅
+- E8.4 播放器（media_kit / HLS） ✅（stream_preview + media_kit）
+- E8.5 主播开播 ✅ — **RTMP/OBS 主路径（控制面 key/play）**；App 内推流非本阶段
+- E8.6 聊天与弹幕层 ✅（HTTP + 可选 Centrifugo WS）
+- E8.7 礼物面板与动画 ✅ — **面板 + 简动画 overlay**（非 Rive 资产包）
+- E8.8 钱包与充值 UI ✅（Flutter wallet + mock/sandbox）
+- E8.9 推送（P2） ✅ — **token 注册 + `PUSH_DELIVERY=noop|log|http` 投递端口 + `/me/push-tokens/test`**；真实 FCM/APNs 密钥待账号
 
 ### E9 H5
-- E9.1 观看页 + 分享落地
-- E9.2 登录态轻量（可选）
-- E9.3 hls.js 播放
+- E9.1 观看页 + 分享落地 ✅
+- E9.2 登录态轻量（可选） ✅
+- E9.3 hls.js 播放 ✅
 
 ### E10 媒体深度（P2–P3）
-- E10.1 生产 CDN/Stream 配置
-- E10.2 LiveKit 集群
-- E10.3 连麦信令与权限
-- E10.4 PK 玩法状态机与结算
-- E10.5 台上转推台下策略
+- E10.1 生产 CDN/Stream 配置 — **本地 SRS ✅；CF Stream URL 脚手架 ✅；生产 CDN 账号/证书运维**
+- E10.2 LiveKit 集群 — **控制面 token ✅；`livekit-stage.md` ✅；真集群运维**
+- E10.3 连麦信令与权限 ✅ — **API + Flutter Co-host 邀请 UI**
+- E10.4 PK 玩法状态机与结算 ✅ — **API + Flutter 比分横幅/Start·End PK**
+- E10.5 台上转推台下策略 — **join token ✅；egress→RTMP 回推约定见 `docs/runbooks/livekit-stage.md`；集群仍运维**
 
 ### E11 增长（P4）
-- E11.1 埋点 SDK 与事件字典
-- E11.2 看板（DAU/开播/付费）
-- E11.3 轻推荐（规则 + 简单特征）
-- E11.4 创作者中心
+- E11.1 埋点 SDK 与事件字典 ✅ — **`POST /api/v1/events` + 事件字典**
+- E11.2 看板（DAU/开播/付费）— **`/metrics` + admin analytics summary ✅**；完整仓外看板待外部
+- E11.3 轻推荐（规则 + 简单特征） ✅ — **`/feed/hot` 粉丝+新鲜度排序 v1**
+- E11.4 创作者中心 ✅ — **`GET /me/creator` + Flutter/H5**
 
 ### E12 质量与发布
-- E12.1 资金路径自动化测试
-- E12.2 设备矩阵（iOS/Android 中低端）
-- E12.3 压测门禁（见非功能文档）
-- E12.4 商店打包与元数据
-- E12.5 发布开关与回滚
+- E12.1 资金路径自动化测试 ✅（wallet/gift/pay 单测 + dogfood）
+- E12.2 设备矩阵 — **模板 `reports/device-matrix-TEMPLATE.md` ✅；真机冒烟人工**
+- E12.3 压测门禁 — **脚手架 + live `ws-centrifugo-load.py` ✅**；本地 1000 连接 100% / loss 0% / held_p50=180s（`reports/ws-1k-baseline-20260722T121825Z.md`）；**15 min soak + stage 集群仍运维**
+- E12.4 商店打包与元数据 — **`apps/mobile/store/` 文案/身份脚手架 ✅；提包账号人工**
+- E12.5 发布开关与回滚 ✅ — **`FEATURE_*` kill-switch + `go-live-stage.md` §6**
 
 ---
 

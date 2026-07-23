@@ -124,7 +124,7 @@ API_BASE=https://api.stage.example.com OTP_CODE=<real> ./scripts/dogfood-api-smo
 注意：脚本默认 OTP `123456` 与 mock topup/pay — **仅适用于 dogfood**。生产冒烟应使用：
 
 - 真实 OTP  
-- 跳过 topup/pay mock 段落（或专用 `dogfood-api-smoke-prod.sh` 后续补）
+- 跳过 topup/pay mock：`DOGFOOD_STRICT=1 OTP_CODE=<real> API_BASE=… ./scripts/dogfood-api-smoke.sh`
 
 本地全绿路径：
 
@@ -185,3 +185,20 @@ API_BASE=https://api.stage.example.com OTP_CODE=<real> ./scripts/dogfood-api-smo
 | 测试 compose | `deploy/docker-compose.yml` + `deploy/.env.test` |
 | API 冒烟 | `scripts/dogfood-api-smoke.sh` |
 | P1 状态 | `docs/product/p1-status.md` |
+
+
+### 发布开关速查（E12.5）
+
+`FEATURE_PUBLIC_REGISTER|REAL_PAY|PK|COHOST|CLIENT_EVENTS` — 见 `crate features` 与 `.env.example`。事故时优先拨开关再回滚镜像。
+
+**P1-safe / stage·prod 推荐默认（plan 06）：**
+
+| 变量 | 推荐 | 说明 |
+|---|---|---|
+| `FEATURE_PUBLIC_REGISTER` | `1`（或配合 `INVITE_ONLY`） | 注册闸 |
+| `FEATURE_REAL_PAY` | 按通道 readiness | 非 mock 建单；生产另禁 mock |
+| `FEATURE_PK` | **`0`** | P3 experimental；**非 P1 退出**；unset 亦默认 off |
+| `FEATURE_COHOST` | **`0`** | 同上 |
+| `FEATURE_CLIENT_EVENTS` | `1` | P4 脚手架；可关 |
+
+启用 `FEATURE_PK=1` / `FEATURE_COHOST=1` 仅用于 **P1 签字后** 的 P3 dogfood。详见 [p3-p4-experimental.md](../product/p3-p4-experimental.md)。

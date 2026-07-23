@@ -15,11 +15,22 @@
 | [03-契约与接口冻结](./03-契约与接口冻结.md) | OpenAPI / 事件 / Webhook 冻结顺序 | 后端 + 客户端 |
 | [04-非功能与容量](./04-非功能与容量.md) | SLO、压测门禁、容量阶梯 | 后端 / SRE |
 | [05-风险与第一刀](./05-风险与第一刀.md) | 风险、关键路径、批准后立即执行项 | TL / PM |
+| [06-P1进度评审与后续规划](./06-P1进度评审与后续规划.md) | P1 进度裁决、范围跑偏、出口闸门与 2–4 周规划 | 决策 / TL / PM |
+| [p3-p4-experimental](./p3-p4-experimental.md) | 连麦/PK/埋点/OAuth/推送 **非 P1 退出**；默认关开关 | 决策 / 全员 |
+| [p1-git-split-plan](./p1-git-split-plan.md) | Stage 0 脏工作区拆分草案（A–F，**不自动提交**） | TL / 全员 |
+| [p1-parallel-tracks](./p1-parallel-tracks.md) | 后端 / Admin / Flutter **三轨并行**任务板与接口契约 | 研发 / TL |
+| [event-dictionary](./event-dictionary.md) | 客户端埋点事件名与 props 约定（P4） | 客户端 / 数据 |
 | [海外合规与上架闸门](../compliance/海外合规与上架闸门.md) | App Store/Play、GDPR、支付、审核策略钩子 | 产品 / 法务对接 |
 | [架构总览](../architecture/overview.md) | 平面划分、硬约束、阶段映射 | 全员 |
 | [支付通道接入设计](../architecture/payment-channels.md) | PayProvider、Jeepay/易支付/TokenPay、订单与 webhook | 后端 / 客户端 |
 | [本地开播 Runbook](../runbooks/go-live-local.md) | Dogfood 测试栈开播 | 全员 |
 | [Stage/生产 Runbook](../runbooks/go-live-stage.md) | 生产禁止项、环境变量、发布清单 | SRE / TL |
+| [举报 SLA](../runbooks/report-sla.md) | 举报分级与运营处置时效 | 运营 / 产品 |
+| [备份恢复演练](../runbooks/backup-restore.md) | P2 备份/恢复演练步骤与记录模板 | SRE |
+| [商店内测分发](../runbooks/store-internal.md) | TestFlight / Play Internal 清单 | 客户端 / 产品 |
+| [SLO 与告警](../runbooks/slo-alerts.md) | SLI 初值、合成探测、桌面推演 | SRE |
+| [LiveKit stage](../runbooks/livekit-stage.md) | 连麦集群 env + 联调；真 RTC 边界 | 后端 / 客户端 |
+| [Dogfood 队列](../runbooks/dogfood-cohort.md) | 20 主播 / 500 用户填表 | 运营 |
 
 ## 一页纸（English）
 

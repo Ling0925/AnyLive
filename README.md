@@ -14,7 +14,7 @@
 | Flutter / Vue admin / H5 shells | ✅ |
 | Email OTP + JWT access/refresh + `/me` (+ PATCH profile) | ✅ |
 | Rooms + SRS MediaProvider publish/play | ✅ |
-| Wallet ledger API + topup + idempotent gifts | ✅ |
+| Wallet ledger API + topup + idempotent gifts + admin reconcile | ✅ |
 | Chat history + Centrifugo token + env-gated publish | ✅ |
 | Admin ban / mute / unmute / force-close / audit / gifts / reports | ✅ |
 | Follow / unfollow + hot / following feeds | ✅ |
@@ -25,8 +25,21 @@
 | H5 HLS watch + share + room-ended | ✅ |
 | Admin ops shell (OTP, gifts, moderation, reports, HLS preview) | ✅ |
 | Flutter feed/follow/report/profile + go-live OBS + copy HLS | ✅ |
+| Flutter media_kit 站内 HLS + 会话持久化 + 导出/删除 | ✅ |
+| Flutter 创作者中心 + 埋点 + 连麦/PK 控制面 | ✅ |
+| H5 pay mock 币包 + sandbox-complete | ✅ |
+| H5 进房埋点 + PK 横幅 | ✅ |
+| OpenAPI pay/* + `/metrics` + CI Flutter | ✅ |
 | Control-plane dogfood smoke (`scripts/dogfood-api-smoke.sh`) | ✅ |
 | Docker test deploy API + Admin (`./scripts/deploy-test.sh`) | ✅ |
+| Wallet admin reconcile + pay expire-orders | ✅ |
+| Admin 总览资金运维（对账/关单） | ✅ |
+| Stripe/IAP sandbox channels + invite gate | ✅ |
+| Chat blocklist + LiveKit join + co-host/PK control plane | ✅ |
+| Client analytics batch ingest (`POST /events`) | ✅ |
+| Hot feed ranking + creator center stats | ✅ |
+| Feature flags (`FEATURE_PK` / `REAL_PAY` / …) | ✅ |
+| Jeepay / EPay / TokenPay sandbox pay adapters | ✅ |
 
 默认仍是 **内存后端**（`cargo test` / 本地 dogfood 无需 docker）。设 `USE_POSTGRES=1` + `DATABASE_URL` 时 users/rooms/wallet/social/moderation/reports/chat/profile_extras/**deleted_users**/**refresh_tokens** 切到 SQLx；OTP 挑战仍为进程内内存。媒体推流另需 SRS（见 `scripts/dogfood-media.md`）。
 
@@ -74,9 +87,12 @@ cd apps/h5-web && pnpm test
 - `GET /api/v1/wallet` · `GET /api/v1/wallet/ledger` · `POST /api/v1/wallet/topups` · `GET /api/v1/gifts` · `POST .../gifts`
 - `GET /api/v1/pay/channels|products` · `POST|GET /api/v1/pay/orders` · `POST /api/v1/webhooks/pay/{mock,jeepay,epay,tokenpay}`
 - `POST /api/v1/realtime/token` · `POST/GET /api/v1/rooms/{id}/messages`
-- `POST /api/v1/admin/grant|ban|mute|unmute|rooms/force-close` · `GET /api/v1/admin/audit`
+- `POST /api/v1/admin/grant|ban|mute|unmute|rooms/force-close` · `GET /api/v1/admin/audit` · `GET /api/v1/admin/wallet/reconcile`
 - `GET|POST /api/v1/admin/gifts` · `GET /api/v1/admin/reports` · `PATCH .../reports/{id}`
 - `POST/DELETE /api/v1/users/{id}/follow` · `GET /api/v1/me/following` · `GET /api/v1/feed/hot|following`
+- `POST /api/v1/rooms/{id}/livekit/join` · `POST .../interactive/invite|respond|leave` · `GET .../interactive`
+- `GET|POST /api/v1/rooms/{id}/pk` · `POST .../pk/start|end`
+- `POST /api/v1/events` · `GET /api/v1/me/creator` · `GET /api/v1/feed/hot|following`
 - `POST /api/v1/reports` · `POST /api/v1/webhooks/srs/on_publish|on_unpublish`
 
 ## 仓库结构
