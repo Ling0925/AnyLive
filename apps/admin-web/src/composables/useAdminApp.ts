@@ -232,6 +232,9 @@ type AdminUserRow = {
 const usersList = ref<AdminUserRow[]>([])
 const usersTotal = ref(0)
 const usersQuery = ref('')
+const usersStatusFilter = ref<'all' | 'active' | 'disabled' | 'deleted'>('all')
+const usersPage = ref(1)
+const usersPageSize = ref(20)
 const usersBusy = ref(false)
 const createDisplayName = ref('')
 const createUsername = ref('')
@@ -1284,14 +1287,56 @@ function fillMuteFromLookup() {
   nav.value = 'moderation'
 }
 
+const usersTotalPages = computed(() =>
+  Math.max(1, Math.ceil(usersTotal.value / usersPageSize.value)),
+)
+
+const usersListMeta = computed(() => {
+  const total = usersTotal.value
+  const pages = usersTotalPages.value
+  const page = Math.min(Math.max(1, usersPage.value), pages)
+  const size = usersPageSize.value
+  const from = total === 0 ? 0 : (page - 1) * size + 1
+  const to = Math.min(page * size, total)
+  return { total, page, pages, size, from, to }
+})
+
+function setUsersPage(next: number) {
+  const page = Math.min(Math.max(1, next), usersTotalPages.value)
+  if (page === usersPage.value) return
+  usersPage.value = page
+  void loadUsers()
+}
+
+function searchUsers() {
+  usersPage.value = 1
+  void loadUsers()
+}
+
+watch(usersPageSize, () => {
+  usersPage.value = 1
+  if (accessToken.value && nav.value === 'users') void loadUsers()
+})
+
+watch(usersStatusFilter, () => {
+  usersPage.value = 1
+  if (accessToken.value && nav.value === 'users') void loadUsers()
+})
+
 async function loadUsers() {
   if (!accessToken.value) return
   usersBusy.value = true
   try {
     const q = usersQuery.value.trim()
-    const path = q
-      ? `${adminUsersPath()}?q=${encodeURIComponent(q)}&limit=50`
-      : `${adminUsersPath()}?limit=50`
+    const size = usersPageSize.value
+    const page = Math.max(1, usersPage.value)
+    const offset = (page - 1) * size
+    const params = new URLSearchParams()
+    params.set('limit', String(size))
+    params.set('offset', String(offset))
+    if (q) params.set('q', q)
+    if (usersStatusFilter.value !== 'all') params.set('status', usersStatusFilter.value)
+    const path = `${adminUsersPath()}?${params.toString()}`
     const res = await apiFetch(apiUrl(apiBase, path), { headers: authHeaders() })
     if (!res.ok) {
       if (isAdminForbidden(res.status)) {
@@ -1302,6 +1347,14 @@ async function loadUsers() {
     const data = await res.json()
     usersList.value = Array.isArray(data.items) ? data.items : []
     usersTotal.value = Number(data.total ?? usersList.value.length)
+    // Clamp page if server total shrunk (e.g. after filter/delete).
+    const pages = Math.max(1, Math.ceil(usersTotal.value / size))
+    if (usersPage.value > pages) {
+      usersPage.value = pages
+      if (page !== pages) {
+        void loadUsers()
+      }
+    }
   } catch (e) {
     error.value = String(e)
   } finally {
@@ -1347,6 +1400,7 @@ async function createUser() {
     createUsername.value = ''
     createEmail.value = ''
     createPassword.value = ''
+    usersPage.value = 1
     await loadUsers()
   } catch (e) {
     error.value = String(e)
@@ -1818,7 +1872,14 @@ onMounted(() => {
     usersList,
     usersTotal,
     usersQuery,
+    usersStatusFilter,
+    usersPage,
+    usersPageSize,
+    usersTotalPages,
+    usersListMeta,
     usersBusy,
+    setUsersPage,
+    searchUsers,
     createDisplayName,
     createUsername,
     createEmail,

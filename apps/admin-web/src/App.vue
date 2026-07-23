@@ -149,8 +149,13 @@ const {
   userIdInput,
   usersBusy,
   usersList,
+  usersListMeta,
   usersQuery,
+  usersStatusFilter,
+  usersPageSize,
   usersTotal,
+  searchUsers,
+  setUsersPage,
   verifyOtp,
 } = useAdminApp()
 
@@ -1315,93 +1320,148 @@ void previewVideoEl
         <section v-else-if="nav === 'users'" class="panel" data-testid="panel-users">
           <div class="panel-head">
             <h2>{{ t('users.title') }}</h2>
-            <button type="button" class="btn sm" :disabled="usersBusy" @click="loadUsers">
-              {{ t('common.refresh') }}
-            </button>
+            <div class="toolbar">
+              <span class="stat-chip">{{ t('users.total', { n: usersTotal }) }}</span>
+              <span class="stat-chip">{{ t('users.bannedList') }} · {{ bannedUsers.length }}</span>
+              <span class="stat-chip">{{ t('users.mutedList') }} · {{ mutedUsers.length }}</span>
+              <button
+                type="button"
+                class="btn sm"
+                data-testid="users-list-refresh"
+                :disabled="usersBusy"
+                @click="loadUsers"
+              >
+                {{ t('common.refresh') }}
+              </button>
+            </div>
           </div>
           <p class="panel-desc">{{ t('navBlurb.users') }}</p>
           <p v-if="tempPasswordNotice" class="flash ok" data-testid="temp-password">
             {{ tempPasswordNotice }}
           </p>
 
-          <div class="split-actions section-block">
-            <div class="action-card">
-              <h3>{{ t('users.create') }}</h3>
-              <label class="field">
-                <span>{{ t('users.displayName') }}</span>
-                <input v-model="createDisplayName" type="text" data-testid="create-display-name" />
-              </label>
-              <label class="field">
-                <span>{{ t('users.username') }}</span>
-                <input v-model="createUsername" type="text" data-testid="create-username" />
-              </label>
-              <label class="field">
-                <span>{{ t('users.email') }}</span>
-                <input v-model="createEmail" type="email" data-testid="create-email" />
-              </label>
-              <label class="field">
-                <span>{{ t('users.password') }}</span>
-                <input v-model="createPassword" type="text" data-testid="create-password" />
-              </label>
-              <button
-                type="button"
-                class="btn primary"
-                data-testid="create-user-submit"
-                :disabled="createBusy || !createDisplayName.trim()"
-                @click="createUser"
-              >
-                {{ t('users.create') }}
-              </button>
-            </div>
-            <div class="action-card">
-              <h3>{{ t('users.search') }}</h3>
-              <label class="field">
-                <span>{{ t('users.searchPlaceholder') }}</span>
-                <input
-                  v-model="usersQuery"
-                  type="search"
-                  data-testid="users-query"
-                  @keyup.enter="loadUsers"
-                />
-              </label>
-              <button type="button" class="btn" :disabled="usersBusy" @click="loadUsers">
-                {{ t('users.search') }}
-              </button>
-              <p class="dim">{{ t('users.total', { n: usersTotal }) }}</p>
-            </div>
+          <!-- Search + status filter (primary work surface) -->
+          <div class="filter-bar" data-testid="users-filter-bar">
+            <label class="field field-lg">
+              <span>{{ t('common.search') }}</span>
+              <input
+                v-model="usersQuery"
+                type="search"
+                :placeholder="t('users.searchPlaceholder')"
+                data-testid="users-query"
+                @keyup.enter="searchUsers"
+              />
+            </label>
+            <label class="field field-sm">
+              <span>{{ t('users.status') }}</span>
+              <select v-model="usersStatusFilter" data-testid="users-status-filter">
+                <option value="all">{{ t('common.all') }}</option>
+                <option value="active">{{ t('users.statusActive') }}</option>
+                <option value="disabled">{{ t('users.statusDisabled') }}</option>
+                <option value="deleted">{{ t('users.statusDeleted') }}</option>
+              </select>
+            </label>
+            <label class="field field-sm">
+              <span>{{ t('common.pageSize') }}</span>
+              <select v-model.number="usersPageSize" data-testid="users-page-size">
+                <option :value="10">10</option>
+                <option :value="20">20</option>
+                <option :value="50">50</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              class="btn primary"
+              data-testid="users-search-submit"
+              :disabled="usersBusy"
+              @click="searchUsers"
+            >
+              {{ t('users.search') }}
+            </button>
           </div>
 
-          <div v-if="usersList.length" class="table-wrap is-dense">
+          <div class="list-meta" v-if="usersListMeta.total" data-testid="users-meta">
+            <span>{{ t('users.total', { n: usersListMeta.total }) }}</span>
+            <span class="dim">{{
+              t('common.showing', {
+                from: usersListMeta.from,
+                to: usersListMeta.to,
+                total: usersListMeta.total,
+              })
+            }}</span>
+          </div>
+
+          <div v-if="usersList.length" class="table-wrap is-dense" data-testid="users-table-wrap">
             <table class="data data-users" data-testid="users-table">
               <thead>
                 <tr>
-                  <th>{{ t('users.displayName') }}</th>
-                  <th>{{ t('users.username') }}</th>
-                  <th>{{ t('users.email') }}</th>
-                  <th>{{ t('users.status') }}</th>
-                  <th>{{ t('users.actions') }}</th>
+                  <th class="col-user">{{ t('users.displayName') }}</th>
+                  <th class="col-email">{{ t('users.email') }}</th>
+                  <th class="col-status">{{ t('users.status') }}</th>
+                  <th class="col-actions">{{ t('users.actions') }}</th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="u in usersList" :key="u.id">
-                  <td>
-                    {{ u.display_name }}
-                    <div class="cell-sub mono">{{ shortId(u.id) }}</div>
+                <tr v-for="u in usersList" :key="u.id" :data-testid="`user-row-${u.id}`">
+                  <td class="col-user">
+                    <div class="user-cell">
+                      <span class="user-name" :title="u.display_name">{{ u.display_name }}</span>
+                      <span v-if="u.admin_role" class="role-pill admin">{{ u.admin_role }}</span>
+                    </div>
+                    <div class="cell-sub mono" :title="u.id">{{ shortId(u.id) }}</div>
+                    <div v-if="u.username" class="cell-sub mono" :title="u.username">
+                      @{{ u.username }}
+                    </div>
                   </td>
-                  <td class="mono">{{ u.username || '—' }}</td>
-                  <td>{{ u.email || '—' }}</td>
-                  <td class="col-status-mix">
-                    <span class="status-text">{{ u.status }}</span>
-                    <span v-if="u.banned" class="badge closed">{{ t('users.banned') }}</span>
-                    <span v-if="u.muted" class="badge idle">{{ t('users.muted') }}</span>
+                  <td class="col-email" :title="u.email || ''">{{ u.email || '—' }}</td>
+                  <td class="col-status col-status-mix">
+                    <div class="badge-row">
+                      <span
+                        class="badge"
+                        :class="
+                          u.status === 'active'
+                            ? 'ok'
+                            : u.status === 'disabled'
+                              ? 'idle'
+                              : 'closed'
+                        "
+                      >
+                        {{
+                          u.status === 'active'
+                            ? t('users.statusActive')
+                            : u.status === 'disabled'
+                              ? t('users.statusDisabled')
+                              : u.status === 'deleted'
+                                ? t('users.statusDeleted')
+                                : u.status
+                        }}
+                      </span>
+                      <span v-if="u.banned" class="badge closed">{{ t('users.banned') }}</span>
+                      <span v-if="u.muted" class="badge idle">{{ t('users.muted') }}</span>
+                      <span v-if="u.must_change_password" class="badge unknown">{{
+                        t('users.mustChangePassword')
+                      }}</span>
+                    </div>
                   </td>
-                  <td class="actions">
+                  <td class="actions col-actions">
                     <div class="row-actions">
-                      <button type="button" class="btn sm" :disabled="actionBusy" @click="resetUserPassword(u.id)">
-                        {{ t('users.resetPassword') }}
+                      <button
+                        type="button"
+                        class="btn sm"
+                        :disabled="actionBusy"
+                        :title="t('users.resetPassword')"
+                        @click="resetUserPassword(u.id)"
+                      >
+                        {{ t('users.resetPasswordShort') }}
                       </button>
-                      <button type="button" class="btn sm" :disabled="actionBusy" @click="revokeUserSessions(u.id)">
-                        {{ t('users.revokeSessions') }}
+                      <button
+                        type="button"
+                        class="btn sm"
+                        :disabled="actionBusy"
+                        :title="t('users.revokeSessions')"
+                        @click="revokeUserSessions(u.id)"
+                      >
+                        {{ t('users.revokeSessionsShort') }}
                       </button>
                       <button
                         v-if="!u.banned"
@@ -1449,7 +1509,71 @@ void previewVideoEl
             <div class="empty-icon">◎</div>
             {{ usersBusy ? t('common.loading') : t('users.empty') }}
           </div>
-        
+
+          <div
+            v-if="usersListMeta.total > 0"
+            class="pager"
+            data-testid="users-pager"
+          >
+            <button
+              type="button"
+              class="btn sm"
+              data-testid="users-page-prev"
+              :disabled="usersListMeta.page <= 1 || usersBusy"
+              @click="setUsersPage(usersListMeta.page - 1)"
+            >
+              {{ t('common.prev') }}
+            </button>
+            <span class="pager-label">{{
+              t('common.page', { page: usersListMeta.page, pages: usersListMeta.pages })
+            }}</span>
+            <button
+              type="button"
+              class="btn sm"
+              data-testid="users-page-next"
+              :disabled="usersListMeta.page >= usersListMeta.pages || usersBusy"
+              @click="setUsersPage(usersListMeta.page + 1)"
+            >
+              {{ t('common.next') }}
+            </button>
+          </div>
+
+          <!-- Compact provision form -->
+          <details class="section-block users-create-fold" data-testid="users-create-fold">
+            <summary class="users-create-summary">{{ t('users.create') }}</summary>
+            <div class="action-card action-card-md mt-sm">
+              <div class="row">
+                <label class="field">
+                  <span>{{ t('users.displayName') }}</span>
+                  <input v-model="createDisplayName" type="text" data-testid="create-display-name" />
+                </label>
+                <label class="field">
+                  <span>{{ t('users.username') }}</span>
+                  <input v-model="createUsername" type="text" data-testid="create-username" />
+                </label>
+              </div>
+              <div class="row">
+                <label class="field">
+                  <span>{{ t('users.email') }}</span>
+                  <input v-model="createEmail" type="email" data-testid="create-email" />
+                </label>
+                <label class="field">
+                  <span>{{ t('users.password') }}</span>
+                  <input v-model="createPassword" type="text" data-testid="create-password" />
+                </label>
+              </div>
+              <button
+                type="button"
+                class="btn primary"
+                data-testid="create-user-submit"
+                :disabled="createBusy || !createDisplayName.trim()"
+                @click="createUser"
+              >
+                {{ t('users.create') }}
+              </button>
+            </div>
+          </details>
+
           <div class="panel-head section-divider">
             <h3>{{ t('users.moderationLists') }}</h3>
             <button
@@ -1553,8 +1677,8 @@ void previewVideoEl
           <div class="split-actions">
             <div class="action-card" data-testid="users-banned-card">
               <h3>{{ t('users.bannedList') }} · {{ bannedUsers.length }}</h3>
-              <div class="table-wrap" v-if="bannedUsers.length" data-testid="users-banned-table">
-                <table class="data">
+              <div class="table-wrap is-compact" v-if="bannedUsers.length" data-testid="users-banned-table">
+                <table class="data data-compact">
                   <thead>
                     <tr>
                       <th>{{ t('users.colUser') }}</th>
@@ -1565,8 +1689,8 @@ void previewVideoEl
                   </thead>
                   <tbody>
                     <tr v-for="u in bannedUsers" :key="u.user_id" :data-testid="`banned-row-${u.user_id}`">
-                      <td class="mono">{{ shortId(u.user_id, 12) }}</td>
-                      <td>{{ u.reason || t('common.none') }}</td>
+                      <td class="mono" :title="u.user_id">{{ shortId(u.user_id, 12) }}</td>
+                      <td :title="u.reason || ''">{{ u.reason || t('common.none') }}</td>
                       <td class="mono">{{ formatTs(u.created_at) }}</td>
                       <td class="actions">
                         <button
@@ -1588,8 +1712,8 @@ void previewVideoEl
 
             <div class="action-card" data-testid="users-muted-card">
               <h3>{{ t('users.mutedList') }} · {{ mutedUsers.length }}</h3>
-              <div class="table-wrap" v-if="mutedUsers.length" data-testid="users-muted-table">
-                <table class="data">
+              <div class="table-wrap is-compact" v-if="mutedUsers.length" data-testid="users-muted-table">
+                <table class="data data-compact">
                   <thead>
                     <tr>
                       <th>{{ t('users.colUser') }}</th>
@@ -1600,8 +1724,8 @@ void previewVideoEl
                   </thead>
                   <tbody>
                     <tr v-for="u in mutedUsers" :key="u.user_id" :data-testid="`muted-row-${u.user_id}`">
-                      <td class="mono">{{ shortId(u.user_id, 12) }}</td>
-                      <td>{{ u.reason || t('common.none') }}</td>
+                      <td class="mono" :title="u.user_id">{{ shortId(u.user_id, 12) }}</td>
+                      <td :title="u.reason || ''">{{ u.reason || t('common.none') }}</td>
                       <td class="mono">{{ formatTs(u.created_at) }}</td>
                       <td class="actions">
                         <button
@@ -1621,7 +1745,6 @@ void previewVideoEl
               <div v-else class="empty" data-testid="users-muted-empty">{{ t('users.emptyMuted') }}</div>
             </div>
           </div>
-
         </section>
 
         <!-- Moderation -->

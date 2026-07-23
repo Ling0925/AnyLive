@@ -1504,36 +1504,32 @@ table.data tr.is-previewing td {
 }
 
 table.data-users {
-  min-width: 820px;
+  min-width: 780px;
   table-layout: fixed;
 }
 
-table.data-users th:nth-child(1),
-table.data-users td:nth-child(1) {
-  width: 22%;
+table.data-users .col-user {
+  width: 26%;
 }
 
-table.data-users th:nth-child(2),
-table.data-users td:nth-child(2) {
-  width: 14%;
+table.data-users .col-email {
+  width: 24%;
 }
 
-table.data-users th:nth-child(3),
-table.data-users td:nth-child(3) {
+table.data-users .col-status {
   width: 18%;
 }
 
-table.data-users th:nth-child(4),
-table.data-users td:nth-child(4) {
-  width: 14%;
-}
-
-table.data-users th:nth-child(5),
-table.data-users td:nth-child(5) {
+table.data-users .col-actions {
   width: 32%;
 }
 
-table.data-users td {
+table.data-users td.col-user {
+  white-space: normal;
+  overflow: hidden;
+}
+
+table.data-users td.col-email {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1544,6 +1540,75 @@ table.data-users td.col-status-mix {
   white-space: normal;
   overflow: visible;
   text-overflow: clip;
+}
+
+.user-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.user-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.badge.ok {
+  color: var(--success-text);
+  background: var(--success-soft);
+  border-color: rgba(52, 211, 153, 0.35);
+}
+
+.users-create-fold {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  padding: 0.55rem 0.85rem 0.75rem;
+}
+
+.users-create-summary {
+  cursor: pointer;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.9rem;
+  letter-spacing: -0.01em;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--text);
+  user-select: none;
+}
+
+.users-create-summary::-webkit-details-marker {
+  display: none;
+}
+
+.users-create-summary::before {
+  content: '';
+  width: 0.45rem;
+  height: 0.45rem;
+  border-right: 2px solid var(--text-muted);
+  border-bottom: 2px solid var(--text-muted);
+  transform: rotate(-45deg);
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+
+.users-create-fold[open] .users-create-summary::before {
+  transform: rotate(45deg);
+}
+
+.users-create-fold .action-card {
+  border: 0;
+  background: transparent;
+  padding: 0.35rem 0 0;
+  box-shadow: none;
 }
 
 table.data td.mono {
