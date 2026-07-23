@@ -4,16 +4,19 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   ADMIN_NAV,
   adminGiftsPath,
+  adminGateMessage,
   adminTitle,
   apiUrl,
   auditPath,
   banUserPath,
   buildHls,
+  classifyAdminGrant,
   countByStatus,
   createRoomPath,
   forceCloseRoomPath,
   giftsListPath,
   grantAdminPath,
+  isAdminForbidden,
   muteUserPath,
   openReportCount,
   otpSendPath,
@@ -29,6 +32,10 @@ import {
   roomsPath,
   shortId,
   unmuteUserPath,
+  walletReconcilePath,
+  payExpireOrdersPath,
+  metricsPath,
+  analyticsSummaryPath,
   type AdminNavKey,
   type PublishInfo,
 } from './lib/admin'
@@ -41,6 +48,8 @@ const accessToken = ref<string | null>(null)
 const displayName = ref('')
 const userId = ref('')
 const nav = ref<AdminNavKey>('dashboard')
+/** null = unknown (pre-check), true = can call admin APIs, false = logged-in but not ops. */
+const isAdmin = ref<boolean | null>(null)
 
 const email = ref('')
 const otpCode = ref('')
@@ -101,6 +110,26 @@ const goLivePublish = ref<PublishInfo | null>(null)
 const goLiveHls = ref('')
 const goLiveCopyHint = ref('')
 
+const reconcileBusy = ref(false)
+const reconcileHint = ref('')
+const reconcileBalanced = ref<boolean | null>(null)
+const reconcileChecked = ref(0)
+const reconcileImbalance = ref(0)
+const expireBusy = ref(false)
+const expireHint = ref('')
+const metricsBusy = ref(false)
+const metricsHint = ref('')
+const metricsText = ref('')
+const metricsLines = ref(0)
+const analyticsBusy = ref(false)
+const analyticsHint = ref('')
+const analyticsRetained = ref(0)
+const analyticsUsers = ref(0)
+const analyticsByName = ref<Array<{ name: string; count: number }>>([])
+const analyticsRecent = ref<
+  Array<{ id: string; user_id: string; name: string; occurred_at: string }>
+>([])
+
 const isAuthed = computed(() => Boolean(accessToken.value))
 const liveCount = computed(() => countByStatus(rooms.value, 'live'))
 const idleCount = computed(() => countByStatus(rooms.value, 'idle'))
@@ -108,6 +137,16 @@ const closedCount = computed(() => countByStatus(rooms.value, 'closed'))
 const reportOpen = computed(() => openReportCount(reports.value))
 const pageTitle = computed(() => ADMIN_NAV.find((n) => n.key === nav.value)?.label ?? '运营后台')
 const avatarLetter = computed(() => (displayName.value || 'A').slice(0, 1).toUpperCase())
+const adminGateHint = computed(() =>
+  isAdmin.value === false
+    ? adminGateMessage({ apiBase, email: email.value || displayName.value })
+    : '',
+)
+const sessionRoleLabel = computed(() => {
+  if (isAdmin.value === true) return 'admin'
+  if (isAdmin.value === false) return '非管理员'
+  return isAuthed.value ? '检测中…' : '—'
+})
 
 function authHeaders(json = true): HeadersInit {
   const h: Record<string, string> = {}
@@ -217,9 +256,15 @@ async function loadReports() {
     return
   }
   const res = await fetch(apiUrl(apiBase, reportsListPath()), { headers: authHeaders(false) })
+  if (isAdminForbidden(res.status)) {
+    isAdmin.value = false
+    reports.value = []
+    return
+  }
   if (!res.ok) throw new Error(`reports ${res.status}`)
   const data = await res.json()
   reports.value = data.items ?? []
+  if (isAdmin.value !== true) isAdmin.value = true
 }
 
 async function loadAudit() {
@@ -228,14 +273,21 @@ async function loadAudit() {
     return
   }
   const res = await fetch(apiUrl(apiBase, auditPath()), { headers: authHeaders(false) })
+  if (isAdminForbidden(res.status)) {
+    isAdmin.value = false
+    audit.value = []
+    return
+  }
   if (!res.ok) throw new Error(`audit ${res.status}`)
   const data = await res.json()
   audit.value = data.items ?? []
+  if (isAdmin.value !== true) isAdmin.value = true
 }
 
 async function refreshLists() {
   listBusy.value = true
-  error.value = ''
+  // Do not clear a sticky admin-gate error while refreshing rooms.
+  if (isAdmin.value !== false) error.value = ''
   try {
     const tasks: Promise<void>[] = [loadRooms(), loadGifts()]
     if (isAuthed.value) {
@@ -245,10 +297,118 @@ async function refreshLists() {
       audit.value = []
     }
     await Promise.all(tasks)
+    if (isAdmin.value === false && !error.value) {
+      error.value = adminGateHint.value
+    }
   } catch (e) {
     error.value = String(e)
   } finally {
     listBusy.value = false
+  }
+}
+
+async function runWalletReconcile() {
+  if (!isAuthed.value) return
+  reconcileBusy.value = true
+  reconcileHint.value = ''
+  try {
+    const res = await fetch(apiUrl(apiBase, walletReconcilePath()), {
+      headers: authHeaders(false),
+    })
+    if (!res.ok) throw new Error(`reconcile ${res.status}`)
+    const data = await res.json()
+    reconcileChecked.value = Number(data.checked_users ?? 0)
+    reconcileImbalance.value = Number(data.imbalance_count ?? 0)
+    reconcileBalanced.value = Boolean(data.balanced)
+    reconcileHint.value = data.balanced
+      ? `账本平衡 · 已扫 ${reconcileChecked.value} 用户`
+      : `发现 ${reconcileImbalance.value} 处不平衡（已扫 ${reconcileChecked.value}）`
+  } catch (e) {
+    reconcileHint.value = String(e)
+    reconcileBalanced.value = null
+  } finally {
+    reconcileBusy.value = false
+  }
+}
+
+async function runExpirePayOrders() {
+  if (!isAuthed.value) return
+  expireBusy.value = true
+  expireHint.value = ''
+  try {
+    const res = await fetch(apiUrl(apiBase, payExpireOrdersPath()), {
+      method: 'POST',
+      headers: authHeaders(),
+    })
+    if (!res.ok) throw new Error(`expire-orders ${res.status}`)
+    const data = await res.json()
+    expireHint.value = `已关单 ${Number(data.expired_count ?? 0)} 笔超时订单`
+  } catch (e) {
+    expireHint.value = String(e)
+  } finally {
+    expireBusy.value = false
+  }
+}
+
+async function runMetricsScrape() {
+  metricsBusy.value = true
+  metricsHint.value = ''
+  try {
+    const res = await fetch(apiUrl(apiBase, metricsPath()))
+    if (!res.ok) throw new Error(`metrics ${res.status}`)
+    const text = await res.text()
+    metricsText.value = text
+    metricsLines.value = text.split('\n').filter((l) => l.trim() && !l.startsWith('#')).length
+    metricsHint.value = `抓取成功 · ${metricsLines.value} 条样本`
+  } catch (e) {
+    metricsHint.value = String(e)
+    metricsText.value = ''
+    metricsLines.value = 0
+  } finally {
+    metricsBusy.value = false
+  }
+}
+
+async function runAnalyticsSummary() {
+  if (!isAuthed.value) return
+  analyticsBusy.value = true
+  analyticsHint.value = ''
+  try {
+    const res = await fetch(apiUrl(apiBase, analyticsSummaryPath()), {
+      headers: authHeaders(false),
+    })
+    if (!res.ok) throw new Error(`analytics ${res.status}`)
+    const data = await res.json()
+    analyticsRetained.value = Number(data.retained_events ?? 0)
+    analyticsUsers.value = Number(data.distinct_users ?? 0)
+    analyticsByName.value = Array.isArray(data.by_name)
+      ? data.by_name.map((r: { name?: string; count?: number }) => ({
+          name: String(r.name ?? ''),
+          count: Number(r.count ?? 0),
+        }))
+      : []
+    analyticsRecent.value = Array.isArray(data.recent)
+      ? data.recent.map(
+          (r: {
+            id?: string
+            user_id?: string
+            name?: string
+            occurred_at?: string
+          }) => ({
+            id: String(r.id ?? ''),
+            user_id: String(r.user_id ?? ''),
+            name: String(r.name ?? ''),
+            occurred_at: String(r.occurred_at ?? ''),
+          }),
+        )
+      : []
+    analyticsHint.value = `缓冲 ${analyticsRetained.value} 事件 · ${analyticsUsers.value} 用户（进程内，非真 DAU）`
+  } catch (e) {
+    analyticsHint.value = String(e)
+    analyticsByName.value = []
+    analyticsRecent.value = []
+  } finally {
+    analyticsBusy.value = false
   }
 }
 
@@ -289,13 +449,14 @@ async function verifyOtp() {
     accessToken.value = data.access_token ?? null
     displayName.value = data.user?.display_name ?? data.user?.email ?? email.value
     userId.value = data.user?.id ?? ''
+    isAdmin.value = null
     notice.value = '登录成功'
     nav.value = 'dashboard'
-    await refreshLists()
-    // Bootstrap first admin if needed (idempotent for already-admin in multi-admin setups may 403 after first).
+    // Bootstrap first admin if needed; surface closed-bootstrap so ops can seed.
     if (userId.value) {
-      void tryBootstrapAdmin(userId.value)
+      await tryBootstrapAdmin(userId.value)
     }
+    await refreshLists()
   } catch (e) {
     error.value = String(e)
   } finally {
@@ -305,13 +466,26 @@ async function verifyOtp() {
 
 async function tryBootstrapAdmin(id: string) {
   try {
-    await fetch(apiUrl(apiBase, grantAdminPath()), {
+    const res = await fetch(apiUrl(apiBase, grantAdminPath()), {
       method: 'POST',
       headers: authHeaders(),
       body: JSON.stringify({ user_id: id }),
     })
+    const bodyText = await res.text().catch(() => '')
+    const outcome = classifyAdminGrant(res.status, bodyText)
+    if (outcome === 'granted') {
+      isAdmin.value = true
+      notice.value = '已获得管理员权限（bootstrap 或授权成功）'
+      return
+    }
+    if (outcome === 'bootstrap_closed' || outcome === 'conflict') {
+      // Privilege still unknown until audit/reports probe in refreshLists.
+      isAdmin.value = null
+      return
+    }
+    // network-ish error: leave isAdmin unknown
   } catch {
-    // ignore — may already be admin or bootstrap closed
+    // ignore transport errors; refreshLists will probe
   }
 }
 
@@ -319,6 +493,7 @@ function logout() {
   accessToken.value = null
   displayName.value = ''
   userId.value = ''
+  isAdmin.value = null
   notice.value = '已退出登录'
   closePreview()
   void refreshLists()
@@ -346,6 +521,11 @@ async function forceCloseRoom(id?: string) {
         reason: actionReason.value.trim() || undefined,
       }),
     })
+    if (isAdminForbidden(res.status)) {
+      isAdmin.value = false
+      error.value = adminGateHint.value || adminGateMessage({ apiBase, email: email.value })
+      return
+    }
     if (!res.ok) throw new Error(`force-close ${res.status}`)
     notice.value = `已强关房间 ${shortId(roomId)}`
     roomIdInput.value = ''
@@ -790,14 +970,17 @@ onMounted(() => {
           <div class="avatar">{{ avatarLetter }}</div>
           <div>
             <div style="font-weight: 600">{{ displayName || 'operator' }}</div>
-            <div class="dim mono" style="font-size: 0.72rem">{{ shortId(userId, 10) }}</div>
+            <div class="dim mono" style="font-size: 0.72rem">
+              {{ shortId(userId, 10) }} · {{ sessionRoleLabel }}
+            </div>
           </div>
         </div>
       </header>
 
       <div class="content">
+        <p v-if="isAdmin === false" class="flash err">{{ adminGateHint }}</p>
         <p v-if="notice" class="flash ok">{{ notice }}</p>
-        <p v-if="error" class="flash err">{{ error }}</p>
+        <p v-if="error && isAdmin !== false" class="flash err">{{ error }}</p>
 
         <!-- Dashboard -->
         <template v-if="nav === 'dashboard'">
@@ -819,6 +1002,87 @@ onMounted(() => {
               <div class="kpi-value">{{ gifts.length }}</div>
             </div>
           </div>
+
+          <section v-if="isAuthed" class="panel" style="margin-bottom: 1rem">
+            <div class="panel-head">
+              <h2>资金运维</h2>
+            </div>
+            <div class="row" style="gap: 0.75rem; flex-wrap: wrap; align-items: center">
+              <button
+                type="button"
+                class="btn primary"
+                :disabled="reconcileBusy"
+                @click="runWalletReconcile"
+              >
+                {{ reconcileBusy ? '对账中…' : '钱包对账' }}
+              </button>
+              <button
+                type="button"
+                class="btn"
+                :disabled="expireBusy"
+                @click="runExpirePayOrders"
+              >
+                {{ expireBusy ? '关单中…' : '超时关单' }}
+              </button>
+              <button
+                type="button"
+                class="btn"
+                :disabled="metricsBusy"
+                @click="runMetricsScrape"
+              >
+                {{ metricsBusy ? '抓取中…' : '抓取 /metrics' }}
+              </button>
+            </div>
+            <p v-if="reconcileHint" class="hint" :class="{ err: reconcileBalanced === false }">
+              {{ reconcileHint }}
+            </p>
+            <p v-if="expireHint" class="hint">{{ expireHint }}</p>
+            <p v-if="metricsHint" class="hint">{{ metricsHint }}</p>
+            <pre
+              v-if="metricsText"
+              class="mono"
+              style="max-height: 180px; overflow: auto; font-size: 11px; margin-top: 0.5rem"
+            >{{ metricsText.slice(0, 4000) }}</pre>
+          </section>
+
+          <section v-if="isAuthed" class="panel" style="margin-bottom: 1rem">
+            <div class="panel-head">
+              <h2>埋点缓冲（dogfood）</h2>
+              <button
+                type="button"
+                class="btn sm"
+                :disabled="analyticsBusy"
+                @click="runAnalyticsSummary"
+              >
+                {{ analyticsBusy ? '加载中…' : '刷新汇总' }}
+              </button>
+            </div>
+            <p class="muted">
+              进程内环缓冲摘要，验证客户端 ingest；完整 DAU/付费看板仍走外部仓。
+            </p>
+            <p v-if="analyticsHint" class="hint">{{ analyticsHint }}</p>
+            <div v-if="analyticsByName.length" class="table-wrap" style="margin-top: 0.5rem">
+              <table class="data">
+                <thead>
+                  <tr>
+                    <th>事件名</th>
+                    <th>次数</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in analyticsByName.slice(0, 12)" :key="row.name">
+                    <td>{{ row.name }}</td>
+                    <td>{{ row.count }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <ul v-if="analyticsRecent.length" class="muted" style="margin-top: 0.75rem">
+              <li v-for="ev in analyticsRecent.slice(0, 5)" :key="ev.id">
+                {{ ev.name }} · {{ ev.user_id.slice(0, 8) }} · {{ ev.occurred_at }}
+              </li>
+            </ul>
+          </section>
 
           <div class="grid-2">
             <section class="panel">

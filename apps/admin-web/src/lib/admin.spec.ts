@@ -2,17 +2,20 @@ import { describe, expect, it } from 'vitest'
 import {
   ADMIN_NAV,
   adminGiftsPath,
+  adminGateMessage,
   adminTitle,
   apiUrl,
   auditPath,
   banUserPath,
   buildHls,
   canAccessModule,
+  classifyAdminGrant,
   countByStatus,
   createRoomPath,
   forceCloseRoomPath,
   giftsListPath,
   grantAdminPath,
+  isAdminForbidden,
   mePath,
   muteUserPath,
   navLabel,
@@ -32,6 +35,10 @@ import {
   roomsPath,
   shortId,
   unmuteUserPath,
+  walletReconcilePath,
+  payExpireOrdersPath,
+  metricsPath,
+  analyticsSummaryPath,
   API_PATHS,
 } from './admin'
 
@@ -46,6 +53,26 @@ describe('admin helpers', () => {
     expect(canAccessModule('moderator', 'rooms')).toBe(true)
     expect(canAccessModule('moderator', 'wallet')).toBe(false)
     expect(canAccessModule('viewer', 'rooms')).toBe(false)
+  })
+
+  it('classifies grant bootstrap outcomes', () => {
+    expect(classifyAdminGrant(204)).toBe('granted')
+    expect(classifyAdminGrant(200)).toBe('granted')
+    expect(classifyAdminGrant(403, '{"message":"admin only"}')).toBe('bootstrap_closed')
+    expect(classifyAdminGrant(409, 'admin bootstrap already claimed')).toBe('conflict')
+    expect(classifyAdminGrant(500, 'boom')).toBe('error')
+    expect(isAdminForbidden(403)).toBe(true)
+    expect(isAdminForbidden(401)).toBe(false)
+  })
+
+  it('explains admin gate for non-ops logins', () => {
+    const msg = adminGateMessage({
+      apiBase: 'http://localhost:8088',
+      email: 'viewer@example.com',
+    })
+    expect(msg).toContain('viewer@example.com')
+    expect(msg).toContain('seed-admin-local.sh')
+    expect(msg).toContain('admin_users')
   })
 
   it('exposes sidebar nav items', () => {
@@ -93,6 +120,10 @@ describe('api path helpers', () => {
     expect(auditPath()).toBe('/api/v1/admin/audit')
     expect(grantAdminPath()).toBe('/api/v1/admin/grant')
     expect(roomsPath()).toBe('/api/v1/rooms')
+    expect(walletReconcilePath()).toBe('/api/v1/admin/wallet/reconcile')
+    expect(payExpireOrdersPath()).toBe('/api/v1/admin/pay/expire-orders')
+    expect(analyticsSummaryPath()).toBe('/api/v1/admin/analytics/summary')
+    expect(metricsPath()).toBe('/metrics')
   })
 
   it('selects gifts path based on auth', () => {

@@ -18,6 +18,56 @@ export function canAccessModule(role: string, module: string): boolean {
   return false
 }
 
+/**
+ * Classify POST /admin/grant response for first-boot bootstrap UX.
+ * - 2xx: granted (bootstrap or existing admin granting)
+ * - 403 with "admin only": bootstrap closed and caller is not admin
+ * - 409: concurrent bootstrap already claimed
+ * - other: transport/API error
+ */
+export type AdminGrantOutcome =
+  | 'granted'
+  | 'bootstrap_closed'
+  | 'conflict'
+  | 'error'
+
+export function classifyAdminGrant(status: number, bodyText = ''): AdminGrantOutcome {
+  if (status >= 200 && status < 300) return 'granted'
+  if (status === 409) return 'conflict'
+  if (status === 403) {
+    const t = bodyText.toLowerCase()
+    if (t.includes('admin only') || t.includes('forbidden')) return 'bootstrap_closed'
+    return 'bootstrap_closed'
+  }
+  return 'error'
+}
+
+/** True when an admin-only route returned 403 (caller lacks ops privilege). */
+export function isAdminForbidden(status: number): boolean {
+  return status === 403
+}
+
+/**
+ * Operator-facing copy when login succeeded but admin actions are locked.
+ * Bootstrap only works while admin_users is empty.
+ */
+export function adminGateMessage(opts?: {
+  apiBase?: string
+  email?: string
+}): string {
+  const base = opts?.apiBase?.trim() || 'http://localhost:8088'
+  const email = opts?.email?.trim()
+  const emailHint = email
+    ? `当前账号 ${email} 不是管理员。`
+    : '当前账号不是管理员。'
+  return (
+    `${emailHint}自助 bootstrap 仅在 admin_users 为空时可用。` +
+    `本地可：① 用已有管理员邮箱登录（如 dogfood 种子 / DOGFOOD_ADMIN_EMAIL）；` +
+    `② 运行 scripts/seed-admin-local.sh ${email ? email : '<email>'}；` +
+    `③ docker exec 向 admin_users 插入 user_id。API ${base}`
+  )
+}
+
 /** Sidebar nav keys used by the ops shell. */
 export type AdminNavKey =
   | 'dashboard'
@@ -75,6 +125,10 @@ export const API_PATHS = {
   adminReports: '/api/v1/admin/reports',
   adminAudit: '/api/v1/admin/audit',
   adminGrant: '/api/v1/admin/grant',
+  adminWalletReconcile: '/api/v1/admin/wallet/reconcile',
+  adminPayExpireOrders: '/api/v1/admin/pay/expire-orders',
+  adminAnalyticsSummary: '/api/v1/admin/analytics/summary',
+  metrics: '/metrics',
 } as const
 
 /** Gifts list path: admin catalog when authed, else public catalog. */
@@ -128,6 +182,22 @@ export function auditPath(): string {
 
 export function grantAdminPath(): string {
   return API_PATHS.adminGrant
+}
+
+export function walletReconcilePath(): string {
+  return API_PATHS.adminWalletReconcile
+}
+
+export function payExpireOrdersPath(): string {
+  return API_PATHS.adminPayExpireOrders
+}
+
+export function analyticsSummaryPath(): string {
+  return API_PATHS.adminAnalyticsSummary
+}
+
+export function metricsPath(): string {
+  return API_PATHS.metrics
 }
 
 /** PATCH resolve path for a report id: `/api/v1/admin/reports/{id}`. */
