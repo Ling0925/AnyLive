@@ -26,6 +26,16 @@ jobs:
           python-version: "3.12"
       - run: pip install pyyaml
       - run: python scripts/validate-contracts.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Generate OpenAPI TS types
+        run: bash scripts/gen-openapi-ts.sh
+      - name: Check generated OpenAPI TS is committed
+        run: |
+          git add apps/admin-web/src/generated/openapi.d.ts apps/h5-web/src/generated/openapi.d.ts
+          git diff --cached --exit-code -- apps/admin-web/src/generated/openapi.d.ts apps/h5-web/src/generated/openapi.d.ts \
+            || (echo "Run ./scripts/gen-openapi-ts.sh and commit generated types" && exit 1)
       - run: bash scripts/smoke-compose.sh
         env:
           # compose config validation only needs docker when available
@@ -51,3 +61,17 @@ jobs:
           cache-dependency-path: apps/${{ matrix.app }}/pnpm-lock.yaml
       - run: pnpm install
       - run: pnpm test
+
+  mobile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter test
