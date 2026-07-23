@@ -5,6 +5,9 @@
 > **Does not** close the real-ESP gate. Signing this only accepts a **scoped** dogfood using fixed/dev OTP.  
 > Scripts, CI, and agents **must not** flip `V-BE-1` to `done` while this file remains unsigned or only a draft in git.
 
+> **Solo owner (2026-07-23):** 本表为**可选模板**，个人项目**不要求**填写或签字。 见 [solo-owner-mode.md](../product/solo-owner-mode.md)。 多人协作 / 对外放量时再考虑使用。
+>
+
 | Gate | Link |
 |---|---|
 | Wave2 ID | **V-BE-1** — [p1-parallel-tracks.md](../product/p1-parallel-tracks.md) §5 / status table |

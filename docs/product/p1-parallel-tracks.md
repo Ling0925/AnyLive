@@ -152,15 +152,18 @@ FL      repo/session ──►   登录Feed房间播放钱包 ──►  真机�
 
 ## 5. Wave 2 — 出口验证（仍可并行）
 
-| ID | 轨道 | 任务 | DoD |
-|---|---|---|---|
-| V-BE-1 | BE | 真 OTP 通道（ESP/HTTP）或书面接受 dev-only | 非仅口头；草案 [otp-dev-only-risk-accept.md](../runbooks/otp-dev-only-risk-accept.md)（**未签字 ≠ done**；签后归档 `reports/risk-accept/`） |
-| V-BE-2 | BE | stage 配置 / 1k soak 或风险接受书 | 报告落 `reports/`；草案 [ws-1k-soak-risk-accept.md](../runbooks/ws-1k-soak-risk-accept.md)（**未签字 ≠ done**）；stage env 见 [deploy/.env.stage.example](../../deploy/.env.stage.example) |
-| V-AD-1 | AD | 运营预置：礼物目录、admin 账号、演示脚本走查 | 15 分钟演示可跟 |
-| V-FL-1 | FL | 设备矩阵：中端 Android + 近两代 iPhone（+ H5 Safari/Chrome 行） | 填 `reports/device-matrix-TEMPLATE.md` 或 `./scripts/device-matrix-prefill.sh` 产出的 `reports/device-matrix-YYYYMMDD-*.md`；**Pass 仅人工勾选，prefill 不签字** |
-| V-FL-2 | FL | 10 分钟真人路径录屏（可与 OBS 同学一起） | **先** `./scripts/dogfood-10min-path.sh` PASS，再人工 login→feed→HLS→chat→gift→end-state；**Recording URL 进** [dogfood-cohort.md](../runbooks/dogfood-cohort.md) V-FL-2 表 / 纪要；**无 URL 不得标 done** |
-| V-ALL-1 | 全员 | 缺陷会：无开放 P0 | 纪要 |
-| V-ALL-2 | 全员 | git 按 [p1-git-split-plan](./p1-git-split-plan.md) 收敛 | 可打 tag 候选 |
+> **Solo owner（2026-07-23）：** 个人项目 **不** 做签字 / 矩阵 Pass / 录屏 URL / 缺陷会等流程关闸。  
+> 口径见 [solo-owner-mode.md](./solo-owner-mode.md)。下表 DoD 在多人协作时仍可参考；**solo 以 waived/optional 为准**。
+
+| ID | 轨道 | 任务 | DoD（多人参考） | Solo |
+|---|---|---|---|---|
+| V-BE-1 | BE | 真 OTP 或书面接受 dev-only | 可选模板 [otp-dev-only-risk-accept.md](../runbooks/otp-dev-only-risk-accept.md) | **waived** — dev OTP OK；不声称真 ESP |
+| V-BE-2 | BE | stage soak 或风险接受 | 可选模板 [ws-1k-soak-risk-accept.md](../runbooks/ws-1k-soak-risk-accept.md)；stage [`.env.stage.example`](../../deploy/.env.stage.example) | **waived** — 本地 1k 基线即可；不声称 stage 15min |
+| V-AD-1 | AD | 运营预置 + 演示走查 | [admin-ops-15min-demo.md](../runbooks/admin-ops-15min-demo.md) 自己点通 | **optional** — 无 footer 签字关闸 |
+| V-FL-1 | FL | 设备冒烟 | 模板 / prefill 可选 | **optional** — 真机自测即可 |
+| V-FL-2 | FL | 10 分钟真人路径 | 控制面 `dogfood-10min-path` + 自己走 App/H5 | **optional** — 无 Recording URL 关闸 |
+| V-ALL-1 | 全员 | 缺陷会 | 纪要 | **n/a (solo)** |
+| V-ALL-2 | 全员 | git 主题收敛 | [p1-git-split-plan](./p1-git-split-plan.md) | 建议主题 commit（习惯，非签字） |
 
 ---
 
@@ -259,7 +262,8 @@ A=执行 · R=负责结果 · C=协商 · I=知会
 
 > **看板日期：** 2026-07-23  
 > **Wave 1 控制面：** 三轨任务 ID 代码侧已收口（审计 doneIds + gap-close 实现）。  
-> **Wave 1 集体 DoD：** **未整体签字通过** — 仍依赖 Wave 2 人工项（设备矩阵、缺陷会、ESP、OBS 周等）。自动化绿 ≠ 出口放行。
+> **运作模式：** [solo-owner-mode.md](./solo-owner-mode.md) — **不**以签字/矩阵 Pass/录屏 URL 关闸；完整实现 + 自测打包优先。  
+> **诚实边界：** 自动化绿 ≠ 真 ESP / stage soak / 商店上架；FEATURE_PK/COHOST 默认 OFF。
 
 | ID | 轨道 | 状态 | 负责人 | 目标日 | 备注 |
 |---|---|---|---|---|---|
@@ -293,13 +297,13 @@ A=执行 · R=负责结果 · C=协商 · I=知会
 | FL-9 | FL | done | | | 审计 done + gap-close：WalletPage ledger ≤20 条；mock topup / sandbox buy 后刷新 |
 | FL-10 | FL | done | | | 审计 done；WS + HTTP 轮询回退 |
 | FL-11 | FL | done | | | 审计 done；widget/repo 单测；`flutter test` 绿 |
-| V-BE-1 | BE | todo | | | **人工/运维：** 真 OTP 或书面接受 → [otp-dev-only-risk-accept.md](../runbooks/otp-dev-only-risk-accept.md)（**unsigned draft**；CI/脚本不得改 done） |
-| V-BE-2 | BE | todo | | | **人工/运维：** stage soak 或风险接受 → [ws-1k-soak-risk-accept.md](../runbooks/ws-1k-soak-risk-accept.md) + `reports/`；stage env [`.env.stage.example`](../../deploy/.env.stage.example) |
-| V-AD-1 | AD | todo | | | **人工：** 运营预置礼物目录、admin 账号、15min 演示走查 |
-| V-FL-1 | FL | todo | | | **人工/设备：** 矩阵模板 + prefill（`reports/device-matrix-TEMPLATE.md` · `scripts/device-matrix-prefill.sh`）；既有装机笔记非全路径；**不得自动 Pass** |
-| V-FL-2 | FL | todo | | | **人工：** 控制面 10min-path PASS → 真人路径录屏；清单与 **Recording URL** 见 [dogfood-cohort.md](../runbooks/dogfood-cohort.md) §V-FL-2；无 URL 不 done |
-| V-ALL-1 | 全员 | todo | | | **人工：** 缺陷会 — 无开放 P0 纪要 |
-| V-ALL-2 | 全员 | todo | | | git 按 split-plan 收敛 → tag 候选（未要求本板提交） |
+| V-BE-1 | BE | waived (solo) | owner | 2026-07-23 | **Solo：** dev OTP 可 dogfood；**不**声称真 ESP。可选模板仍在 runbooks；**不要求签字**。见 [solo-owner-mode.md](./solo-owner-mode.md) |
+| V-BE-2 | BE | waived (solo) | owner | 2026-07-23 | **Solo：** 本地 1k 基线可参考；**不**声称 stage 15min soak。**不要求签字** |
+| V-AD-1 | AD | optional | owner | | Admin 自测即可；**无** footer 签字关闸 |
+| V-FL-1 | FL | optional | owner | | 真机/H5 自测即可；矩阵 prefill 可选、**不**强制 Pass |
+| V-FL-2 | FL | optional | owner | | 自己走 login→feed→play→chat→gift；**无** Recording URL 关闸 |
+| V-ALL-1 | 全员 | n/a (solo) | | | 个人项目不做缺陷会仪式 |
+| V-ALL-2 | 全员 | doing | owner | | 主题 commit 习惯；非签字门禁 |
 
 状态：`todo` / `doing` / `blocked` / `done`。
 
@@ -331,9 +335,9 @@ A=执行 · R=负责结果 · C=协商 · I=知会
 5. PK/连麦未出现在 Demo 脚本。  
 
 **2026-07-23 状态：** 上表 1–5 的**自动化/代码侧**已基本满足（BE-9 本地 PASS + CI 非阻塞；AD/FL 主路径与 gap-close 完成；OpenAPI 为 sole contract；FEATURE_PK/COHOST 关）。  
-**尚未**把 Wave 1 集体 DoD 标为「全员签字通过」：Wave 2 人工项（V-BE-1/2、V-AD-1、V-FL-1/2、V-ALL-1）仍为 `todo`，设备矩阵 / 缺陷会 / ESP / OBS 周不得伪造。
+**Solo（2026-07-23）：** Wave 2 不以签字关闸；见 [solo-owner-mode.md](./solo-owner-mode.md)。控制面已可 dogfood；继续实现 / 自测 / 主题 commit 即可。
 
-→ 可**进入** Wave 2 出口验证流程，并按 split-plan 推进 **A/B/C** 合入；出口 tag 仍卡人工项。
+→ 按需打包自测；不把未签字当阻塞。
 
 ---
 

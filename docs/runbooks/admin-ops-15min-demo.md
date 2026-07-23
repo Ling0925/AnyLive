@@ -3,8 +3,8 @@
 对应验收：**V-AD-1** — 运营预置礼物目录、admin 账号、演示脚本走查（[p1-parallel-tracks](../product/p1-parallel-tracks.md)）。  
 产品演示脚本原文：[mvp-scope.md §4](../product/mvp-scope.md)（本 runbook 把 §4 七步落到具体命令、URL、`data-testid`）。
 
-> **本文件只提供走查清单。** 是否关闭 V-AD-1 **只能由人工签字**（下方 footer）。  
-> **禁止**在 `p1-parallel-tracks.md` 里把 V-AD-1 标为 `done` 除非本页签字完成。
+> **本文件是走查清单。** Solo 项目**无签字关闸** — [solo-owner-mode.md](../product/solo-owner-mode.md)。  
+> 看板口径见 [p1-parallel-tracks.md](../product/p1-parallel-tracks.md)。
 
 ---
 
@@ -120,20 +120,17 @@
 
 ---
 
-## 4. 人工签字（仅此关闭 V-AD-1）
+## 4. 自测记录（可选 · solo 无签字关闸）
 
-走查人确认：
+> 个人项目**不要求** footer 签字。见 [solo-owner-mode.md](../product/solo-owner-mode.md)。需要时自行勾选备忘即可。
 
 - [ ] 预检 §0 通过（栈 + admin + 礼物 seed）
-- [ ] §1 步骤 1–7 可在约 15 分钟内跟完（OBS/H5/App 真机段按环境勾选）
-- [ ] 钱包对账结果已展示；未伪造 balanced
-- [ ] **未**在未签字前把 `p1-parallel-tracks` 的 V-AD-1 改为 `done`
+- [ ] §1 主路径点通（OBS/H5/App 按你环境）
+- [ ] 钱包对账看过一眼
 
-| 字段 | 填写 |
+| 字段 | 填写（可选） |
 |---|---|
-| 走查人 | |
+| 自测人 | |
 | 日期 | |
-| 环境（local / test 栈 commit） | |
-| 备注 / 缺陷 | |
-
-**Human sign-off only closes V-AD-1.** 代码合并、CI 绿、或本 runbook 落盘 **均不等于** V-AD-1 完成。
+| 环境 | |
+| 备注 | |

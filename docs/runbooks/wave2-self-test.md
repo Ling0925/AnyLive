@@ -1,8 +1,8 @@
-# Wave2 人工自测打包清单
+# Wave2 自测打包清单
 
-> 把本地测试栈 + 三端客户端 + 控制面 dogfood 收成**一套可复用的人肉自测包**。  
-> 本清单**不**关闭 V-BE-1/2、V-FL-1/2、V-AD-1、V-ALL-1；控制面 PASS ≠ 出口签字。  
-> 更完整的开播步骤见 [go-live-local.md](./go-live-local.md)；队列与 V-FL-2 录屏见 [dogfood-cohort.md](./dogfood-cohort.md)。
+> 把本地测试栈 + 三端客户端 + 控制面 dogfood 收成**一套可复用的自测包**。  
+> **Solo owner：** 不搞签字关闸 — 见 [solo-owner-mode.md](../product/solo-owner-mode.md)。控制面 PASS = 回归绿；自测由你点通即可。  
+> 开播细节：[go-live-local.md](./go-live-local.md)。
 
 ## 0. 目标产物
 
@@ -104,20 +104,17 @@ DOGFOOD_REPORT_DIR=reports ./scripts/dogfood-api-smoke.sh
 
 共用 env：`API_BASE`（默认 `http://localhost:8088`）、`OTP_CODE`（测试栈 `123456`）、`DOGFOOD_ADMIN_EMAIL`。  
 可选媒体面：`./scripts/dogfood-media-smoke.sh`。  
-**控制面绿只证明 API 就绪，不替代 OBS 推流、真机路径或任何风险接受签字。**
+**控制面绿 = API/脚本就绪。** 推流与真机路径你自己点；**solo 不要求** risk-accept 签字、矩阵 Pass、录屏 URL、缺陷会。
 
-## 5. 仍须人工签字 / 操作的项
-
-脚本与 CI **不得**自动标 done：
+## 5. 建议你自测的项（非签字门禁）
 
 | 项 | 说明 | 入口 |
 |---|---|---|
-| **Risk-accept（OTP / WS soak）** | 草案未签 ≠ V-BE-1 / V-BE-2 关闭 | [otp-dev-only-risk-accept.md](./otp-dev-only-risk-accept.md) · [ws-1k-soak-risk-accept.md](./ws-1k-soak-risk-accept.md) |
-| **设备矩阵（V-FL-1）** | Mid Android + 近两代 iPhone + H5；Pass **仅人工勾选** | `./scripts/device-matrix-prefill.sh` → `reports/device-matrix-*.md` |
-| **OBS 周** | 真人连续推流 ≥7 天（可轮值）；Server from `push_url` + 完整 `stream_key`（含 `?exp=&sig=`） | [go-live-local.md](./go-live-local.md) §4 · [dogfood-cohort.md](./dogfood-cohort.md) |
-| **缺陷会（V-ALL-1）** | 无开放 P0 的纪要 | [p1-parallel-tracks.md](../product/p1-parallel-tracks.md) V-ALL-1 |
-| **V-FL-2 录屏** | 真人 login→feed→HLS→chat→gift→end-state + **Recording URL** | [dogfood-cohort.md](./dogfood-cohort.md) §V-FL-2 |
-| **V-AD-1 运营演示** | 15 min 后台走查 + 签字 | [admin-ops-15min-demo.md](./admin-ops-15min-demo.md) |
+| **OTP** | 本地 dev OTP `123456` 即可；真 ESP 以后再说 | 可选模板 [otp-dev-only-risk-accept.md](./otp-dev-only-risk-accept.md)（**不要求填**） |
+| **WS 基线** | 已有本地 1k 报告可参考；stage 15min 非 solo 阻塞 | 可选 [ws-1k-soak-risk-accept.md](./ws-1k-soak-risk-accept.md) |
+| **真机 / H5** | 装 APK + 打开 H5 走主路径 | `build-mobile-apk` · preview :5173 |
+| **OBS** | 需要时推一流验证 HLS | [go-live-local.md](./go-live-local.md) §4 |
+| **Admin** | 礼物 / 房间 / 处置自己点通 | [admin-ops-15min-demo.md](./admin-ops-15min-demo.md)（**无 footer 关闸**） |
 
 ## 6. P1-safe：FEATURE_PK / FEATURE_COHOST 必须为 false
 
@@ -139,7 +136,7 @@ curl -fsS http://127.0.0.1:8088/api/v1/meta | python3 -m json.tool
 - [ ] admin-web + h5-web：`pnpm build` + `preview`（端口不冲突）
 - [ ] `gift-seed` → `10min-path` → `api-smoke` 均 PASS
 - [ ] `GET /api/v1/meta` → `features.pk` / `features.cohost` **false**
-- [ ] 人工：risk-accept / 设备矩阵 / OBS 周 / 缺陷会 / V-FL-2 URL / V-AD-1 — **未签不算关闭**
+- [ ] 自己点通：App/H5 主路径 +（可选）OBS + Admin — **无签字关闸**（[solo-owner-mode](../product/solo-owner-mode.md)）
 
 ## 相关文档
 
