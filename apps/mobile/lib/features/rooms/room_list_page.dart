@@ -12,11 +12,15 @@ class RoomListPage extends StatefulWidget {
     super.key,
     required this.config,
     required this.accessToken,
+    this.userId,
     this.roomsRepository,
   });
 
   final AppConfig config;
   final String accessToken;
+
+  /// Current user id for host-only room controls (optional).
+  final String? userId;
 
   /// Optional injectable repository for tests.
   final RoomsRepository? roomsRepository;
@@ -101,6 +105,7 @@ class _RoomListPageState extends State<RoomListPage> {
         builder: (_) => RoomPage(
           config: widget.config,
           accessToken: widget.accessToken,
+          userId: widget.userId,
           room: room,
           roomsRepository: _rooms,
         ),
