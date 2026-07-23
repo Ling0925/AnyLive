@@ -16,6 +16,7 @@ Audience + streamer client for iOS/Android. **Not** Flutter Web — public watch
 | `APP_FLAVOR` | falls back to `APP_ENV` / `local` | `local` \| `stage` \| `prod` |
 | `APP_ENV` | `local` | environment label |
 | `CENTRIFUGO_WS` | empty | optional; empty → HTTP chat poll only |
+| `H5_BASE_URL` | derived from API host `:5173` | share deep links (`?room=`); Android emulator maps `10.0.2.2` → `127.0.0.1` |
 | `ANYLIVE_EMBEDDED_PLAYER` | off in tests | set `true` for media_kit HLS embed |
 
 ## API base: emulator, adb reverse, real device

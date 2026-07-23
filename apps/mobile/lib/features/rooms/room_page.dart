@@ -228,17 +228,21 @@ class _RoomPageState extends State<RoomPage> {
             // play URL may lag until stream is active
           }
         }
-        try {
-          final pk = await _interactive.getPk(_room.id);
-          if (!mounted) return;
-          final changed = pk?.id != _pk?.id ||
-              pk?.scoreA != _pk?.scoreA ||
-              pk?.scoreB != _pk?.scoreB ||
-              pk?.status != _pk?.status;
-          if (changed) {
-            setState(() => _pk = pk);
-          }
-        } catch (_) {}
+        if (_featurePk) {
+          try {
+            final pk = await _interactive.getPk(_room.id);
+            if (!mounted) return;
+            final changed = pk?.id != _pk?.id ||
+                pk?.scoreA != _pk?.scoreA ||
+                pk?.scoreB != _pk?.scoreB ||
+                pk?.status != _pk?.status;
+            if (changed) {
+              setState(() => _pk = pk);
+            }
+          } catch (_) {}
+        } else if (_pk != null && mounted) {
+          setState(() => _pk = null);
+        }
       } catch (_) {
         // ignore transient poll errors
       }
@@ -354,12 +358,7 @@ class _RoomPageState extends State<RoomPage> {
   }
 
   Future<void> _shareRoom() async {
-    final base = widget.config.normalizedApiBaseUrl;
-    // H5 deep link on same host family when possible; fall back to room id.
-    final host = Uri.tryParse(base)?.host ?? 'localhost';
-    final scheme = Uri.tryParse(base)?.scheme ?? 'http';
-    // Prefer known local H5 preview port for dogfood; path is ?room=
-    final shareUrl = '$scheme://$host:5173/?room=${_room.id}';
+    final shareUrl = widget.config.shareRoomUrl(_room.id);
     await Clipboard.setData(ClipboardData(text: shareUrl));
     if (!mounted) return;
     await showModalBottomSheet<void>(
@@ -443,9 +442,11 @@ class _RoomPageState extends State<RoomPage> {
       }
 
       PkSession? pk;
-      try {
-        pk = await _interactive.getPk(_room.id);
-      } catch (_) {}
+      if (_featurePk) {
+        try {
+          pk = await _interactive.getPk(_room.id);
+        } catch (_) {}
+      }
 
       if (!mounted) return;
       setState(() {
@@ -528,6 +529,8 @@ class _RoomPageState extends State<RoomPage> {
   Future<void> _sendChat() async {
     final text = _chatController.text.trim();
     if (text.isEmpty || _sending) return;
+    // Match H5: send only while live (backend does not enforce room status).
+    if (!_room.isLive) return;
     setState(() => _sending = true);
     try {
       final msg = await _rooms.postMessage(_room.id, text);
@@ -582,10 +585,12 @@ class _RoomPageState extends State<RoomPage> {
         'gift.tap',
         props: {'room_id': _room.id, 'gift_id': gift.id},
       ));
-      try {
-        final pk = await _interactive.getPk(_room.id);
-        if (mounted) setState(() => _pk = pk);
-      } catch (_) {}
+      if (_featurePk) {
+        try {
+          final pk = await _interactive.getPk(_room.id);
+          if (mounted) setState(() => _pk = pk);
+        } catch (_) {}
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1111,6 +1116,7 @@ class _RoomPageState extends State<RoomPage> {
                             likeCount: _likeCount,
                             roomOffline: _roomOffline,
                             roomTerminal: _roomTerminal,
+                            featurePk: _featurePk,
                             pk: _pk,
                           ),
                           // 3) Channel row: host + Follow
@@ -1178,21 +1184,24 @@ class _RoomPageState extends State<RoomPage> {
                         ],
                       ),
                     ),
-                    // 5) Composer
+                    // 5) Composer — live only (H5 parity); history still visible offline
                     _ChatInput(
                       controller: _chatController,
                       onSend: _sendChat,
-                      // Chat remains available while idle; gifts/like stay live-only.
-                      enabled: !_sending && !_roomTerminal,
-                    ),
-                    // 6) Gift dock + balance / top-up
-                    _GiftDock(
-                      gifts: _giftsCatalog,
-                      balance: _balance,
-                      onSend: _sendGift,
-                      onTopup: _topup,
                       enabled: !_sending && _room.isLive,
+                      offlineHint: !_room.isLive && !_roomTerminal
+                          ? 'Room offline — chat send disabled'
+                          : (_roomTerminal ? 'Stream ended — chat closed' : null),
                     ),
+                    // 6) Gift dock + balance / top-up (hide when permanently closed)
+                    if (!_roomTerminal)
+                      _GiftDock(
+                        gifts: _giftsCatalog,
+                        balance: _balance,
+                        onSend: _sendGift,
+                        onTopup: _topup,
+                        enabled: !_sending && _room.isLive,
+                      ),
                   ],
                 ),
     );
@@ -1489,6 +1498,7 @@ class _MetaRow extends StatelessWidget {
     required this.likeCount,
     required this.roomOffline,
     required this.roomTerminal,
+    this.featurePk = false,
     this.pk,
   });
 
@@ -1497,6 +1507,8 @@ class _MetaRow extends StatelessWidget {
   final int likeCount;
   final bool roomOffline;
   final bool roomTerminal;
+  /// Soft-hide PK banner when FEATURE_PK is off (meta.features.pk).
+  final bool featurePk;
   final PkSession? pk;
 
   @override
@@ -1506,7 +1518,7 @@ class _MetaRow extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (pk != null && (pk!.isActive || pk!.isEnded)) ...[
+          if (featurePk && pk != null && (pk!.isActive || pk!.isEnded)) ...[
             Container(
               key: const Key('pk-banner'),
               width: double.infinity,
@@ -1679,14 +1691,18 @@ class _ChatInput extends StatelessWidget {
     required this.controller,
     required this.onSend,
     required this.enabled,
+    this.offlineHint,
   });
 
   final TextEditingController controller;
   final VoidCallback onSend;
   final bool enabled;
+  /// When non-null, shown as field hint (e.g. offline / stream ended).
+  final String? offlineHint;
 
   @override
   Widget build(BuildContext context) {
+    final hint = offlineHint ?? 'Say something…';
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
       child: Row(
@@ -1695,8 +1711,8 @@ class _ChatInput extends StatelessWidget {
             child: TextField(
               controller: controller,
               enabled: enabled,
-              decoration: const InputDecoration(
-                hintText: 'Say something…',
+              decoration: InputDecoration(
+                hintText: hint,
                 isDense: true,
               ),
               onSubmitted: (_) => onSend(),

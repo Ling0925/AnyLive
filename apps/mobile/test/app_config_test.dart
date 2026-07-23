@@ -51,5 +51,30 @@ void main() {
       expect(AppConfig.normalizeFlavor(''), 'local');
       expect(AppConfig.normalizeFlavor('custom'), 'custom');
     });
+
+    test('normalizedH5BaseUrl uses explicit h5BaseUrl', () {
+      const cfg = AppConfig(
+        apiBaseUrl: 'http://localhost:8088',
+        environment: 'local',
+        h5BaseUrl: 'https://watch.example.com/',
+      );
+      expect(cfg.normalizedH5BaseUrl, 'https://watch.example.com');
+      expect(
+        cfg.shareRoomUrl('r1'),
+        'https://watch.example.com/?room=r1',
+      );
+    });
+
+    test('normalizedH5BaseUrl derives from api host for local dogfood', () {
+      const cfg = AppConfig(
+        apiBaseUrl: 'http://10.0.2.2:8088',
+        environment: 'local',
+      );
+      expect(cfg.normalizedH5BaseUrl, 'http://127.0.0.1:5173');
+      expect(
+        cfg.shareRoomUrl('abc'),
+        'http://127.0.0.1:5173/?room=abc',
+      );
+    });
   });
 }

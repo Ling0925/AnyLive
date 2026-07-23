@@ -4,6 +4,7 @@ import 'package:anylive_mobile/api/social_repository.dart';
 import 'package:anylive_mobile/config/app_config.dart';
 import 'package:anylive_mobile/features/feed/feed_page.dart';
 import 'package:anylive_mobile/features/home/home_page.dart';
+import 'package:anylive_mobile/ui/feed_skeleton.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -63,7 +64,8 @@ void main() {
       ),
     );
 
-    expect(find.byType(CircularProgressIndicator), findsWidgets);
+    // Loading uses FeedSkeleton placeholders (not CircularProgressIndicator).
+    expect(find.byType(FeedSkeleton), findsWidgets);
     await tester.pumpAndSettle();
 
     expect(find.text('Discover'), findsOneWidget);
