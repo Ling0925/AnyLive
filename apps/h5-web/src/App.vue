@@ -1010,10 +1010,17 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
 
 <template>
   <main class="page">
-    <header class="top">
-      <div>
-        <h1>AnyLive Watch</h1>
-        <p class="muted">Public H5 player (hls.js / native). API: {{ apiBase }}</p>
+    <header class="top topbar">
+      <div class="brand">
+        <h1>
+          <span class="logo-mark" aria-hidden="true" />
+          AnyLive
+          <span v-if="canWatch" class="live-chip" role="status">
+            <span class="live-dot" aria-hidden="true" />
+            LIVE
+          </span>
+        </h1>
+        <p class="muted api-line">Watch · {{ apiBase }}</p>
       </div>
       <div class="auth-chip">
         <template v-if="authed">
@@ -1034,12 +1041,13 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
       <p class="muted">Email OTP — optional. Watch works without login.</p>
       <div class="row">
         <input v-model="email" type="email" placeholder="you@example.com" autocomplete="email" />
-        <button type="button" :disabled="authBusy" @click="sendOtp">Send OTP</button>
+        <button type="button" class="btn primary" :disabled="authBusy" @click="sendOtp">Send OTP</button>
       </div>
       <div class="row">
         <input v-model="otpCode" placeholder="OTP code" inputmode="numeric" autocomplete="one-time-code" />
         <button
           type="button"
+          class="btn primary"
           data-testid="verify-otp"
           :disabled="authBusy || !ageConfirmed"
           @click="verifyOtp"
@@ -1073,6 +1081,7 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
       <div class="row">
         <button
           type="button"
+          class="btn primary"
           data-testid="export-data"
           :disabled="privacyBusy"
           @click="exportMyData"
@@ -1101,10 +1110,10 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
       />
     </section>
 
-    <div class="row">
+    <div class="util-strip row">
       <input v-model="roomId" placeholder="Room UUID" />
-      <button :disabled="loading" @click="loadRoom">Load</button>
-      <button type="button" :disabled="!roomId.trim()" @click="shareRoom">Share</button>
+      <button type="button" class="btn primary" :disabled="loading" @click="loadRoom">Load</button>
+      <button type="button" class="ghost" :disabled="!roomId.trim()" @click="shareRoom">Share</button>
     </div>
     <section class="panel search" data-testid="search-panel">
       <div class="row">
@@ -1113,7 +1122,7 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
           placeholder="Search rooms / users"
           @keyup.enter="runSearch"
         />
-        <button type="button" :disabled="searchBusy" @click="runSearch">Search</button>
+        <button type="button" class="btn primary" :disabled="searchBusy" @click="runSearch">Search</button>
       </div>
       <p v-if="searchHint" class="hint">{{ searchHint }}</p>
       <ul v-if="searchResult" class="msg-list">
@@ -1152,307 +1161,725 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
       <p v-if="creatorHint" class="hint">{{ creatorHint }}</p>
     </section>
 
-    <section v-if="roomTerminal" class="ended" role="status" data-testid="room-ended">
-      <p class="ended-title">直播已结束</p>
-      <p class="ended-sub">Room ended (force-closed)</p>
-      <p v-if="status" class="muted">status: {{ status }}</p>
-    </section>
+    <div class="watch-grid">
+      <div class="stage-col">
+        <section v-if="roomTerminal" class="ended" role="status" data-testid="room-ended">
+          <p class="ended-title">直播已结束</p>
+          <p class="ended-sub">Room ended (force-closed)</p>
+          <p v-if="status" class="muted">status: {{ status }}</p>
+        </section>
 
-    <section
-      v-else-if="roomOffline && status === 'idle'"
-      class="ended offline"
-      role="status"
-      data-testid="room-offline"
-    >
-      <p class="ended-title">暂时离线</p>
-      <p class="ended-sub">Host stopped — room idle (may go live again)</p>
-      <p class="muted">status: idle</p>
-    </section>
-
-    <p v-else-if="status" class="muted">status: {{ status }}</p>
-
-    <section v-if="canWatch" class="player">
-      <p class="mono">{{ hlsUrl }}</p>
-            <div id="room-stats" class="row" style="gap:12px;align-items:center;margin:8px 0">
-        <span>{{ onlineCount }} online</span>
-        <button type="button" :disabled="!authed || likeBusy || roomOffline" @click="likeRoom">♥ {{ likeCount }}</button>
-        <span v-if="wsStatus" class="muted">ws: {{ wsStatus }}</span>
-        <span v-if="giftOverlay" class="gift-overlay">🎁 {{ giftOverlay }}</span>
-      </div>
-      <video ref="videoEl" controls playsinline style="width: 100%; max-width: 720px; background: #000" />
-    </section>
-
-    <!-- Chat: list is public while not permanently closed; send requires live + login -->
-    <section v-if="roomId.trim() && status && !roomTerminal" class="panel chat">
-      <div class="panel-head">
-        <h2>Chat</h2>
-        <button type="button" class="ghost" @click="refreshMessages">Refresh</button>
-      </div>
-      <ul class="msg-list">
-        <li v-for="m in messages" :key="m.id">
-          <strong>{{ m.senderName || m.senderId.slice(0, 6) }}</strong>
-          <span>{{ m.body }}</span>
-        </li>
-        <li v-if="!messages.length" class="muted">No messages yet</li>
-      </ul>
-      <div v-if="authed && canWatch" class="row">
-        <input v-model="chatBody" placeholder="Say something…" @keyup.enter="sendChat" />
-        <button type="button" :disabled="chatBusy" @click="sendChat">Send</button>
-      </div>
-      <p v-else-if="authed && roomOffline" class="muted">Room offline — chat send disabled</p>
-      <p v-else class="muted">
-        <button type="button" class="link" @click="loginOpen = true">Login</button>
-        to send chat
-      </p>
-      <p v-if="chatHint" class="hint">{{ chatHint }}</p>
-    </section>
-
-    <!-- Gifts + wallet: only when live + can watch -->
-    <section v-if="roomId.trim() && status && canWatch" class="panel gifts">
-      <div class="panel-head">
-        <h2>Gifts</h2>
-        <span v-if="authed" class="chip">balance: {{ balance }}</span>
-      </div>
-      <div v-if="authed" class="row topup">
-        <input v-model.number="topupAmount" type="number" min="1" placeholder="Topup amount" />
-        <button type="button" :disabled="giftBusy" @click="doTopup">Top up (legacy mock)</button>
-        <button type="button" class="ghost" :disabled="giftBusy" @click="refreshBalance">Refresh</button>
-      </div>
-      <div v-if="authed && payProducts.length" class="pay-packs">
-        <p class="muted">Coin packs (pay mock)</p>
-        <div class="gift-bar">
-          <button
-            v-for="p in payProducts"
-            :key="p.id"
-            type="button"
-            class="gift-btn"
-            :disabled="payBusy"
-            @click="buyCoins(p)"
-          >
-            {{ p.title }}
-            <span class="price">{{ p.amount }} {{ p.currency }}</span>
-          </button>
-        </div>
-        <p v-if="payHint" class="hint">{{ payHint }}</p>
-      </div>
-      <div class="gift-bar">
-        <button
-          v-for="g in gifts"
-          :key="g.id"
-          type="button"
-          class="gift-btn"
-          :disabled="giftBusy || !authed"
-          @click="sendGift(g)"
+        <section
+          v-else-if="roomOffline && status === 'idle'"
+          class="ended offline"
+          role="status"
+          data-testid="room-offline"
         >
-          {{ g.name }}
-          <span class="price">{{ g.price }}</span>
-        </button>
-        <p v-if="!gifts.length" class="muted">No gifts in catalog</p>
+          <p class="ended-title">暂时离线</p>
+          <p class="ended-sub">Host stopped — room idle (may go live again)</p>
+          <p class="muted">status: idle</p>
+        </section>
+
+        <p v-else-if="status" class="muted status-line">status: {{ status }}</p>
+
+        <section v-if="canWatch" class="stage">
+          <div class="player">
+            <video ref="videoEl" controls playsinline class="player-video" />
+            <div id="room-stats" class="room-stats">
+              <span class="stat-pill">{{ onlineCount }} online</span>
+              <button
+                type="button"
+                class="like-btn"
+                :disabled="!authed || likeBusy || roomOffline"
+                @click="likeRoom"
+              >
+                ♥ {{ likeCount }}
+              </button>
+              <span v-if="wsStatus" class="muted ws-pill">ws: {{ wsStatus }}</span>
+              <span v-if="giftOverlay" class="gift-overlay">🎁 {{ giftOverlay }}</span>
+            </div>
+          </div>
+          <details class="hls-details">
+            <summary class="mono dim">HLS URL</summary>
+            <p class="mono dim">{{ hlsUrl }}</p>
+          </details>
+        </section>
       </div>
-      <p v-if="!authed" class="muted">
-        <button type="button" class="link" @click="loginOpen = true">Login</button>
-        to send gifts &amp; top up
-      </p>
-      <p v-if="giftHint" class="hint">{{ giftHint }}</p>
-    </section>
+
+      <div class="side-col">
+        <!-- Chat: list is public while not permanently closed; send requires live + login -->
+        <section v-if="roomId.trim() && status && !roomTerminal" class="panel chat">
+          <div class="panel-head">
+            <h2>Chat</h2>
+            <button type="button" class="ghost" @click="refreshMessages">Refresh</button>
+          </div>
+          <ul class="msg-list">
+            <li v-for="m in messages" :key="m.id">
+              <strong>{{ m.senderName || m.senderId.slice(0, 6) }}</strong>
+              <span>{{ m.body }}</span>
+            </li>
+            <li v-if="!messages.length" class="muted empty-msg">No messages yet</li>
+          </ul>
+          <div v-if="authed && canWatch" class="row composer">
+            <input v-model="chatBody" placeholder="Say something…" @keyup.enter="sendChat" />
+            <button type="button" class="btn primary" :disabled="chatBusy" @click="sendChat">Send</button>
+          </div>
+          <p v-else-if="authed && roomOffline" class="muted">Room offline — chat send disabled</p>
+          <p v-else class="muted">
+            <button type="button" class="link" @click="loginOpen = true">Login</button>
+            to send chat
+          </p>
+          <p v-if="chatHint" class="hint">{{ chatHint }}</p>
+        </section>
+
+        <!-- Gifts + wallet: only when live + can watch -->
+        <section v-if="roomId.trim() && status && canWatch" class="panel gifts">
+          <div class="panel-head">
+            <h2>Gifts</h2>
+            <span v-if="authed" class="chip balance-chip">balance: {{ balance }}</span>
+          </div>
+          <div v-if="authed" class="row topup">
+            <input v-model.number="topupAmount" type="number" min="1" placeholder="Topup amount" />
+            <button type="button" :disabled="giftBusy" @click="doTopup">Top up (legacy mock)</button>
+            <button type="button" class="ghost" :disabled="giftBusy" @click="refreshBalance">Refresh</button>
+          </div>
+          <div v-if="authed && payProducts.length" class="pay-packs">
+            <p class="muted">Coin packs (pay mock)</p>
+            <div class="gift-bar">
+              <button
+                v-for="p in payProducts"
+                :key="p.id"
+                type="button"
+                class="gift-btn"
+                :disabled="payBusy"
+                @click="buyCoins(p)"
+              >
+                {{ p.title }}
+                <span class="price">{{ p.amount }} {{ p.currency }}</span>
+              </button>
+            </div>
+            <p v-if="payHint" class="hint">{{ payHint }}</p>
+          </div>
+          <div class="gift-bar">
+            <button
+              v-for="g in gifts"
+              :key="g.id"
+              type="button"
+              class="gift-btn"
+              :disabled="giftBusy || !authed"
+              @click="sendGift(g)"
+            >
+              {{ g.name }}
+              <span class="price">{{ g.price }}</span>
+            </button>
+            <p v-if="!gifts.length" class="muted">No gifts in catalog</p>
+          </div>
+          <p v-if="!authed" class="muted">
+            <button type="button" class="link" @click="loginOpen = true">Login</button>
+            to send gifts &amp; top up
+          </p>
+          <p v-if="giftHint" class="hint">{{ giftHint }}</p>
+        </section>
+      </div>
+    </div>
   </main>
 </template>
 
 <style scoped>
 .page {
-  font-family: system-ui, sans-serif;
-  max-width: 800px;
-  margin: 2rem auto;
+  max-width: var(--page-max);
+  margin: 0 auto;
   padding: 0 1rem 3rem;
-  color: #e8e8e8;
+  color: var(--text);
   background: transparent;
 }
-.top {
+
+/* --- Topbar --- */
+.top,
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
   display: flex;
   justify-content: space-between;
-  gap: 1rem;
-  align-items: flex-start;
+  gap: var(--gap);
+  align-items: center;
+  min-height: var(--topbar-h);
+  margin: 0 -1rem 0.75rem;
+  padding: 0.65rem 1rem;
+  background: rgba(10, 10, 16, 0.72);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border-bottom: 1px solid var(--border);
 }
-.top h1 {
-  margin: 0 0 0.25rem;
+
+.brand h1 {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
 }
+
+.logo-mark {
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  box-shadow: 0 0 12px var(--accent-glow);
+  flex-shrink: 0;
+}
+
+.live-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-left: 0.25rem;
+  padding: 0.12rem 0.55rem;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 51, 85, 0.16);
+  border: 1px solid rgba(255, 51, 85, 0.45);
+  color: var(--live);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--live);
+  box-shadow: 0 0 0 0 rgba(255, 51, 85, 0.55);
+  animation: live-pulse 1.4s ease-out infinite;
+}
+
+@keyframes live-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 51, 85, 0.55);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(255, 51, 85, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 51, 85, 0);
+  }
+}
+
+.api-line {
+  margin: 0.15rem 0 0;
+  font-size: var(--fs-xs);
+}
+
 .auth-chip {
   display: flex;
   gap: 0.5rem;
   align-items: center;
   flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
+
+.auth-chip .chip {
+  border-color: var(--border-accent);
+  background: var(--accent-soft);
+}
+
+/* --- Rows / form controls --- */
 .row {
   display: flex;
   gap: 0.5rem;
-  margin: 1rem 0;
+  margin: 0.75rem 0;
   flex-wrap: wrap;
+  align-items: center;
 }
+
+.util-strip {
+  margin: 0.5rem 0 0.75rem;
+}
+
 input {
   flex: 1;
   min-width: 8rem;
-  padding: 0.5rem;
-  border: 1px solid #333;
-  border-radius: 6px;
-  background: #1a1a1a;
-  color: #eee;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text);
 }
+
+input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
 button {
-  padding: 0.5rem 1rem;
-  border: 1px solid #444;
-  border-radius: 6px;
-  background: #2a2a2a;
-  color: #eee;
+  padding: 0.55rem 1rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text);
   cursor: pointer;
+  font-weight: 500;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.12s ease;
 }
+
 button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+button.btn.primary,
+button.primary {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  border: 0;
+  font-weight: 600;
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(200, 80, 255, 0.25);
+}
+
+button.btn.primary:hover:not(:disabled),
+button.primary:hover:not(:disabled) {
+  box-shadow: var(--shadow-glow);
+}
+
 button.ghost {
   background: transparent;
+  border: 1px solid var(--border-strong);
 }
+
+button.ghost:hover:not(:disabled) {
+  border-color: var(--border-accent);
+  background: var(--accent-soft);
+}
+
 button.link {
   background: none;
   border: none;
-  color: #6af;
+  color: var(--accent);
   padding: 0;
   text-decoration: underline;
+  font-weight: 500;
 }
+
+button.danger {
+  background: var(--danger-bg);
+  border-color: rgba(248, 113, 113, 0.4);
+  color: var(--danger);
+}
+
+/* --- Utility text --- */
 .muted {
-  color: #888;
+  color: var(--text-muted);
 }
+
 .err {
-  color: #f66;
+  color: var(--danger);
 }
+
 .hint {
-  color: #5c8;
-  font-size: 0.9rem;
+  color: var(--success);
+  font-size: var(--fs-sm);
 }
+
 .mono {
-  font-family: ui-monospace, monospace;
-  font-size: 0.85rem;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
   word-break: break-all;
-  color: #aaa;
 }
+
+.dim {
+  opacity: 0.55;
+  color: var(--text-dim);
+}
+
+.chip {
+  font-size: var(--fs-sm);
+  padding: 0.2rem 0.6rem;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  border: 1px solid var(--border-accent);
+  color: var(--text);
+}
+
+.balance-chip {
+  color: var(--coin);
+}
+
+/* --- Glass panels --- */
 .panel {
-  margin: 1.25rem 0;
+  margin: 0.85rem 0;
   padding: 1rem;
-  border: 1px solid #2a2a2a;
-  border-radius: 8px;
-  background: #141414;
+  border: var(--glass-border);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  box-shadow: var(--shadow-sm);
 }
+
+.panel.login,
+.panel.privacy {
+  max-width: 420px;
+}
+
 .panel h2 {
   margin: 0;
-  font-size: 1.05rem;
+  font-size: var(--fs-md);
+  font-weight: 650;
 }
+
 .panel-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 0.75rem;
+  gap: 0.5rem;
 }
-.chip {
-  font-size: 0.85rem;
+
+/* --- Watch grid --- */
+.watch-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  margin-top: 0.5rem;
+}
+
+.stage-col,
+.side-col {
+  min-width: 0;
+}
+
+/* --- Stage / player --- */
+.stage {
+  position: relative;
+}
+
+.player {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background: var(--bg-stage);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  box-shadow: var(--shadow-md);
+  max-width: var(--stage-max);
+}
+
+.player-video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  max-width: none;
+  display: block;
+  background: var(--bg-stage);
+}
+
+.room-stats {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--border);
+  font-size: var(--fs-sm);
+  z-index: 2;
+}
+
+.stat-pill,
+.ws-pill {
+  font-size: var(--fs-xs);
+}
+
+.like-btn {
   padding: 0.2rem 0.55rem;
-  border-radius: 999px;
-  background: #222;
-  border: 1px solid #333;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.06);
+  font-size: var(--fs-sm);
 }
+
+.like-btn:not(:disabled):hover {
+  border-color: var(--accent-hot);
+  color: var(--accent-hot);
+}
+
+.gift-overlay {
+  position: absolute;
+  top: -2.6rem;
+  right: 0;
+  padding: 0.35rem 0.7rem;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 61, 154, 0.18);
+  border: 1px solid rgba(255, 61, 154, 0.45);
+  color: var(--accent-hot);
+  font-weight: 650;
+  font-size: var(--fs-sm);
+  box-shadow: 0 0 18px rgba(255, 61, 154, 0.35);
+  animation: gift-fade 1.8s ease-out forwards;
+  pointer-events: none;
+}
+
+@keyframes gift-fade {
+  0% {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  15% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.hls-details {
+  margin-top: 0.45rem;
+  max-width: var(--stage-max);
+}
+
+.hls-details summary {
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+
+.hls-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.status-line {
+  margin: 0.5rem 0;
+  font-size: var(--fs-sm);
+}
+
+/* --- Chat bubbles --- */
 .msg-list {
   list-style: none;
   margin: 0 0 0.75rem;
   padding: 0;
-  max-height: 180px;
+  max-height: 220px;
+  min-height: 120px;
   overflow-y: auto;
 }
+
 .msg-list li {
-  padding: 0.25rem 0;
-  border-bottom: 1px solid #222;
-  font-size: 0.9rem;
+  padding: 6px 10px;
+  margin: 4px 0;
+  border: none;
+  border-radius: 10px 10px 10px 4px;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: var(--fs-sm);
 }
+
+.msg-list li.empty-msg {
+  background: transparent;
+  text-align: center;
+  padding: 1.25rem 0.5rem;
+  color: var(--text-dim);
+}
+
 .msg-list strong {
-  margin-right: 0.5rem;
-  color: #9cf;
+  margin-right: 0.45rem;
+  color: var(--chat-name);
+  font-weight: 600;
 }
+
+.composer {
+  margin-bottom: 0;
+}
+
+/* --- Gifts --- */
 .gift-bar {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
 }
+
 .gift-btn {
   display: inline-flex;
   flex-direction: column;
   align-items: center;
   min-width: 4.5rem;
   padding: 0.55rem 0.75rem;
-  background: #1e1e28;
-  border-color: #3a3a55;
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, rgba(200, 80, 255, 0.12), transparent);
+  border: 1px solid var(--border-accent);
+  color: var(--text);
 }
+
+.gift-btn:hover:not(:disabled) {
+  box-shadow: var(--shadow-glow);
+  transform: translateY(-1px);
+}
+
 .gift-btn .price {
-  font-size: 0.75rem;
-  color: #fc6;
+  font-size: var(--fs-xs);
+  color: var(--coin);
   margin-top: 0.15rem;
+  font-weight: 600;
 }
+
+.pay-packs {
+  margin-bottom: 0.75rem;
+}
+
+.pay-packs .gift-btn {
+  min-height: 3.4rem;
+  justify-content: center;
+}
+
+/* --- Ended / offline --- */
 .ended {
-  margin: 2rem 0;
-  padding: 2rem 1rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  min-height: min(48vw, 280px);
+  margin: 0.5rem 0;
+  padding: 2rem 1.25rem;
   text-align: center;
-  background: #1a1a1a;
-  border-radius: 8px;
-  border: 1px solid #333;
+  background: var(--bg-panel-solid);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  max-width: var(--stage-max);
 }
+
+.ended.offline {
+  border-color: rgba(251, 191, 36, 0.25);
+  background: linear-gradient(180deg, rgba(251, 191, 36, 0.06), var(--bg-panel-solid));
+}
+
 .ended-title {
-  font-size: 1.5rem;
-  font-weight: 600;
-  margin: 0 0 0.25rem;
+  font-size: var(--fs-xl);
+  font-weight: 650;
+  margin: 0 0 0.35rem;
+  color: var(--text);
 }
+
 .ended-sub {
-  color: #888;
+  color: var(--text-muted);
   margin: 0 0 0.75rem;
+  font-size: var(--fs-sm);
 }
+
+/* --- PK / creator / checks / export --- */
 .pk {
-  border-color: #5a4a20;
-  background: #1f1a10;
+  border-color: rgba(251, 191, 36, 0.28);
+  background: linear-gradient(180deg, rgba(251, 191, 36, 0.08), var(--bg-panel));
 }
+
 .pk-score {
-  font-size: 1.25rem;
-  font-weight: 600;
+  font-size: var(--fs-lg);
+  font-weight: 650;
   margin: 0.25rem 0 0;
-  color: #fc6;
+  color: var(--coin);
 }
+
 .check {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   margin: 0.5rem 0;
-  font-size: 0.95rem;
+  font-size: var(--fs-sm);
   cursor: pointer;
 }
+
 .check input {
   flex: none;
   width: auto;
   min-width: 0;
+  accent-color: var(--accent);
 }
+
+.check input:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  border-radius: 3px;
+}
+
 .legal-links a {
-  color: #6af;
+  color: var(--accent);
 }
-button.danger {
-  background: #3a1a1a;
-  border-color: #833;
-  color: #f99;
-}
+
 .export-box {
   width: 100%;
   margin-top: 0.75rem;
-  padding: 0.5rem;
-  border: 1px solid #333;
-  border-radius: 6px;
-  background: #0d0d0d;
-  color: #ccc;
-  font-family: ui-monospace, monospace;
-  font-size: 0.75rem;
-  box-sizing: border-box;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
   resize: vertical;
+}
+
+/* --- Desktop ≥900px --- */
+@media (min-width: 900px) {
+  .watch-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) var(--chat-w);
+    grid-template-rows: auto 1fr;
+    gap: var(--gap-lg);
+    align-items: start;
+  }
+
+  .stage-col {
+    grid-column: 1;
+  }
+
+  .side-col {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap);
+    position: sticky;
+    top: calc(var(--topbar-h) + 12px);
+    max-height: calc(100svh - var(--topbar-h) - 24px);
+  }
+
+  .side-col .chat {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    margin: 0;
+  }
+
+  .side-col .msg-list {
+    flex: 1;
+    max-height: none;
+    min-height: 280px;
+  }
+
+  .side-col .gifts {
+    margin: 0;
+    flex-shrink: 0;
+  }
+
+  .ended {
+    min-height: min(42vw, 360px);
+  }
+
+  .player {
+    max-width: none;
+  }
 }
 </style>
