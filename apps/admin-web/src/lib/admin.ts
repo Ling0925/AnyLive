@@ -50,22 +50,66 @@ export function isAdminForbidden(status: number): boolean {
 /**
  * Operator-facing copy when login succeeded but admin actions are locked.
  * Bootstrap only works while admin_users is empty.
+ * When bootstrap_closed (grant 403 after OTP), keep the same actionable paths.
  */
 export function adminGateMessage(opts?: {
   apiBase?: string
   email?: string
+  /** When true, prefix notes that first-boot grant was rejected (admin_users non-empty). */
+  bootstrapClosed?: boolean
 }): string {
   const base = opts?.apiBase?.trim() || 'http://localhost:8088'
   const email = opts?.email?.trim()
   const emailHint = email
     ? `当前账号 ${email} 不是管理员。`
     : '当前账号不是管理员。'
+  const closedHint = opts?.bootstrapClosed
+    ? '自助 bootstrap 已关闭（admin_users 非空，POST /admin/grant 返回 403）。'
+    : '自助 bootstrap 仅在 admin_users 为空时可用。'
+  const seedEmail = email || '<email>'
   return (
-    `${emailHint}自助 bootstrap 仅在 admin_users 为空时可用。` +
-    `本地可：① 用已有管理员邮箱登录（如 dogfood 种子 / DOGFOOD_ADMIN_EMAIL）；` +
-    `② 运行 scripts/seed-admin-local.sh ${email ? email : '<email>'}；` +
+    `${emailHint}${closedHint}` +
+    `本地可：① 用已有管理员邮箱登录（dogfood 种子 / DOGFOOD_ADMIN_EMAIL）；` +
+    `② 运行 ./scripts/seed-admin-local.sh ${seedEmail}；` +
     `③ docker exec 向 admin_users 插入 user_id。API ${base}`
   )
+}
+
+/**
+ * Compact dashboard preflight hints for dogfood demos.
+ * Informational only — never claims the 15min walkthrough is complete.
+ */
+export type DemoPrepHints = {
+  adminOk: boolean
+  giftCount: number
+  giftSeedCmd: string
+  runbookPath: string
+  lines: string[]
+}
+
+export function demoPrepHints(opts: {
+  isAdmin: boolean | null
+  giftCount: number
+}): DemoPrepHints {
+  const giftSeedCmd = './scripts/dogfood-gift-seed.sh'
+  const runbookPath = 'docs/runbooks/admin-ops-15min-demo.md'
+  const adminOk = opts.isAdmin === true
+  const giftCount = Math.max(0, Number(opts.giftCount) || 0)
+  const lines: string[] = []
+  if (adminOk) {
+    lines.push('Admin 会话 OK')
+  } else if (opts.isAdmin === false) {
+    lines.push('Admin 未授权 — 见顶部 gate / seed-admin-local.sh')
+  } else {
+    lines.push('Admin 权限检测中…')
+  }
+  lines.push(
+    giftCount > 0
+      ? `礼物目录 ${giftCount} 项（可再跑 seed 刷新固定 Rose/Heart/Rocket）`
+      : `礼物目录为空 — 运行 ${giftSeedCmd}（需 DOGFOOD_ADMIN_EMAIL 或已 seed admin）`,
+  )
+  lines.push(`15min 走查：${runbookPath}（仅人工签字关闭 V-AD-1）`)
+  return { adminOk, giftCount, giftSeedCmd, runbookPath, lines }
 }
 
 /** Sidebar nav keys used by the ops shell. */

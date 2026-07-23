@@ -13,6 +13,7 @@ import {
   classifyAdminGrant,
   countByStatus,
   createRoomPath,
+  demoPrepHints,
   forceCloseRoomPath,
   giftsListPath,
   grantAdminPath,
@@ -140,9 +141,16 @@ const closedCount = computed(() => countByStatus(rooms.value, 'closed'))
 const reportOpen = computed(() => openReportCount(reports.value))
 const pageTitle = computed(() => ADMIN_NAV.find((n) => n.key === nav.value)?.label ?? '运营后台')
 const avatarLetter = computed(() => (displayName.value || 'A').slice(0, 1).toUpperCase())
+/** Set when POST /admin/grant returns bootstrap_closed so gate copy is more specific. */
+const bootstrapClosed = ref(false)
+
 const adminGateHint = computed(() =>
   isAdmin.value === false
-    ? adminGateMessage({ apiBase, email: email.value || displayName.value })
+    ? adminGateMessage({
+        apiBase,
+        email: email.value || displayName.value,
+        bootstrapClosed: bootstrapClosed.value,
+      })
     : '',
 )
 const sessionRoleLabel = computed(() => {
@@ -150,6 +158,26 @@ const sessionRoleLabel = computed(() => {
   if (isAdmin.value === false) return '非管理员'
   return isAuthed.value ? '检测中…' : '—'
 })
+const prepHints = computed(() =>
+  demoPrepHints({ isAdmin: isAdmin.value, giftCount: gifts.value.length }),
+)
+const giftSeedCmd = './scripts/dogfood-gift-seed.sh'
+const giftSeedCopyHint = ref('')
+
+async function copyGiftSeedCmd() {
+  giftSeedCopyHint.value = ''
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(giftSeedCmd)
+      giftSeedCopyHint.value = '已复制 seed 命令'
+      return
+    }
+  } catch {
+    // fall through
+  }
+  window.prompt('复制礼物 seed 命令', giftSeedCmd)
+  giftSeedCopyHint.value = 'seed 命令已就绪'
+}
 
 function authHeaders(json = true): HeadersInit {
   const h: Record<string, string> = {}
@@ -300,6 +328,9 @@ async function refreshLists() {
       audit.value = []
     }
     await Promise.all(tasks)
+    if (isAdmin.value === true) {
+      bootstrapClosed.value = false
+    }
     if (isAdmin.value === false && !error.value) {
       error.value = adminGateHint.value
     }
@@ -478,12 +509,19 @@ async function tryBootstrapAdmin(id: string) {
     const outcome = classifyAdminGrant(res.status, bodyText)
     if (outcome === 'granted') {
       isAdmin.value = true
+      bootstrapClosed.value = false
       notice.value = '已获得管理员权限（bootstrap 或授权成功）'
       return
     }
     if (outcome === 'bootstrap_closed' || outcome === 'conflict') {
       // Privilege still unknown until audit/reports probe in refreshLists.
+      // Flag closed bootstrap so admin-gate copy is actionable when probe fails.
+      bootstrapClosed.value = true
       isAdmin.value = null
+      notice.value =
+        outcome === 'conflict'
+          ? '管理员 bootstrap 已被占用，正在检测当前账号权限…'
+          : '自助 bootstrap 已关闭（admin_users 非空），正在检测当前账号权限…'
       return
     }
     // network-ish error: leave isAdmin unknown
@@ -497,6 +535,7 @@ function logout() {
   displayName.value = ''
   userId.value = ''
   isAdmin.value = null
+  bootstrapClosed.value = false
   notice.value = '已退出登录'
   cancelEditGift()
   closePreview()
@@ -1108,6 +1147,40 @@ onMounted(() => {
           </div>
 
           <section
+            v-if="isAdmin === true"
+            class="panel"
+            style="margin-bottom: 1rem"
+            data-testid="demo-prep"
+          >
+            <div class="panel-head">
+              <h2>演示预检（信息提示）</h2>
+            </div>
+            <p class="panel-desc">
+              仅预检提示，不代表 15 分钟走查完成；V-AD-1 须人工签字关闭。
+            </p>
+            <ul class="muted" style="margin: 0.25rem 0 0.5rem; padding-left: 1.2rem; font-size: 0.88rem">
+              <li v-for="(line, i) in prepHints.lines" :key="i">{{ line }}</li>
+            </ul>
+            <div class="row" style="gap: 0.5rem; flex-wrap: wrap; align-items: center">
+              <code class="mono" data-testid="demo-prep-gift-seed">{{ prepHints.giftSeedCmd }}</code>
+              <button
+                type="button"
+                class="btn sm"
+                data-testid="demo-prep-copy-gift-seed"
+                @click="copyGiftSeedCmd"
+              >
+                复制 seed 命令
+              </button>
+              <span class="dim mono" style="font-size: 0.78rem" data-testid="demo-prep-runbook">
+                {{ prepHints.runbookPath }}
+              </span>
+            </div>
+            <p v-if="giftSeedCopyHint" class="hint" data-testid="demo-prep-copy-hint">
+              {{ giftSeedCopyHint }}
+            </p>
+          </section>
+
+          <section
             v-if="isAuthed"
             class="panel"
             style="margin-bottom: 1rem"
@@ -1635,6 +1708,27 @@ onMounted(() => {
           <p class="panel-desc">
             维护礼物目录（名称、价格、启用状态）。公开接口仅返回 active 礼物。编辑时 POST
             同一接口并带 <code class="mono">id</code> 更新。
+          </p>
+          <p class="hint" data-testid="gifts-seed-hint" style="margin-top: 0">
+            一键目录（宿主机）：
+            <code class="mono">./scripts/dogfood-gift-seed.sh</code>
+            — Rose/Heart/Rocket 固定 UUID，可重复跑；需 admin（
+            <code class="mono">DOGFOOD_ADMIN_EMAIL</code>
+            或
+            <code class="mono">seed-admin-local.sh</code>
+            ）。本面板不假装已 seed。
+            <button
+              type="button"
+              class="btn sm"
+              style="margin-left: 0.35rem"
+              data-testid="gifts-copy-seed-cmd"
+              @click="copyGiftSeedCmd"
+            >
+              复制命令
+            </button>
+            <span v-if="giftSeedCopyHint" class="dim" style="margin-left: 0.35rem">{{
+              giftSeedCopyHint
+            }}</span>
           </p>
           <div class="row" data-testid="gift-form">
             <label class="field">

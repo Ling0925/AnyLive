@@ -12,6 +12,7 @@ import {
   classifyAdminGrant,
   countByStatus,
   createRoomPath,
+  demoPrepHints,
   forceCloseRoomPath,
   giftsListPath,
   grantAdminPath,
@@ -73,6 +74,36 @@ describe('admin helpers', () => {
     expect(msg).toContain('viewer@example.com')
     expect(msg).toContain('seed-admin-local.sh')
     expect(msg).toContain('admin_users')
+    expect(msg).toContain('DOGFOOD_ADMIN_EMAIL')
+    expect(msg).toContain('./scripts/seed-admin-local.sh viewer@example.com')
+  })
+
+  it('explains closed bootstrap with actionable seed paths', () => {
+    const msg = adminGateMessage({
+      apiBase: 'http://localhost:8088',
+      email: 'ops@example.com',
+      bootstrapClosed: true,
+    })
+    expect(msg).toContain('bootstrap 已关闭')
+    expect(msg).toContain('admin_users')
+    expect(msg).toContain('seed-admin-local.sh ops@example.com')
+    expect(msg).toContain('DOGFOOD_ADMIN_EMAIL')
+  })
+
+  it('builds demo prep hints without claiming walkthrough complete', () => {
+    const ok = demoPrepHints({ isAdmin: true, giftCount: 3 })
+    expect(ok.adminOk).toBe(true)
+    expect(ok.giftCount).toBe(3)
+    expect(ok.giftSeedCmd).toContain('dogfood-gift-seed.sh')
+    expect(ok.runbookPath).toContain('admin-ops-15min-demo.md')
+    expect(ok.lines.some((l) => l.includes('Admin 会话 OK'))).toBe(true)
+    expect(ok.lines.some((l) => l.includes('3'))).toBe(true)
+    expect(ok.lines.join(' ')).not.toMatch(/walkthrough complete|演示完成|V-AD-1 done/i)
+
+    const empty = demoPrepHints({ isAdmin: false, giftCount: 0 })
+    expect(empty.adminOk).toBe(false)
+    expect(empty.lines.some((l) => l.includes('未授权'))).toBe(true)
+    expect(empty.lines.some((l) => l.includes('dogfood-gift-seed'))).toBe(true)
   })
 
   it('exposes sidebar nav items', () => {
