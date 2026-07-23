@@ -153,6 +153,8 @@ fn pay_modes_for_channel(channel: PayChannel) -> Vec<String> {
         PayChannel::Jeepay => vec!["qrcode".into(), "redirect".into(), "jsapi".into()],
         PayChannel::Epay => vec!["redirect".into(), "qrcode".into()],
         PayChannel::Tokenpay => vec!["qrcode".into()],
+        PayChannel::Stripe => vec!["redirect".into()],
+        PayChannel::Iap => vec!["jsapi".into()],
     }
 }
 
@@ -204,6 +206,9 @@ pub async fn create_pay_order(
     let channel = PayChannel::parse(&body.channel).ok_or_else(|| {
         ApiError(anylive_common::AppError::validation("unknown pay channel"))
     })?;
+    if channel != PayChannel::Mock {
+        state.features.require_real_pay().map_err(ApiError::from)?;
+    }
     let provider = state.pay_registry.get(channel).ok_or_else(|| {
         ApiError(anylive_common::AppError::new(
             anylive_common::ErrorCode::ForbiddenPolicy,
@@ -591,7 +596,7 @@ pub async fn pay_webhook_mock(
     handle_pay_notify(state, PayChannel::Mock, headers, body).await
 }
 
-/// POST /api/v1/webhooks/pay/jeepay — stub until adapter lands.
+/// POST /api/v1/webhooks/pay/jeepay — Jeepay HMAC sandbox notify.
 pub async fn pay_webhook_jeepay(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -600,7 +605,7 @@ pub async fn pay_webhook_jeepay(
     handle_pay_notify(state, PayChannel::Jeepay, headers, body).await
 }
 
-/// POST /api/v1/webhooks/pay/epay — stub until adapter lands.
+/// POST /api/v1/webhooks/pay/epay — EPay HMAC sandbox notify.
 pub async fn pay_webhook_epay(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -609,13 +614,31 @@ pub async fn pay_webhook_epay(
     handle_pay_notify(state, PayChannel::Epay, headers, body).await
 }
 
-/// POST /api/v1/webhooks/pay/tokenpay — stub until adapter lands.
+/// POST /api/v1/webhooks/pay/tokenpay — TokenPay HMAC sandbox notify.
 pub async fn pay_webhook_tokenpay(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<StatusCode, ApiError> {
     handle_pay_notify(state, PayChannel::Tokenpay, headers, body).await
+}
+
+/// POST /api/v1/webhooks/pay/stripe — Stripe Checkout / PaymentIntent notify.
+pub async fn pay_webhook_stripe(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<StatusCode, ApiError> {
+    handle_pay_notify(state, PayChannel::Stripe, headers, body).await
+}
+
+/// POST /api/v1/webhooks/pay/iap — App Store / Play sandbox receipt notify.
+pub async fn pay_webhook_iap(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<StatusCode, ApiError> {
+    handle_pay_notify(state, PayChannel::Iap, headers, body).await
 }
 
 #[cfg(test)]
@@ -863,5 +886,154 @@ mod tests {
             .unwrap();
         let wallet = body_json(res).await;
         assert_eq!(wallet["balance"].as_i64().unwrap(), coins);
+    }
+
+    #[tokio::test]
+    async fn stripe_and_iap_webhook_credit_wallet() {
+        use anylive_pay::{IapPayProvider, StripePayProvider};
+
+        let state = AppState::dev_ready().await;
+        let app = crate::build_app_with_state(state.clone());
+        let token = login_token(app.clone(), "stripe-iap@example.com").await;
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/pay/channels")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let channels = body_json(res).await;
+        let ids: Vec<&str> = channels["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["id"].as_str().unwrap())
+            .collect();
+        assert!(ids.contains(&"stripe"));
+        assert!(ids.contains(&"iap"));
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/pay/products")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let products = body_json(res).await;
+        let product_id = products["items"][0]["id"].as_str().unwrap().to_string();
+        let coins = products["items"][0]["coins"].as_i64().unwrap();
+        let amount = products["items"][0]["amount"].as_str().unwrap().to_string();
+
+        // Stripe order + sandbox webhook
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/pay/orders")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::from(format!(
+                        r#"{{"product_id":"{product_id}","channel":"stripe","client_request_id":"stripe-1"}}"#
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(res.status().is_success(), "{:?}", body_json(res).await);
+        let order = body_json(res).await;
+        let order_id = order["id"].as_str().unwrap().to_string();
+        assert_eq!(order["channel"], "stripe");
+        assert!(order["pay_url"].as_str().is_some());
+
+        let stripe = StripePayProvider::new(
+            "anylive-dev-pay-mock-secret-change-me",
+            "http://localhost:8088",
+            "",
+        );
+        let sig = stripe.sign_order(Uuid::parse_str(&order_id).unwrap());
+        let body = serde_json::json!({
+            "order_id": order_id,
+            "sig": sig,
+            "amount": amount,
+        });
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/webhooks/pay/stripe")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(res.status().is_success());
+
+        // IAP order + receipt webhook
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/pay/orders")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::from(format!(
+                        r#"{{"product_id":"{product_id}","channel":"iap","client_request_id":"iap-1"}}"#
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(res.status().is_success(), "{:?}", body_json(res).await);
+        let order = body_json(res).await;
+        let iap_order_id = order["id"].as_str().unwrap().to_string();
+        assert_eq!(order["channel"], "iap");
+
+        let iap = IapPayProvider::new("anylive-dev-pay-mock-secret-change-me");
+        let sig = iap.sign_order(Uuid::parse_str(&iap_order_id).unwrap());
+        let body = serde_json::json!({
+            "order_id": iap_order_id,
+            "sig": sig,
+            "receipt": "sandbox-receipt-token",
+            "transaction_id": "tx-iap-1",
+            "amount": amount,
+        });
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/webhooks/pay/iap")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(res.status().is_success());
+
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/wallet")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let wallet = body_json(res).await;
+        assert_eq!(wallet["balance"].as_i64().unwrap(), coins * 2);
     }
 }

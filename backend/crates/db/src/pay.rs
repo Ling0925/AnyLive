@@ -407,6 +407,29 @@ impl PostgresPayStore {
             Err(_) => false,
         }
     }
+
+    /// Mark pending/paying orders past `expires_at` as `expired`.
+    pub async fn expire_stale_orders(&self, now: chrono::DateTime<Utc>) -> u64 {
+        let res = sqlx::query(
+            r#"
+            UPDATE pay_orders
+            SET status = 'expired', updated_at = $1
+            WHERE status IN ('pending', 'paying')
+              AND expires_at IS NOT NULL
+              AND expires_at < $1
+            "#,
+        )
+        .bind(now)
+        .execute(&self.pool)
+        .await;
+        match res {
+            Ok(r) => r.rows_affected(),
+            Err(err) => {
+                tracing::error!(error = %err, "expire_stale_orders failed");
+                0
+            }
+        }
+    }
 }
 
 #[derive(sqlx::FromRow)]
@@ -625,6 +648,13 @@ impl PayStore for AnyPayStore {
                 s.record_webhook_event(channel, provider_event_id, order_id)
                     .await
             }
+        }
+    }
+
+    async fn expire_stale_orders(&self, now: chrono::DateTime<Utc>) -> u64 {
+        match self {
+            Self::Memory(s) => s.expire_stale_orders(now).await,
+            Self::Postgres(s) => s.expire_stale_orders(now).await,
         }
     }
 }
