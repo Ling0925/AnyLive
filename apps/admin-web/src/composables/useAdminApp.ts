@@ -460,6 +460,9 @@ watch([previewVideoEl, previewHlsUrl], ([el, url]) => {
 })
 
 onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onPreviewKeydown)
+  document.body.style.overflow = ''
+
   teardownPreviewPlayer()
   if (resendTimer) clearInterval(resendTimer)
 })
@@ -480,11 +483,6 @@ async function previewRoom(room: { id: string; status: string }) {
     previewError.value = t('rooms.notLive')
     previewRoomId.value = room.id
     previewHlsUrl.value = ''
-    await nextTick()
-    document.querySelector('[data-testid="room-preview-panel"]')?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'nearest',
-    })
     return
   }
   previewBusy.value = true
@@ -496,10 +494,6 @@ async function previewRoom(room: { id: string; status: string }) {
     const play = await res.json()
     previewHlsUrl.value = buildHls(play, room.id)
     await nextTick()
-    document.querySelector('[data-testid="room-preview-panel"]')?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'nearest',
-    })
   } catch (e) {
     previewError.value = String(e)
   } finally {
@@ -513,6 +507,24 @@ function closePreview() {
   previewHlsUrl.value = ''
   previewError.value = ''
 }
+
+function onPreviewKeydown(ev: KeyboardEvent) {
+  if (ev.key === 'Escape' && previewRoomId.value) {
+    ev.preventDefault()
+    closePreview()
+  }
+}
+
+watch(previewRoomId, (id) => {
+  if (typeof document === 'undefined') return
+  if (id) {
+    document.addEventListener('keydown', onPreviewKeydown)
+    document.body.style.overflow = 'hidden'
+  } else {
+    document.removeEventListener('keydown', onPreviewKeydown)
+    document.body.style.overflow = ''
+  }
+})
 
 function useRoomId(id: string) {
   roomIdInput.value = id

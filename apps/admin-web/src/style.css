@@ -1132,51 +1132,90 @@ pre.mono {
   white-space: nowrap;
 }
 
-/* Preview */
-.preview {
-  margin-top: 0.9rem;
-  padding-top: 0.9rem;
-  border-top: 1px solid var(--border);
-  min-width: 0;
-}
-
-/* Docked above rooms list: stays in the filter/meta band, not under the table. */
-.preview.is-docked {
-  margin: 0 0 0.85rem;
-  padding: 0.85rem 0.95rem;
+/* Preview + modal */
+.preview-video {
+  width: 100%;
+  max-width: 100%;
+  max-height: min(62vh, 520px);
+  background: #000;
+  border-radius: 10px;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-elevated);
-  box-shadow: var(--shadow-sm);
+  display: block;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
 }
 
-.preview.is-docked .panel-head {
-  margin-bottom: 0.55rem;
-}
-
-.preview.is-docked .preview-video {
-  max-width: min(640px, 100%);
-  max-height: min(40vh, 360px);
+.preview-url {
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  margin: 0 0 0.65rem;
+  font-size: 0.78rem;
 }
 
 table.data tr.is-previewing td {
   background: var(--primary-soft);
 }
 
-.preview-video {
-  width: 100%;
-  max-width: min(720px, 100%);
-  background: #000;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  display: block;
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+  background: rgba(8, 6, 5, 0.62);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  overflow: auto;
 }
 
-.preview-url {
-  word-break: break-all;
-  overflow-wrap: anywhere;
-  margin: 0.45rem 0;
-  font-size: 0.78rem;
+.modal-dialog {
+  width: min(760px, 100%);
+  max-height: min(90vh, 900px);
+  overflow: auto;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  padding: 1rem 1.1rem 1.15rem;
+  min-width: 0;
+}
+
+.modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+  min-width: 0;
+}
+
+.modal-title {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.modal-title h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 620;
+}
+
+.modal-body {
+  min-width: 0;
+}
+
+.preview-modal .preview-video {
+  max-width: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-overlay {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
 }
 
 /* ---------- Login ---------- */

@@ -964,21 +964,6 @@ void previewVideoEl
             }}</span>
           </div>
 
-          <!-- HLS preview docks above the list so ops don't scroll past 100+ rows. -->
-          <div v-if="previewRoomId" class="preview is-docked" data-testid="room-preview-panel">
-            <div class="panel-head">
-              <h2>{{ t('rooms.previewTitle') }} · {{ shortId(previewRoomId, 12) }}</h2>
-              <button type="button" class="btn sm ghost" data-testid="room-preview-close" @click="closePreview">
-                {{ t('common.close') }}
-              </button>
-            </div>
-            <p v-if="previewError" class="flash err">{{ previewError }}</p>
-            <p v-if="previewHlsUrl" class="preview-url mono">
-              <a :href="previewHlsUrl" target="_blank" rel="noopener">{{ previewHlsUrl }}</a>
-            </p>
-            <video v-if="previewHlsUrl" ref="previewVideoEl" controls playsinline class="preview-video" />
-          </div>
-
           <div class="table-wrap is-dense" v-if="pagedRooms.length" data-testid="rooms-table">
             <table class="data data-rooms">
               <thead>
@@ -1807,4 +1792,55 @@ void previewVideoEl
       </div>
     </div>
   </div>
+
+  <!-- Room HLS preview modal (above list, doesn't bury player under rows) -->
+  <Teleport to="body">
+    <div
+      v-if="previewRoomId"
+      class="modal-overlay"
+      data-testid="room-preview-panel"
+      role="presentation"
+      @click.self="closePreview"
+    >
+      <div
+        class="modal-dialog preview-modal"
+        role="dialog"
+        aria-modal="true"
+        :aria-label="t('rooms.previewTitle')"
+        data-testid="room-preview-dialog"
+        @keydown.escape.prevent="closePreview"
+      >
+        <div class="modal-head">
+          <div class="modal-title">
+            <h2>{{ t('rooms.previewTitle') }}</h2>
+            <span class="mono dim">{{ shortId(previewRoomId, 12) }}</span>
+          </div>
+          <button
+            type="button"
+            class="btn sm ghost"
+            data-testid="room-preview-close"
+            @click="closePreview"
+          >
+            {{ t('common.close') }}
+          </button>
+        </div>
+        <div class="modal-body">
+          <p v-if="previewBusy" class="hint">{{ t('common.loading') }}</p>
+          <p v-if="previewError" class="flash err">{{ previewError }}</p>
+          <p v-if="previewHlsUrl" class="preview-url mono">
+            <a :href="previewHlsUrl" target="_blank" rel="noopener">{{ previewHlsUrl }}</a>
+          </p>
+          <video
+            v-if="previewHlsUrl"
+            ref="previewVideoEl"
+            controls
+            playsinline
+            autoplay
+            class="preview-video"
+          />
+        </div>
+      </div>
+    </div>
+  </Teleport>
+
 </template>
