@@ -10,6 +10,7 @@ import {
   auditPath,
   authErrorMessage,
   banUserPath,
+  bannedUsersPath,
   buildHls,
   canAccessModule,
   classifyAdminGrant,
@@ -45,7 +46,10 @@ import {
   saveAdminSession,
   shortId,
   tokenRefreshPath,
+  unbanUserPath,
   unmuteUserPath,
+  userModerationPath,
+  mutedUsersPath,
   walletReconcilePath,
   payExpireOrdersPath,
   metricsPath,
@@ -127,6 +131,7 @@ describe('admin helpers', () => {
       'rooms',
       'reports',
       'gifts',
+      'users',
       'moderation',
       'audit',
     ])
@@ -219,9 +224,14 @@ describe('api path helpers', () => {
 
   it('exposes admin action paths', () => {
     expect(banUserPath()).toBe('/api/v1/admin/ban')
+    expect(unbanUserPath()).toBe('/api/v1/admin/unban')
     expect(muteUserPath()).toBe('/api/v1/admin/mute')
     expect(unmuteUserPath()).toBe('/api/v1/admin/unmute')
     expect(forceCloseRoomPath()).toBe('/api/v1/admin/rooms/force-close')
+    expect(bannedUsersPath()).toBe('/api/v1/admin/users/banned')
+    expect(mutedUsersPath()).toBe('/api/v1/admin/users/muted')
+    expect(userModerationPath('u1')).toBe('/api/v1/admin/users/u1/moderation')
+    expect(userModerationPath('/u1/')).toBe('/api/v1/admin/users/u1/moderation')
     expect(auditPath()).toBe('/api/v1/admin/audit')
     expect(grantAdminPath()).toBe('/api/v1/admin/grant')
     expect(roomsPath()).toBe('/api/v1/rooms')

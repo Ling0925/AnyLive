@@ -141,12 +141,6 @@ pub struct ResetPasswordResponse {
     pub must_change_password: bool,
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
-pub struct UnbanUserBody {
-    pub user_id: String,
-    #[serde(default)]
-    pub reason: Option<String>,
-}
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct RevokeSessionsBody {
@@ -447,32 +441,6 @@ pub async fn admin_revoke_sessions(
     }))
 }
 
-/// Unban a user (admin).
-#[utoipa::path(
-    post,
-    path = "/api/v1/admin/unban",
-    tag = "admin",
-    security(("bearerAuth" = [])),
-    request_body = UnbanUserBody,
-    responses((status = 204))
-)]
-pub async fn unban_user(
-    State(state): State<Arc<AppState>>,
-    user: AuthUser,
-    Json(body): Json<UnbanUserBody>,
-) -> Result<StatusCode, ApiError> {
-    let target = parse_user_id(&body.user_id)?;
-    state
-        .moderation
-        .unban_user(
-            user.user_id,
-            target,
-            body.reason.unwrap_or_else(|| "appeal".into()),
-        )
-        .await
-        .map_err(ApiError::from)?;
-    Ok(StatusCode::NO_CONTENT)
-}
 
 fn parse_user_id(raw: &str) -> Result<UserId, ApiError> {
     let id = Uuid::parse_str(raw.trim())

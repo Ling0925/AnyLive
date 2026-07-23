@@ -54,6 +54,9 @@ import {
   payExpireOrdersPath,
   metricsPath,
   analyticsSummaryPath,
+  bannedUsersPath,
+  mutedUsersPath,
+  userModerationPath,
   type AdminNavKey,
   type PublishInfo,
 } from './lib/admin'
@@ -187,6 +190,20 @@ const createEmail = ref('')
 const createPassword = ref('')
 const createBusy = ref(false)
 const tempPasswordNotice = ref('')
+const unbanUserIdInput = ref('')
+const lookupUserId = ref('')
+const lookupBusy = ref(false)
+const lookupStatus = ref<{
+  user_id: string
+  banned: boolean
+  muted: boolean
+  ban_reason: string | null
+  mute_reason: string | null
+  banned_at: string | null
+  muted_at: string | null
+} | null>(null)
+const bannedUsers = ref<Array<{ user_id: string; reason: string; created_at: string }>>([])
+const mutedUsers = ref<Array<{ user_id: string; reason: string; created_at: string }>>([])
 
 const isAuthed = computed(() => Boolean(accessToken.value))
 const liveCount = computed(() => countByStatus(rooms.value, 'live'))
@@ -364,6 +381,7 @@ function go(key: AdminNavKey) {
   error.value = ''
   if (key === 'users' && accessToken.value) {
     void loadUsers()
+    void loadModerationLists()
   }
 }
 
@@ -465,11 +483,13 @@ async function refreshLists() {
   try {
     const tasks: Promise<void>[] = [loadRooms(), loadGifts()]
     if (isAuthed.value) {
-      tasks.push(loadReports(), loadAudit(), loadUsers())
+      tasks.push(loadReports(), loadAudit(), loadUsers(), loadModerationLists())
     } else {
       reports.value = []
       audit.value = []
       usersList.value = []
+      bannedUsers.value = []
+      mutedUsers.value = []
     }
     await Promise.all(tasks)
     if (isAdmin.value === true) {
@@ -1061,13 +1081,97 @@ async function banUser() {
     if (res.status !== 204) throw new Error(`ban ${res.status}`)
     notice.value = t('moderation.banned', { id: shortId(id) })
     userIdInput.value = ''
-    await loadAudit()
-    await loadUsers()
+    await Promise.all([loadAudit(), loadUsers(), loadModerationLists()])
   } catch (e) {
     error.value = String(e)
   } finally {
     actionBusy.value = false
   }
+}
+
+async function loadBannedUsers() {
+  if (!accessToken.value) {
+    bannedUsers.value = []
+    return
+  }
+  const res = await apiFetch(apiUrl(apiBase, bannedUsersPath()), { headers: authHeaders(false) })
+  if (isAdminForbidden(res.status)) {
+    isAdmin.value = false
+    bannedUsers.value = []
+    return
+  }
+  if (!res.ok) throw new Error(`banned users ${res.status}`)
+  const data = await res.json()
+  bannedUsers.value = data.items ?? []
+  if (isAdmin.value !== true) isAdmin.value = true
+}
+
+async function loadMutedUsers() {
+  if (!accessToken.value) {
+    mutedUsers.value = []
+    return
+  }
+  const res = await apiFetch(apiUrl(apiBase, mutedUsersPath()), { headers: authHeaders(false) })
+  if (isAdminForbidden(res.status)) {
+    isAdmin.value = false
+    mutedUsers.value = []
+    return
+  }
+  if (!res.ok) throw new Error(`muted users ${res.status}`)
+  const data = await res.json()
+  mutedUsers.value = data.items ?? []
+  if (isAdmin.value !== true) isAdmin.value = true
+}
+
+async function loadModerationLists() {
+  await Promise.all([loadBannedUsers(), loadMutedUsers()])
+}
+
+async function lookupUserModeration() {
+  if (!accessToken.value) {
+    error.value = t('flash.needLogin')
+    return
+  }
+  const id = lookupUserId.value.trim()
+  if (!id) {
+    error.value = t('users.needUserId')
+    return
+  }
+  notice.value = ''
+  error.value = ''
+  lookupBusy.value = true
+  try {
+    const res = await apiFetch(apiUrl(apiBase, userModerationPath(id)), {
+      headers: authHeaders(false),
+    })
+    if (isAdminForbidden(res.status)) {
+      isAdmin.value = false
+      throw new Error(`moderation status ${res.status}`)
+    }
+    if (!res.ok) throw new Error(`moderation status ${res.status}`)
+    lookupStatus.value = await res.json()
+    notice.value = t('users.lookedUp', { id: shortId(id) })
+  } catch (e) {
+    error.value = String(e)
+  } finally {
+    lookupBusy.value = false
+  }
+}
+
+function fillBanFromLookup() {
+  const id = lookupStatus.value?.user_id || lookupUserId.value.trim()
+  if (!id) return
+  userIdInput.value = id
+  unbanUserIdInput.value = id
+  nav.value = 'moderation'
+}
+
+function fillMuteFromLookup() {
+  const id = lookupStatus.value?.user_id || lookupUserId.value.trim()
+  if (!id) return
+  muteUserIdInput.value = id
+  unmuteUserIdInput.value = id
+  nav.value = 'moderation'
 }
 
 async function loadUsers() {
@@ -1183,24 +1287,49 @@ async function revokeUserSessions(id: string) {
   }
 }
 
-async function unbanUserId(id: string) {
-  if (!accessToken.value) return
+async function unbanUser(targetId?: string) {
+  if (!accessToken.value) {
+    error.value = t('flash.needLogin')
+    return
+  }
+  const id = (targetId ?? unbanUserIdInput.value).trim()
+  if (!id) {
+    error.value = t('moderation.needUserId')
+    return
+  }
+  notice.value = ''
+  error.value = ''
   actionBusy.value = true
   try {
     const res = await apiFetch(apiUrl(apiBase, unbanUserPath()), {
       method: 'POST',
       headers: authHeaders(),
-      body: JSON.stringify({ user_id: id, reason: 'admin unban' }),
+      body: JSON.stringify({
+        user_id: id,
+        reason: actionReason.value.trim() || undefined,
+      }),
     })
     if (res.status !== 204) throw new Error(`unban ${res.status}`)
-    notice.value = t('users.unban')
-    await loadUsers()
-    await loadAudit()
+    notice.value = t('moderation.unbanned', { id: shortId(id) })
+    if (!targetId) unbanUserIdInput.value = ''
+    if (lookupStatus.value?.user_id === id) {
+      lookupStatus.value = {
+        ...lookupStatus.value,
+        banned: false,
+        ban_reason: null,
+        banned_at: null,
+      }
+    }
+    await Promise.all([loadAudit(), loadModerationLists(), loadUsers()])
   } catch (e) {
     error.value = String(e)
   } finally {
     actionBusy.value = false
   }
+}
+
+async function unbanUserId(id: string) {
+  await unbanUser(id)
 }
 
 async function banUserId(id: string) {
@@ -1252,7 +1381,7 @@ async function muteUser() {
     if (res.status !== 204) throw new Error(`mute ${res.status}`)
     notice.value = t('moderation.muted', { id: shortId(id) })
     muteUserIdInput.value = ''
-    await loadAudit()
+    await Promise.all([loadAudit(), loadModerationLists()])
   } catch (e) {
     error.value = String(e)
   } finally {
@@ -1260,12 +1389,12 @@ async function muteUser() {
   }
 }
 
-async function unmuteUser() {
+async function unmuteUser(targetId?: string) {
   if (!accessToken.value) {
     error.value = t('flash.needLogin')
     return
   }
-  const id = unmuteUserIdInput.value.trim()
+  const id = (targetId ?? unmuteUserIdInput.value).trim()
   if (!id) {
     error.value = t('moderation.needUserId')
     return
@@ -1284,8 +1413,16 @@ async function unmuteUser() {
     })
     if (res.status !== 204) throw new Error(`unmute ${res.status}`)
     notice.value = t('moderation.unmuted', { id: shortId(id) })
-    unmuteUserIdInput.value = ''
-    await loadAudit()
+    if (!targetId) unmuteUserIdInput.value = ''
+    if (lookupStatus.value?.user_id === id) {
+      lookupStatus.value = {
+        ...lookupStatus.value,
+        muted: false,
+        mute_reason: null,
+        muted_at: null,
+      }
+    }
+    await Promise.all([loadAudit(), loadModerationLists(), loadUsers()])
   } catch (e) {
     error.value = String(e)
   } finally {
@@ -2609,6 +2746,179 @@ onMounted(() => {
             <div class="empty-icon">◎</div>
             {{ usersBusy ? t('common.loading') : t('users.empty') }}
           </div>
+        
+          <div class="panel-head" style="margin-top: 1.5rem">
+            <h3>{{ t('users.moderationLists') }}</h3>
+            <button
+              type="button"
+              class="btn sm"
+              data-testid="users-refresh"
+              :disabled="listBusy"
+              @click="loadModerationLists"
+            >
+              {{ t('users.refreshLists') }}
+            </button>
+          </div>
+          <p class="panel-desc">{{ t('users.desc') }}</p>
+
+          <div class="action-card" style="max-width: 640px; margin-bottom: 1rem" data-testid="users-lookup">
+            <h3>{{ t('users.lookup') }}</h3>
+            <label class="field">
+              <span>{{ t('moderation.userId') }}</span>
+              <input
+                v-model="lookupUserId"
+                class="mono"
+                type="text"
+                :placeholder="t('users.lookupPlaceholder')"
+                data-testid="users-lookup-id"
+              />
+            </label>
+            <div class="row" style="gap: 0.5rem; flex-wrap: wrap">
+              <button
+                type="button"
+                class="btn primary"
+                data-testid="users-lookup-submit"
+                :disabled="lookupBusy || !lookupUserId.trim()"
+                @click="lookupUserModeration"
+              >
+                {{ t('users.lookupSubmit') }}
+              </button>
+              <button
+                type="button"
+                class="btn sm"
+                data-testid="users-fill-ban"
+                :disabled="!lookupUserId.trim() && !lookupStatus"
+                @click="fillBanFromLookup"
+              >
+                {{ t('users.fillBan') }}
+              </button>
+              <button
+                type="button"
+                class="btn sm"
+                data-testid="users-fill-mute"
+                :disabled="!lookupUserId.trim() && !lookupStatus"
+                @click="fillMuteFromLookup"
+              >
+                {{ t('users.fillMute') }}
+              </button>
+            </div>
+            <div v-if="lookupStatus" class="hint" style="margin-top: 0.75rem" data-testid="users-lookup-result">
+              <strong>{{ t('users.statusTitle') }}</strong>
+              <div class="mono" style="margin-top: 0.25rem">{{ shortId(lookupStatus.user_id, 16) }}</div>
+              <div v-if="lookupStatus.banned || lookupStatus.muted" style="margin-top: 0.35rem">
+                <span v-if="lookupStatus.banned" class="badge closed" style="margin-right: 0.35rem">
+                  {{ t('users.statusBanned') }}
+                  <template v-if="lookupStatus.ban_reason"> · {{ lookupStatus.ban_reason }}</template>
+                  <template v-if="lookupStatus.banned_at">
+                    · {{ t('users.statusSince', { time: formatTs(lookupStatus.banned_at) }) }}
+                  </template>
+                </span>
+                <span v-if="lookupStatus.muted" class="badge idle">
+                  {{ t('users.statusMuted') }}
+                  <template v-if="lookupStatus.mute_reason"> · {{ lookupStatus.mute_reason }}</template>
+                  <template v-if="lookupStatus.muted_at">
+                    · {{ t('users.statusSince', { time: formatTs(lookupStatus.muted_at) }) }}
+                  </template>
+                </span>
+              </div>
+              <div v-else class="dim" style="margin-top: 0.35rem">{{ t('users.statusClear') }}</div>
+              <div class="row" style="gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap">
+                <button
+                  v-if="lookupStatus.banned"
+                  type="button"
+                  class="btn sm primary"
+                  data-testid="users-lookup-unban"
+                  :disabled="actionBusy"
+                  @click="unbanUser(lookupStatus.user_id)"
+                >
+                  {{ t('users.unban') }}
+                </button>
+                <button
+                  v-if="lookupStatus.muted"
+                  type="button"
+                  class="btn sm primary"
+                  data-testid="users-lookup-unmute"
+                  :disabled="actionBusy"
+                  @click="unmuteUser(lookupStatus.user_id)"
+                >
+                  {{ t('users.unmute') }}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="split-actions">
+            <div class="action-card" data-testid="users-banned-card">
+              <h3>{{ t('users.bannedList') }} · {{ bannedUsers.length }}</h3>
+              <div class="table-wrap" v-if="bannedUsers.length" data-testid="users-banned-table">
+                <table class="data">
+                  <thead>
+                    <tr>
+                      <th>{{ t('users.colUser') }}</th>
+                      <th>{{ t('users.colReason') }}</th>
+                      <th>{{ t('users.colTime') }}</th>
+                      <th>{{ t('common.actions') }}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="u in bannedUsers" :key="u.user_id" :data-testid="`banned-row-${u.user_id}`">
+                      <td class="mono">{{ shortId(u.user_id, 12) }}</td>
+                      <td>{{ u.reason || t('common.none') }}</td>
+                      <td class="mono">{{ formatTs(u.created_at) }}</td>
+                      <td class="actions">
+                        <button
+                          type="button"
+                          class="btn sm primary"
+                          data-testid="users-unban-row"
+                          :disabled="actionBusy"
+                          @click="unbanUser(u.user_id)"
+                        >
+                          {{ t('users.unban') }}
+                        </button>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div v-else class="empty" data-testid="users-banned-empty">{{ t('users.emptyBanned') }}</div>
+            </div>
+
+            <div class="action-card" data-testid="users-muted-card">
+              <h3>{{ t('users.mutedList') }} · {{ mutedUsers.length }}</h3>
+              <div class="table-wrap" v-if="mutedUsers.length" data-testid="users-muted-table">
+                <table class="data">
+                  <thead>
+                    <tr>
+                      <th>{{ t('users.colUser') }}</th>
+                      <th>{{ t('users.colReason') }}</th>
+                      <th>{{ t('users.colTime') }}</th>
+                      <th>{{ t('common.actions') }}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="u in mutedUsers" :key="u.user_id" :data-testid="`muted-row-${u.user_id}`">
+                      <td class="mono">{{ shortId(u.user_id, 12) }}</td>
+                      <td>{{ u.reason || t('common.none') }}</td>
+                      <td class="mono">{{ formatTs(u.created_at) }}</td>
+                      <td class="actions">
+                        <button
+                          type="button"
+                          class="btn sm primary"
+                          data-testid="users-unmute-row"
+                          :disabled="actionBusy"
+                          @click="unmuteUser(u.user_id)"
+                        >
+                          {{ t('users.unmute') }}
+                        </button>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div v-else class="empty" data-testid="users-muted-empty">{{ t('users.emptyMuted') }}</div>
+            </div>
+          </div>
+
         </section>
 
         <!-- Moderation -->

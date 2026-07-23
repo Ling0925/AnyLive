@@ -16,7 +16,7 @@ export function canAccessModule(role: string, module: string): boolean {
       'users',
       'gifts',
       'moderation',
-      'audit',
+      'audit'
     ].includes(module)
   }
   return false
@@ -279,10 +279,13 @@ export const API_PATHS = {
   adminMute: '/api/v1/admin/mute',
   adminUnmute: '/api/v1/admin/unmute',
   adminForceClose: '/api/v1/admin/rooms/force-close',
+  adminUsersBanned: '/api/v1/admin/users/banned',
+  adminUsersMuted: '/api/v1/admin/users/muted',
+  adminUserModeration: '/api/v1/admin/users',
+  adminUsers: '/api/v1/admin/users',
   adminReports: '/api/v1/admin/reports',
   adminAudit: '/api/v1/admin/audit',
   adminGrant: '/api/v1/admin/grant',
-  adminUsers: '/api/v1/admin/users',
   adminWalletReconcile: '/api/v1/admin/wallet/reconcile',
   adminPayExpireOrders: '/api/v1/admin/pay/expire-orders',
   adminAnalyticsSummary: '/api/v1/admin/analytics/summary',
@@ -352,6 +355,20 @@ export function muteUserPath(): string {
 
 export function unmuteUserPath(): string {
   return API_PATHS.adminUnmute
+}
+
+export function bannedUsersPath(): string {
+  return API_PATHS.adminUsersBanned
+}
+
+export function mutedUsersPath(): string {
+  return API_PATHS.adminUsersMuted
+}
+
+/** Lookup path: `/api/v1/admin/users/{id}/moderation`. */
+export function userModerationPath(id: string): string {
+  const clean = id.replace(/^\/+|\/+$/g, '')
+  return `${API_PATHS.adminUserModeration}/${encodeURIComponent(clean)}/moderation`
 }
 
 export function forceCloseRoomPath(): string {

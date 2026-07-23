@@ -191,6 +191,12 @@ pub fn build_app_with_state_and_cors(state: Arc<AppState>, cors: CorsLayer) -> R
             "/api/v1/admin/rooms/force-close",
             post(routes::force_close_room),
         )
+        .route("/api/v1/admin/users/banned", get(routes::list_banned_users))
+        .route("/api/v1/admin/users/muted", get(routes::list_muted_users))
+        .route(
+            "/api/v1/admin/users/{id}/moderation",
+            get(routes::get_user_moderation),
+        )
         .route("/api/v1/admin/audit", get(routes::list_audit))
         .route("/api/v1/admin/users", get(routes::admin_list_users).post(routes::admin_create_user))
         .route(
@@ -300,6 +306,9 @@ pub fn build_app_with_state_and_cors(state: Arc<AppState>, cors: CorsLayer) -> R
         routes::mute_user,
         routes::unmute_user,
         routes::force_close_room,
+        routes::list_banned_users,
+        routes::list_muted_users,
+        routes::get_user_moderation,
         routes::list_audit,
         routes::admin_create_user,
         routes::admin_list_users,
@@ -368,12 +377,16 @@ pub fn build_app_with_state_and_cors(state: Arc<AppState>, cors: CorsLayer) -> R
         routes::ChatMessageDto,
         routes::ChatListResponse,
         routes::BanUserBody,
+        routes::UnbanUserBody,
         routes::MuteUserBody,
         routes::UnmuteUserBody,
         routes::ForceCloseBody,
         routes::GrantAdminBody,
         routes::AuditEventDto,
         routes::AuditListResponse,
+        routes::ModerationEntryDto,
+        routes::ModerationListResponse,
+        routes::UserModerationStatusDto,
         routes::BalanceMismatchDto,
         routes::WalletReconcileResponse,
         routes::ExpirePayOrdersResponse,
@@ -1906,6 +1919,58 @@ mod tests {
         assert_eq!(res.status(), StatusCode::NO_CONTENT);
 
         let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/admin/users/banned")
+                    .header("authorization", format!("Bearer {admin_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let banned = body_json(res).await;
+        assert!(banned["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|i| i["user_id"] == host_id));
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/v1/admin/users/{host_id}/moderation"))
+                    .header("authorization", format!("Bearer {admin_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let status = body_json(res).await;
+        assert_eq!(status["banned"], true);
+        assert_eq!(status["ban_reason"], "spam");
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/admin/unban")
+                    .header("authorization", format!("Bearer {admin_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"user_id":"{host_id}","reason":"appeal"}}"#
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+        let res = app
             .oneshot(
                 Request::builder()
                     .uri("/api/v1/admin/audit")
@@ -1917,7 +1982,9 @@ mod tests {
             .unwrap();
         assert_eq!(res.status(), StatusCode::OK);
         let audit = body_json(res).await;
-        assert!(audit["items"].as_array().unwrap().len() >= 2);
+        let items = audit["items"].as_array().unwrap();
+        assert!(items.len() >= 3);
+        assert!(items.iter().any(|e| e["action"] == "unban_user"));
     }
 
     async fn bootstrap_admin(app: &axum::Router, token: &str) {

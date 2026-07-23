@@ -2,7 +2,7 @@
 
 use anylive_common::{AppError, ErrorCode};
 use anylive_domain::{RoomId, UserId};
-use anylive_moderation::{AdminRole, AuditEvent, MemoryModeration};
+use anylive_moderation::{AdminRole, AuditEvent, MemoryModeration, ModerationEntry, UserModerationStatus};
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -202,6 +202,7 @@ impl PostgresModeration {
         Ok(())
     }
 
+    /// Remove a ban (admin). Idempotent when the user is not banned.
     pub async fn unban_user(
         &self,
         actor: UserId,
@@ -212,13 +213,24 @@ impl PostgresModeration {
         let reason = reason.into();
         let mut tx = self.pool.begin().await.map_err(map_db)?;
 
-        sqlx::query("DELETE FROM banned_users WHERE user_id = $1")
-            .bind(target.0)
-            .execute(&mut *tx)
-            .await
-            .map_err(map_db)?;
+        sqlx::query(
+            r#"
+            DELETE FROM banned_users WHERE user_id = $1
+            "#,
+        )
+        .bind(target.0)
+        .execute(&mut *tx)
+        .await
+        .map_err(map_db)?;
 
-        push_audit(&mut tx, actor, "unban_user", target.0.to_string(), reason).await?;
+        push_audit(
+            &mut tx,
+            actor,
+            "unban_user",
+            target.0.to_string(),
+            reason,
+        )
+        .await?;
         tx.commit().await.map_err(map_db)?;
         Ok(())
     }
@@ -246,6 +258,89 @@ impl PostgresModeration {
         .await
         .map_err(map_db)?;
         Ok(row.unwrap_or(false))
+    }
+
+    /// Banned users newest-first (limit clamped 1..=200).
+    pub async fn list_banned(&self, limit: usize) -> Vec<ModerationEntry> {
+        let limit = (limit.clamp(1, 200)) as i64;
+        let rows = sqlx::query_as::<_, SanctionRow>(
+            r#"
+            SELECT user_id, reason, created_at
+            FROM banned_users
+            ORDER BY created_at DESC
+            LIMIT $1
+            "#,
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .unwrap_or_else(|err| {
+            tracing::error!(error = %err, "postgres list_banned failed");
+            Vec::new()
+        });
+        rows.into_iter().map(SanctionRow::into_entry).collect()
+    }
+
+    /// Muted users newest-first (limit clamped 1..=200).
+    pub async fn list_muted(&self, limit: usize) -> Vec<ModerationEntry> {
+        let limit = (limit.clamp(1, 200)) as i64;
+        let rows = sqlx::query_as::<_, SanctionRow>(
+            r#"
+            SELECT user_id, reason, created_at
+            FROM muted_users
+            ORDER BY created_at DESC
+            LIMIT $1
+            "#,
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .unwrap_or_else(|err| {
+            tracing::error!(error = %err, "postgres list_muted failed");
+            Vec::new()
+        });
+        rows.into_iter().map(SanctionRow::into_entry).collect()
+    }
+
+    /// Lookup ban/mute status for one user (ops console).
+    pub async fn user_status(&self, user_id: UserId) -> UserModerationStatus {
+        let ban = sqlx::query_as::<_, SanctionRow>(
+            r#"
+            SELECT user_id, reason, created_at
+            FROM banned_users
+            WHERE user_id = $1
+            "#,
+        )
+        .bind(user_id.0)
+        .fetch_optional(&self.pool)
+        .await
+        .unwrap_or_else(|err| {
+            tracing::error!(error = %err, "postgres user_status ban lookup failed");
+            None
+        });
+        let mute = sqlx::query_as::<_, SanctionRow>(
+            r#"
+            SELECT user_id, reason, created_at
+            FROM muted_users
+            WHERE user_id = $1
+            "#,
+        )
+        .bind(user_id.0)
+        .fetch_optional(&self.pool)
+        .await
+        .unwrap_or_else(|err| {
+            tracing::error!(error = %err, "postgres user_status mute lookup failed");
+            None
+        });
+        UserModerationStatus {
+            user_id,
+            banned: ban.is_some(),
+            muted: mute.is_some(),
+            ban_reason: ban.as_ref().and_then(|r| r.reason.clone()),
+            mute_reason: mute.as_ref().and_then(|r| r.reason.clone()),
+            banned_at: ban.map(|r| r.created_at),
+            muted_at: mute.map(|r| r.created_at),
+        }
     }
 
     pub async fn mute_user(
@@ -417,6 +512,23 @@ impl AuditRow {
             action: self.action,
             target: self.target,
             detail: self.detail,
+            created_at: self.created_at,
+        }
+    }
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct SanctionRow {
+    user_id: Uuid,
+    reason: Option<String>,
+    created_at: DateTime<Utc>,
+}
+
+impl SanctionRow {
+    fn into_entry(self) -> ModerationEntry {
+        ModerationEntry {
+            user_id: UserId(self.user_id),
+            reason: self.reason.unwrap_or_default(),
             created_at: self.created_at,
         }
     }
@@ -630,6 +742,27 @@ impl AnyModeration {
         }
     }
 
+    pub async fn list_banned(&self, limit: usize) -> Vec<ModerationEntry> {
+        match self {
+            Self::Memory(m) => m.list_banned(limit).await,
+            Self::Postgres(m) => m.list_banned(limit).await,
+        }
+    }
+
+    pub async fn list_muted(&self, limit: usize) -> Vec<ModerationEntry> {
+        match self {
+            Self::Memory(m) => m.list_muted(limit).await,
+            Self::Postgres(m) => m.list_muted(limit).await,
+        }
+    }
+
+    pub async fn user_status(&self, user_id: UserId) -> UserModerationStatus {
+        match self {
+            Self::Memory(m) => m.user_status(user_id).await,
+            Self::Postgres(m) => m.user_status(user_id).await,
+        }
+    }
+
     pub async fn audit_force_close(
         &self,
         actor: UserId,
@@ -693,6 +826,20 @@ pub mod sql {
             DELETE FROM muted_users WHERE user_id = $1
             "#;
 
+    pub const SELECT_BANNED_LIST: &str = r#"
+            SELECT user_id, reason, created_at
+            FROM banned_users
+            ORDER BY created_at DESC
+            LIMIT $1
+            "#;
+
+    pub const SELECT_MUTED_LIST: &str = r#"
+            SELECT user_id, reason, created_at
+            FROM muted_users
+            ORDER BY created_at DESC
+            LIMIT $1
+            "#;
+
     pub const INSERT_AUDIT: &str = r#"
         INSERT INTO admin_audit (id, actor_id, action, target, detail, created_at)
         VALUES ($1, $2, $3, $4, $5, $6)
@@ -716,8 +863,11 @@ mod tests {
     fn sql_fragments_cover_moderation_tables() {
         assert!(sql::INSERT_ADMIN.contains("admin_users"));
         assert!(sql::UPSERT_BANNED.contains("banned_users"));
+        assert!(sql::DELETE_BANNED.contains("DELETE FROM banned_users"));
         assert!(sql::UPSERT_MUTED.contains("muted_users"));
         assert!(sql::DELETE_MUTED.contains("DELETE FROM muted_users"));
+        assert!(sql::SELECT_BANNED_LIST.contains("FROM banned_users"));
+        assert!(sql::SELECT_MUTED_LIST.contains("FROM muted_users"));
         assert!(sql::INSERT_AUDIT.contains("admin_audit"));
         assert!(sql::SELECT_RECENT_AUDIT.contains("ORDER BY created_at DESC"));
     }
@@ -749,12 +899,17 @@ mod tests {
         assert!(m.is_admin(admin).await);
         m.ban_user(admin, user, "spam").await.unwrap();
         assert!(m.is_banned(user).await);
+        assert_eq!(m.list_banned(10).await.len(), 1);
+        m.unban_user(admin, user, "appeal").await.unwrap();
+        assert!(!m.is_banned(user).await);
         m.mute_user(admin, user, "noise").await.unwrap();
         assert!(m.is_muted(user).await);
         m.unmute_user(admin, user, "ok").await.unwrap();
         assert!(!m.is_muted(user).await);
-        let audit = m.recent_audit(10).await;
-        assert!(!audit.is_empty());
+        let audit = m.recent_audit(20).await;
+        assert!(audit.iter().any(|e| e.action == "ban_user"));
+        assert!(audit.iter().any(|e| e.action == "unban_user"));
+        assert!(audit.iter().any(|e| e.action == "mute_user"));
         assert!(!m.is_postgres());
     }
 
@@ -786,6 +941,11 @@ mod tests {
 
         m.ban_user(admin.id, target.id, "spam").await.unwrap();
         assert!(m.is_banned(target.id).await);
+        assert_eq!(m.list_banned(10).await.len(), 1);
+        assert!(m.user_status(target.id).await.banned);
+
+        m.unban_user(admin.id, target.id, "appeal").await.unwrap();
+        assert!(!m.is_banned(target.id).await);
 
         m.mute_user(admin.id, target.id, "chat spam").await.unwrap();
         assert!(m.is_muted(target.id).await);
@@ -796,6 +956,7 @@ mod tests {
         m.audit_force_close(admin.id, room, "policy").await.unwrap();
         let audit = m.recent_audit(20).await;
         assert!(audit.iter().any(|e| e.action == "ban_user"));
+        assert!(audit.iter().any(|e| e.action == "unban_user"));
         assert!(audit.iter().any(|e| e.action == "mute_user"));
         assert!(audit.iter().any(|e| e.action == "force_close_room"));
     }

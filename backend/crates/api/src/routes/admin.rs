@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use anylive_domain::{RoomId, RoomStatus, UserId};
 use anylive_pay::PayStore;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
 use serde::{Deserialize, Serialize};
@@ -19,6 +19,13 @@ use crate::state::AppState;
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct BanUserBody {
+    pub user_id: String,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct UnbanUserBody {
     pub user_id: String,
     #[serde(default)]
     pub reason: Option<String>,
@@ -177,6 +184,27 @@ pub async fn ban_user(
         .refresh_store()
         .revoke_all_for_user(UserId(target))
         .await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Unban a user (admin). Idempotent when the user is not banned.
+#[utoipa::path(post, path = "/api/v1/admin/unban", tag = "admin", security(("bearerAuth" = [])), request_body = UnbanUserBody, responses((status = 204)))]
+pub async fn unban_user(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Json(body): Json<UnbanUserBody>,
+) -> Result<StatusCode, ApiError> {
+    let target = Uuid::parse_str(&body.user_id)
+        .map_err(|_| ApiError(anylive_common::AppError::validation("invalid user_id")))?;
+    state
+        .moderation
+        .unban_user(
+            user.user_id,
+            UserId(target),
+            body.reason.unwrap_or_else(|| "policy".into()),
+        )
+        .await
+        .map_err(ApiError::from)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -437,5 +465,119 @@ pub async fn analytics_summary(
         distinct_users,
         by_name,
         recent,
+    }))
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ModerationEntryDto {
+    pub user_id: String,
+    pub reason: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ModerationListResponse {
+    pub items: Vec<ModerationEntryDto>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct UserModerationStatusDto {
+    pub user_id: String,
+    pub banned: bool,
+    pub muted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ban_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mute_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub banned_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub muted_at: Option<String>,
+}
+
+fn entry_to_dto(e: anylive_moderation::ModerationEntry) -> ModerationEntryDto {
+    ModerationEntryDto {
+        user_id: e.user_id.0.to_string(),
+        reason: e.reason,
+        created_at: e.created_at.to_rfc3339(),
+    }
+}
+
+/// List banned users (admin). Newest first.
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/users/banned",
+    tag = "admin",
+    security(("bearerAuth" = [])),
+    responses((status = 200, body = ModerationListResponse))
+)]
+pub async fn list_banned_users(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+) -> Result<Json<ModerationListResponse>, ApiError> {
+    state
+        .moderation
+        .require_admin(user.user_id)
+        .await
+        .map_err(ApiError::from)?;
+    let items = state.moderation.list_banned(100).await;
+    Ok(Json(ModerationListResponse {
+        items: items.into_iter().map(entry_to_dto).collect(),
+    }))
+}
+
+/// List muted users (admin). Newest first.
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/users/muted",
+    tag = "admin",
+    security(("bearerAuth" = [])),
+    responses((status = 200, body = ModerationListResponse))
+)]
+pub async fn list_muted_users(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+) -> Result<Json<ModerationListResponse>, ApiError> {
+    state
+        .moderation
+        .require_admin(user.user_id)
+        .await
+        .map_err(ApiError::from)?;
+    let items = state.moderation.list_muted(100).await;
+    Ok(Json(ModerationListResponse {
+        items: items.into_iter().map(entry_to_dto).collect(),
+    }))
+}
+
+/// Lookup ban/mute status for one user (admin).
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/users/{id}/moderation",
+    tag = "admin",
+    security(("bearerAuth" = [])),
+    params(("id" = String, Path, description = "User UUID")),
+    responses((status = 200, body = UserModerationStatusDto))
+)]
+pub async fn get_user_moderation(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(id): Path<String>,
+) -> Result<Json<UserModerationStatusDto>, ApiError> {
+    state
+        .moderation
+        .require_admin(user.user_id)
+        .await
+        .map_err(ApiError::from)?;
+    let target = Uuid::parse_str(&id)
+        .map_err(|_| ApiError(anylive_common::AppError::validation("invalid user id")))?;
+    let status = state.moderation.user_status(UserId(target)).await;
+    Ok(Json(UserModerationStatusDto {
+        user_id: status.user_id.0.to_string(),
+        banned: status.banned,
+        muted: status.muted,
+        ban_reason: status.ban_reason,
+        mute_reason: status.mute_reason,
+        banned_at: status.banned_at.map(|t| t.to_rfc3339()),
+        muted_at: status.muted_at.map(|t| t.to_rfc3339()),
     }))
 }
