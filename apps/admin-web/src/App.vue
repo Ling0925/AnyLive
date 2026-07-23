@@ -964,6 +964,21 @@ void previewVideoEl
             }}</span>
           </div>
 
+          <!-- HLS preview docks above the list so ops don't scroll past 100+ rows. -->
+          <div v-if="previewRoomId" class="preview is-docked" data-testid="room-preview-panel">
+            <div class="panel-head">
+              <h2>{{ t('rooms.previewTitle') }} · {{ shortId(previewRoomId, 12) }}</h2>
+              <button type="button" class="btn sm ghost" data-testid="room-preview-close" @click="closePreview">
+                {{ t('common.close') }}
+              </button>
+            </div>
+            <p v-if="previewError" class="flash err">{{ previewError }}</p>
+            <p v-if="previewHlsUrl" class="preview-url mono">
+              <a :href="previewHlsUrl" target="_blank" rel="noopener">{{ previewHlsUrl }}</a>
+            </p>
+            <video v-if="previewHlsUrl" ref="previewVideoEl" controls playsinline class="preview-video" />
+          </div>
+
           <div class="table-wrap is-dense" v-if="pagedRooms.length" data-testid="rooms-table">
             <table class="data data-rooms">
               <thead>
@@ -976,7 +991,12 @@ void previewVideoEl
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="r in pagedRooms" :key="r.id" :data-testid="`room-row-${r.id}`">
+                <tr
+                  v-for="r in pagedRooms"
+                  :key="r.id"
+                  :data-testid="`room-row-${r.id}`"
+                  :class="{ 'is-previewing': previewRoomId === r.id }"
+                >
                   <td class="col-title" :title="r.title">{{ r.title }}</td>
                   <td class="col-status">
                     <span class="badge" :class="roomStatusTone(r.status)">{{
@@ -992,6 +1012,7 @@ void previewVideoEl
                       <button
                         type="button"
                         class="btn sm"
+                        :class="{ primary: previewRoomId === r.id }"
                         data-testid="room-preview"
                         :disabled="previewBusy"
                         @click="previewRoom(r)"
@@ -1061,20 +1082,6 @@ void previewVideoEl
             >
               {{ t('common.next') }}
             </button>
-          </div>
-
-          <div v-if="previewRoomId" class="preview" data-testid="room-preview-panel">
-            <div class="panel-head">
-              <h2>{{ t('rooms.previewTitle') }} · {{ shortId(previewRoomId, 12) }}</h2>
-              <button type="button" class="btn sm ghost" data-testid="room-preview-close" @click="closePreview">
-                {{ t('common.close') }}
-              </button>
-            </div>
-            <p v-if="previewError" class="flash err">{{ previewError }}</p>
-            <p v-if="previewHlsUrl" class="preview-url mono">
-              <a :href="previewHlsUrl" target="_blank" rel="noopener">{{ previewHlsUrl }}</a>
-            </p>
-            <video v-if="previewHlsUrl" ref="previewVideoEl" controls playsinline class="preview-video" />
           </div>
         </section>
 

@@ -1140,6 +1140,29 @@ pre.mono {
   min-width: 0;
 }
 
+/* Docked above rooms list: stays in the filter/meta band, not under the table. */
+.preview.is-docked {
+  margin: 0 0 0.85rem;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-sm);
+}
+
+.preview.is-docked .panel-head {
+  margin-bottom: 0.55rem;
+}
+
+.preview.is-docked .preview-video {
+  max-width: min(640px, 100%);
+  max-height: min(40vh, 360px);
+}
+
+table.data tr.is-previewing td {
+  background: var(--primary-soft);
+}
+
 .preview-video {
   width: 100%;
   max-width: min(720px, 100%);

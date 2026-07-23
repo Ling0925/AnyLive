@@ -480,6 +480,11 @@ async function previewRoom(room: { id: string; status: string }) {
     previewError.value = t('rooms.notLive')
     previewRoomId.value = room.id
     previewHlsUrl.value = ''
+    await nextTick()
+    document.querySelector('[data-testid="room-preview-panel"]')?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'nearest',
+    })
     return
   }
   previewBusy.value = true
@@ -491,6 +496,10 @@ async function previewRoom(room: { id: string; status: string }) {
     const play = await res.json()
     previewHlsUrl.value = buildHls(play, room.id)
     await nextTick()
+    document.querySelector('[data-testid="room-preview-panel"]')?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'nearest',
+    })
   } catch (e) {
     previewError.value = String(e)
   } finally {
