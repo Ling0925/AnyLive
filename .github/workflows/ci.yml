@@ -78,7 +78,9 @@ jobs:
 
   # Non-blocking: boots memory-mode API and runs control-plane dogfood smoke.
   # Does not gate merge; evidence for Wave1 collective DoD §12 control-plane green.
+  # Label: control-plane only — does NOT close V-BE-1/2 or sign risk-accept docs.
   dogfood-api-smoke:
+    name: dogfood (control-plane only — not V-BE-1/2)
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
@@ -87,7 +89,7 @@ jobs:
       - name: Build anylive-api
         working-directory: backend
         run: cargo build -p anylive-api --release
-      - name: Start memory API + dogfood-api-smoke
+      - name: Start memory API + dogfood smokes
         env:
           APP_ENV: local
           ALLOW_DEV_OTP: "1"
@@ -107,6 +109,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p reports
+          {
+            echo "## Dogfood CI (control-plane only)"
+            echo ""
+            echo "This job is **non-blocking** (\`continue-on-error: true\`) and **does not close V-BE-1/2**."
+            echo "Unsigned risk-accept drafts: \`docs/runbooks/otp-dev-only-risk-accept.md\`, \`docs/runbooks/ws-1k-soak-risk-accept.md\`."
+            echo "FEATURE_PK=0 FEATURE_COHOST=0 (P1-safe)."
+          } >> "$GITHUB_STEP_SUMMARY"
           ./backend/target/release/anylive-api > reports/ci-api.log 2>&1 &
           API_PID=$!
           trap 'kill $API_PID 2>/dev/null || true' EXIT
@@ -123,15 +132,30 @@ jobs:
             sleep 1
           done
           curl -fsS http://127.0.0.1:8088/health
+          echo "=== dogfood-api-smoke ==="
           API_BASE=http://127.0.0.1:8088 OTP_CODE=123456 \
             ./scripts/dogfood-api-smoke.sh | tee reports/dogfood-api-smoke-ci.txt
           grep -q DOGFOOD_API_SMOKE_PASS reports/dogfood-api-smoke-ci.txt
-      - name: Upload dogfood smoke log
+          echo "=== dogfood-10min-path ==="
+          API_BASE=http://127.0.0.1:8088 OTP_CODE=123456 \
+            ./scripts/dogfood-10min-path.sh | tee reports/dogfood-10min-path-ci.txt
+          grep -q DOGFOOD_10MIN_PATH_PASS reports/dogfood-10min-path-ci.txt
+          {
+            echo ""
+            echo "| Script | Result |"
+            echo "|---|---|"
+            echo "| dogfood-api-smoke | PASS (control-plane) |"
+            echo "| dogfood-10min-path | PASS (control-plane) |"
+            echo ""
+            echo "**Not** V-BE-1/2 signed. Human OBS / ESP / soak still required for exit gates."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload dogfood smoke logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dogfood-api-smoke
+          name: dogfood-control-plane
           path: |
             reports/dogfood-api-smoke-ci.txt
+            reports/dogfood-10min-path-ci.txt
             reports/ci-api.log
           if-no-files-found: ignore

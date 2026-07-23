@@ -30,10 +30,11 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env.test --profil
 - 开发 OTP：**123456**（`APP_ENV=local` + `ALLOW_DEV_OTP`）
 - API 使用 Postgres（`USE_POSTGRES=1`），启动时自动迁移
 - 管理端构建时 `VITE_API_BASE=http://localhost:8088`（浏览器访问宿主机端口）
-- Dogfood 开关见 `deploy/.env.test`：`ALLOW_MOCK_TOPUP`、`ALLOW_DEV_OTP`、`OTP_NOTIFIER`、`SRS_*`、`PAY_CHANNELS`/`PAY_MOCK_SECRET`
+- Dogfood 开关见 `deploy/.env.test`：`ALLOW_MOCK_TOPUP`、`ALLOW_DEV_OTP`、`OTP_NOTIFIER`、`SRS_*`、`PAY_CHANNELS`/`PAY_MOCK_SECRET`、`FEATURE_PK=0`/`FEATURE_COHOST=0`
 
 开播步骤见：`docs/runbooks/go-live-local.md`。  
-Stage/生产清单见：`docs/runbooks/go-live-stage.md`。
+Stage/生产清单见：`docs/runbooks/go-live-stage.md`。  
+**Stage env 模板（可填、无 mock）：** `deploy/.env.stage.example` — 复制后填密钥；`FEATURE_PK`/`FEATURE_COHOST` 保持 `0`。
 
 ### 停止
 

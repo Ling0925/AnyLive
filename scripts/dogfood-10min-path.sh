@@ -8,6 +8,7 @@
 #   3. Optional admin force-close
 #
 # Exit 0 only if critical steps pass. Control-plane only (no real OBS push).
+# Does NOT close V-BE-1/2, plan 06 exit #1/#2, or sign risk-accept docs.
 #
 # Prerequisites:
 #   cargo run -p anylive-api  OR  ./scripts/deploy-test.sh
@@ -17,15 +18,21 @@
 #   ./scripts/dogfood-10min-path.sh
 #   API_BASE=http://127.0.0.1:8088 OTP_CODE=123456 ./scripts/dogfood-10min-path.sh
 #   DOGFOOD_STRICT=1 OTP_CODE=<real> API_BASE=https://api.stage.example ./scripts/dogfood-10min-path.sh
+#   # OBS week: leave room live so you can paste credentials into OBS
 #   SKIP_FORCE_CLOSE=1 ./scripts/dogfood-10min-path.sh
 #
 # Env (shared with dogfood-api-smoke.sh):
 #   API_BASE, OTP_CODE, DOGFOOD_STRICT, DOGFOOD_ADMIN_EMAIL,
 #   DOGFOOD_PG_CONTAINER, POSTGRES_USER, POSTGRES_DB
 # Optional:
-#   SKIP_FORCE_CLOSE=1  — skip admin force-close (leave room live)
+#   SKIP_FORCE_CLOSE=1  — skip admin force-close (leave room live; recommended for OBS week)
+#   ALLOW_P3_FEATURES=1 — allow FEATURE_PK / FEATURE_COHOST on (default: FAIL if on)
+#   DOGFOOD_REPORT_DIR  — if set, tee full stdout/stderr to $DIR/dogfood-10min-path-<UTC>.log
 
 set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SCRIPTS_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 export OTP_CODE="${OTP_CODE:-123456}"
 API_BASE="${API_BASE:-http://localhost:8088}"
@@ -33,6 +40,15 @@ API_BASE="${API_BASE%/}"
 OTP_CODE="${OTP_CODE:-123456}"
 DOGFOOD_STRICT="${DOGFOOD_STRICT:-0}"
 SKIP_FORCE_CLOSE="${SKIP_FORCE_CLOSE:-0}"
+ALLOW_P3_FEATURES="${ALLOW_P3_FEATURES:-0}"
+
+# Optional log tee for redeploy evidence (does not change exit semantics).
+if [[ -n "${DOGFOOD_REPORT_DIR:-}" ]]; then
+  mkdir -p "$DOGFOOD_REPORT_DIR"
+  _df_log="${DOGFOOD_REPORT_DIR}/dogfood-10min-path-$(date -u +%Y%m%dT%H%M%SZ).log"
+  exec > >(tee "$_df_log") 2>&1
+  echo "logging to ${_df_log}"
+fi
 
 HOST_EMAIL="dogfood-10m-host-$(date +%s)-$$@example.com"
 VIEWER_EMAIL="dogfood-10m-viewer-$(date +%s)-$$@example.com"
@@ -42,6 +58,52 @@ FAILED=0
 
 skip_mock() {
   [[ "$DOGFOOD_STRICT" = "1" || "$DOGFOOD_STRICT" = "true" ]]
+}
+
+obs_server_from_push() {
+  # Derive OBS Server from push_url (not hardcoded localhost).
+  PYTHONPATH="${SCRIPTS_DIR}${PYTHONPATH:+:$PYTHONPATH}" python3 -c \
+    "import sys; from media_smoke_lib import obs_server_from_push_url; print(obs_server_from_push_url(sys.argv[1], sys.argv[2]))" \
+    "$1" "$2"
+}
+
+print_obs_block() {
+  local server="$1" stream_key="$2" push_url="$3" hls="${4:-}" flv="${5:-}" expires="${6:-}"
+  echo
+  echo "╔══════════════════════════════════════════════════════════════╗"
+  echo "║  OBS — paste-ready (custom RTMP)                             ║"
+  echo "╠══════════════════════════════════════════════════════════════╣"
+  echo "║  Server:      ${server}"
+  echo "║  Stream Key:  ${stream_key}"
+  echo "╚══════════════════════════════════════════════════════════════╝"
+  echo "  push_url:   ${push_url}"
+  [[ -n "$expires" ]] && echo "  expires_at: ${expires}"
+  if [[ -n "$hls" ]]; then
+    echo "┌──────────────────────────────────────────────────────────────┐"
+    echo "│  HLS (H5 / Flutter / VLC):                                   │"
+    echo "│  ${hls}"
+    [[ -n "$flv" ]] && echo "│  flv: ${flv}"
+    echo "└──────────────────────────────────────────────────────────────┘"
+  fi
+  if [[ "$stream_key" != *"?"* ]] || [[ "$stream_key" != *"exp="* ]] || [[ "$stream_key" != *"sig="* ]]; then
+    echo "WARN: stream_key should include ?exp=&sig= (signed token). Bare room UUID will be rejected by on_publish." >&2
+  else
+    echo "NOTE: stream_key MUST be pasted whole, including ?exp=&sig= (not bare room UUID)."
+  fi
+}
+
+print_human_obs_checklist() {
+  local room_id="$1"
+  echo
+  echo "======== Human OBS week checklist (control-plane green ≠ exit signed) ========"
+  echo "  [ ] 1. OBS → Settings → Stream → Service=Custom"
+  echo "  [ ] 2. Paste Server + full Stream Key (with ?exp=&sig=) → Start Streaming"
+  echo "  [ ] 3. H5 (?room=${room_id}) and/or Flutter room page plays HLS"
+  echo "  [ ] 4. Stop OBS / unpublish — room leaves live (webhook or host stop)"
+  echo "  Tip (OBS week): re-run with SKIP_FORCE_CLOSE=1 so this script leaves the room live."
+  echo "  This PASS does NOT close V-BE-1, V-BE-2, plan 06 exit #1/#2, or risk-accept drafts."
+  echo "  See: docs/runbooks/go-live-local.md · scripts/dogfood-media.md"
+  echo "=============================================================================="
 }
 
 label() {
@@ -146,6 +208,32 @@ ensure_admin() {
 
 echo "AnyLive dogfood 10-minute control-plane path"
 echo "API_BASE=${API_BASE}  OTP_CODE=${OTP_CODE}  DOGFOOD_STRICT=${DOGFOOD_STRICT}"
+echo "SKIP_FORCE_CLOSE=${SKIP_FORCE_CLOSE}  ALLOW_P3_FEATURES=${ALLOW_P3_FEATURES}"
+echo "NOTE: control-plane only — does not close V-BE-1/2 or sign risk-accept docs."
+
+# ---------------------------------------------------------------------------
+label "P1-safe feature guard (GET /api/v1/meta)"
+api GET /api/v1/meta
+META_PK="$(json_get "$HTTP_BODY" "obj.get('features',{}).get('pk')")"
+META_COHOST="$(json_get "$HTTP_BODY" "obj.get('features',{}).get('cohost')")"
+echo "features.pk=${META_PK} features.cohost=${META_COHOST}"
+pk_on=0
+cohost_on=0
+[[ "$META_PK" = "True" || "$META_PK" = "true" || "$META_PK" = "1" ]] && pk_on=1
+[[ "$META_COHOST" = "True" || "$META_COHOST" = "true" || "$META_COHOST" = "1" ]] && cohost_on=1
+if [[ "$pk_on" -eq 1 || "$cohost_on" -eq 1 ]]; then
+  if [[ "$ALLOW_P3_FEATURES" = "1" || "$ALLOW_P3_FEATURES" = "true" ]]; then
+    echo "WARN: FEATURE_PK/COHOST on but ALLOW_P3_FEATURES=1 — continuing (not P1 default)"
+  else
+    echo "FAIL: FEATURE_PK/FEATURE_COHOST must be off for default dogfood (P1-safe)." >&2
+    echo "  features.pk=${META_PK} features.cohost=${META_COHOST}" >&2
+    echo "  Set FEATURE_PK=0 FEATURE_COHOST=0 on the API, or ALLOW_P3_FEATURES=1 to soft-allow." >&2
+    echo "  PK/cohost are P3 experimental — never Wave2 DoD." >&2
+    exit 1
+  fi
+else
+  echo "P1-safe: pk/cohost off (expected)"
+fi
 
 # ---------------------------------------------------------------------------
 label "Host OTP send + verify (${HOST_EMAIL})"
@@ -175,12 +263,11 @@ api POST "/api/v1/rooms/${ROOM_ID}/media/publish" "" "$HOST_TOKEN"
 PUSH_URL="$(json_get "$HTTP_BODY" "obj['push_url']")"
 STREAM_KEY="$(json_get "$HTTP_BODY" "obj['stream_key']")"
 EXPIRES_AT="$(json_get "$HTTP_BODY" "obj.get('expires_at','')")"
-echo "---- OBS (custom RTMP) ----"
-echo "server:     rtmp://localhost:1935/live   (or host from push_url)"
-echo "stream_key: ${STREAM_KEY}"
-echo "push_url:   ${PUSH_URL}"
-echo "expires_at: ${EXPIRES_AT}"
-echo "---------------------------"
+OBS_SERVER="$(obs_server_from_push "$PUSH_URL" "$STREAM_KEY")"
+if [[ -z "$OBS_SERVER" ]]; then
+  echo "WARN: could not derive OBS server from push_url; falling back to path strip" >&2
+  OBS_SERVER="$(python3 -c "u='''${PUSH_URL}'''.strip(); i=u.rfind('/'); print(u[:i] if i>0 else u)")"
+fi
 
 # ---------------------------------------------------------------------------
 label "Media/play (HLS for viewers)"
@@ -189,6 +276,8 @@ HLS_URL="$(json_get "$HTTP_BODY" "obj['hls']")"
 FLV_URL="$(json_get "$HTTP_BODY" "obj.get('flv','')")"
 echo "hls=${HLS_URL}"
 echo "flv=${FLV_URL}"
+
+print_obs_block "$OBS_SERVER" "$STREAM_KEY" "$PUSH_URL" "$HLS_URL" "$FLV_URL" "$EXPIRES_AT"
 
 # ---------------------------------------------------------------------------
 label "Viewer OTP send + verify (${VIEWER_EMAIL})"
@@ -304,10 +393,12 @@ fi
 
 # ---------------------------------------------------------------------------
 if [[ "$SKIP_FORCE_CLOSE" = "1" || "$SKIP_FORCE_CLOSE" = "true" ]]; then
-  label "Skip admin force-close (SKIP_FORCE_CLOSE=1)"
+  label "Skip admin force-close (SKIP_FORCE_CLOSE=1 — leave room live for OBS)"
   echo "room left live: ${ROOM_ID}"
+  echo "Tip: paste OBS block above; after human push/play, stop via OBS unpublish or host stop."
 else
   label "Admin force-close room"
+  echo "Tip for OBS week: re-run with SKIP_FORCE_CLOSE=1 to leave the room live."
   if ensure_admin; then
     api POST /api/v1/admin/rooms/force-close \
       "{\"room_id\":\"${ROOM_ID}\",\"reason\":\"dogfood 10min path\"}" \
@@ -331,17 +422,25 @@ else
 fi
 
 echo
+# Re-print paste-ready OBS block at the end (easy to find after long gift path).
+print_obs_block "$OBS_SERVER" "$STREAM_KEY" "$PUSH_URL" "$HLS_URL" "${FLV_URL:-}" "$EXPIRES_AT"
+print_human_obs_checklist "$ROOM_ID"
+
 if [[ "$FAILED" -ne 0 ]]; then
   echo "DOGFOOD_10MIN_PATH_PARTIAL (critical path ok; admin force-close failed)"
   echo "room_id=${ROOM_ID} host=${HOST_ID} viewer=${VIEWER_ID}"
+  echo "obs_server=${OBS_SERVER}"
   echo "publish=${PUSH_URL}"
   echo "stream_key=${STREAM_KEY}"
   echo "hls=${HLS_URL}"
+  echo "NOTE: PARTIAL/PASS is control-plane only — not V-BE-1/2 or plan 06 #1/#2 signed."
   exit 1
 fi
 
 echo "DOGFOOD_10MIN_PATH_PASS"
 echo "room_id=${ROOM_ID} host=${HOST_ID} viewer=${VIEWER_ID}"
+echo "obs_server=${OBS_SERVER}"
 echo "publish=${PUSH_URL}"
 echo "stream_key=${STREAM_KEY}"
 echo "hls=${HLS_URL}"
+echo "NOTE: PASS is control-plane only — not V-BE-1/2 or plan 06 #1/#2 signed."

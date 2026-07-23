@@ -1,7 +1,16 @@
 # Risk accept — P1 WS gate without stage 15 min soak
 
-> **Status: unsigned draft** (plan 06 §8.3 exit quality / decision D3)  
-> **Does not** close a full stage 15-minute soak. Prefer running soak when stage exists.
+> **⚠ UNSIGNED DRAFT — does NOT equal V-BE-2 done.**  
+> Status: **unsigned draft** (plan 06 §8.3 exit quality / decision D3 · Wave2 **V-BE-2**).  
+> **Does not** close a full stage 15-minute soak. Prefer running soak when stage exists.  
+> Scripts, CI, and agents **must not** flip `V-BE-2` to `done` while this file remains unsigned or only a draft in git.
+
+| Gate | Link |
+|---|---|
+| Wave2 ID | **V-BE-2** — [p1-parallel-tracks.md](../product/p1-parallel-tracks.md) §5 / status table |
+| Plan 06 | §8.3 quality row + soak decision D3 — [06-P1进度评审与后续规划.md](../product/06-P1进度评审与后续规划.md) |
+| Prefer close | Stage 15 min × 1000 soak; archive report under `reports/ws-1k-baseline-<UTC>.md` |
+| Signed archive | Copy filled+signed form under `reports/risk-accept/ws-1k-soak-<UTC>-signed.md` |
 
 ## Context
 
@@ -11,7 +20,7 @@
 | Load tool | `scripts/loadtest/ws-centrifugo-load.py` |
 | Result (local) | 1000/1000 connect, est. loss 0%, **hold ~180s** (not 15 min) |
 | Status note | `reports/ws-1k-soak-status-20260722.md` (gate still OPEN) |
-| Related | plan 06 D3 · [p1-status](../product/p1-status.md) · capacity notes in product 04 |
+| Related | plan 06 D3 · [p1-status](../product/p1-status.md) · capacity notes in product 04 · [go-live-stage](./go-live-stage.md) |
 
 ## Gate vs evidence
 
@@ -29,6 +38,7 @@
 - P1 may proceed to **internal dogfood** treating the **local 1000 × ~3 min** Centrifugo baseline as **interim** WS evidence.
 - Exit tables may note “WS: local baseline + risk-accept” instead of “stage soak green”.
 - Does **not** authorize production / GA capacity claims.
+- V-BE-2 may be marked **done** only after this form is **signed** and archived under `reports/` **or** a stage 15 min soak report is archived.
 
 ## What is **not** accepted
 
@@ -36,6 +46,7 @@
 - Claiming stage topology, multi-AZ, or production Centrifugo limits were proven.
 - Skipping a scheduled stage soak when stage is available without re-signing.
 - Using this form to mark device matrix, OBS week, or defect council complete.
+- Auto-closing V-BE-2 from CI dogfood PASS or an unsigned draft in the repo.
 
 ## Residual risks
 
@@ -53,10 +64,17 @@
 
 ## Sign-off (leave blank until decided)
 
-| Role | Name | Date (UTC) | Signature |
+| Role | Name | Date (UTC) | Signature / initials |
 |---|---|---|---|
 | Tech lead |  |  |  |
 | SRE / ops (if any) |  |  |  |
+| Optional: Product / PM |  |  |  |
+
+**Scope (fill before signing):**
+
+- Accepted environments: ☐ local compose only ☐ shared test ☐ interim until stage exists
+- Expiry / re-review date (UTC): ________
+- Archive path after sign: `reports/risk-accept/ws-1k-soak-________-signed.md`
 
 **Checkbox (signer only):**
 
@@ -64,6 +82,7 @@
 - [ ] Residual risks above acknowledged (no 15 min hold, no stage topology, no load P95)
 - [ ] Follow-up: schedule stage 15 min soak before GA / production capacity claim
 - [ ] I will not rewrite soak status reports as “passed” based on this document alone
+- [ ] I will not treat CI/`DOGFOOD_*_PASS` as V-BE-2 closed
 
 **Preferred close path (if stage appears):**
 

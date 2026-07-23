@@ -1,7 +1,8 @@
 # Stage / 生产上线 Runbook
 
 > 本地 dogfood 见 [go-live-local.md](./go-live-local.md)。  
-> 合规闸门总表见 [海外合规与上架闸门](../compliance/海外合规与上架闸门.md)。
+> 合规闸门总表见 [海外合规与上架闸门](../compliance/海外合规与上架闸门.md)。  
+> **Stage 可填 env 模板：** [deploy/.env.stage.example](../../deploy/.env.stage.example)（复制后填密钥；勿提交真密钥）。
 
 本文面向 **stage（预发）→ 小流量 prod**。生产环境禁止一切 mock / fixed-OTP 开关。
 
@@ -16,6 +17,17 @@
 | prod | `production` / `prod` | 必须 | 公开流量 |
 
 当前 API 生产守卫在 `APP_ENV=production|prod` 时 **fail-closed**。Stage 若未用 production 别名，须人工对照下文清单，勿打开 mock。
+
+**快速起步（stage 草稿 env）：**
+
+```bash
+cp deploy/.env.stage.example deploy/.env.stage
+# 编辑 deploy/.env.stage：DATABASE_URL、JWT_*、OTP_HTTP_*、SRS_*、CORS
+# 要点：APP_ENV=staging · USE_POSTGRES=1 · ALLOW_DEV_OTP=0 · ALLOW_MOCK_TOPUP=0
+#       OTP_NOTIFIER=http · FEATURE_PK=0 FEATURE_COHOST=0 · 无 PAY mock
+```
+
+本地对照默认见根目录 [.env.example](../../.env.example)；测试栈 mock 默认见 [deploy/.env.test](../../deploy/.env.test)（**勿**当 stage 用）。
 
 ---
 
@@ -121,15 +133,17 @@ Stage 可临时用沙箱支付/mock 时：
 API_BASE=https://api.stage.example.com OTP_CODE=<real> ./scripts/dogfood-api-smoke.sh
 ```
 
-注意：脚本默认 OTP `123456` 与 mock topup/pay — **仅适用于 dogfood**。生产冒烟应使用：
+注意：脚本默认 OTP `123456` 与 mock topup/pay — **仅适用于 dogfood**。生产/stage 冒烟应使用：
 
 - 真实 OTP  
 - 跳过 topup/pay mock：`DOGFOOD_STRICT=1 OTP_CODE=<real> API_BASE=… ./scripts/dogfood-api-smoke.sh`
+- 可选归档：`DOGFOOD_REPORT_DIR=reports DOGFOOD_STRICT=1 OTP_CODE=<real> API_BASE=… ./scripts/dogfood-api-smoke.sh`
 
 本地全绿路径：
 
 ```bash
-./scripts/deploy-test.sh   # 含 api + media smoke
+./scripts/deploy-test.sh   # 含 api + media smoke；失败默认非致命
+# 严格：DOGFOOD_SMOKE_REQUIRED=1 ./scripts/deploy-test.sh
 ```
 
 ---
@@ -180,11 +194,16 @@ API_BASE=https://api.stage.example.com OTP_CODE=<real> ./scripts/dogfood-api-smo
 | 资源 | 路径 |
 |---|---|
 | 本地开播 | `docs/runbooks/go-live-local.md` |
+| Stage env 模板 | `deploy/.env.stage.example` |
+| 本地 env 示例 | `.env.example` |
 | 支付设计 | `docs/architecture/payment-channels.md` |
 | 合规闸门 | `docs/compliance/海外合规与上架闸门.md` |
 | 测试 compose | `deploy/docker-compose.yml` + `deploy/.env.test` |
 | API 冒烟 | `scripts/dogfood-api-smoke.sh` |
+| V-BE-1 风险接受（未签） | `docs/runbooks/otp-dev-only-risk-accept.md` |
+| V-BE-2 风险接受（未签） | `docs/runbooks/ws-1k-soak-risk-accept.md` |
 | P1 状态 | `docs/product/p1-status.md` |
+| 并行轨 Wave2 | `docs/product/p1-parallel-tracks.md` §5 V-BE-* |
 
 
 ### 发布开关速查（E12.5）

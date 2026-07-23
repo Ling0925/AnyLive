@@ -12,9 +12,17 @@
 #   API_BASE=http://127.0.0.1:8088 OTP_CODE=123456 ./scripts/dogfood-api-smoke.sh
 #   DOGFOOD_STRICT=1 OTP_CODE=<real> API_BASE=https://api.stage.example ./scripts/dogfood-api-smoke.sh
 #
+# Env:
+#   API_BASE, OTP_CODE, DOGFOOD_STRICT, DOGFOOD_ADMIN_EMAIL, DOGFOOD_PG_CONTAINER
+#   ALLOW_P3_FEATURES=1 — allow FEATURE_PK / FEATURE_COHOST on (default: FAIL if on)
+#   DOGFOOD_REPORT_DIR  — tee full log to $DIR/dogfood-api-smoke-<UTC>.log
+#
 # Requires: curl, python3. Fails on non-2xx (except documented 204).
+# Control-plane only — does NOT close V-BE-1/2 or sign risk-accept docs.
 
 set -euo pipefail
+
+SCRIPTS_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Dogfood expects local API with fixed OTP + mock topup.
 # Server side: APP_ENV=local (or ALLOW_DEV_OTP=1) and ALLOW_MOCK_TOPUP=1 for gifts.
@@ -27,6 +35,15 @@ API_BASE="${API_BASE%/}"
 # Stage/prod-ish: DOGFOOD_STRICT=1 skips mock topup / mock pay / sandbox-complete.
 # Requires a real OTP (OTP_CODE) and a server without mock channels if you assert pay.
 DOGFOOD_STRICT="${DOGFOOD_STRICT:-0}"
+ALLOW_P3_FEATURES="${ALLOW_P3_FEATURES:-0}"
+
+# Optional log tee for redeploy evidence.
+if [[ -n "${DOGFOOD_REPORT_DIR:-}" ]]; then
+  mkdir -p "$DOGFOOD_REPORT_DIR"
+  _df_log="${DOGFOOD_REPORT_DIR}/dogfood-api-smoke-$(date -u +%Y%m%dT%H%M%SZ).log"
+  exec > >(tee "$_df_log") 2>&1
+  echo "logging to ${_df_log}"
+fi
 
 HOST_EMAIL="dogfood-host-$(date +%s)@example.com"
 FAN_EMAIL="dogfood-fan-$(date +%s)@example.com"
@@ -35,6 +52,28 @@ step=0
 
 skip_mock() {
   [[ "$DOGFOOD_STRICT" = "1" || "$DOGFOOD_STRICT" = "true" ]]
+}
+
+obs_server_from_push() {
+  PYTHONPATH="${SCRIPTS_DIR}${PYTHONPATH:+:$PYTHONPATH}" python3 -c \
+    "import sys; from media_smoke_lib import obs_server_from_push_url; print(obs_server_from_push_url(sys.argv[1], sys.argv[2]))" \
+    "$1" "$2"
+}
+
+print_obs_block() {
+  local server="$1" stream_key="$2" push_url="$3" hls="${4:-}"
+  echo
+  echo "---- OBS (custom RTMP) paste-ready ----"
+  echo "Server:      ${server}"
+  echo "Stream Key:  ${stream_key}"
+  echo "push_url:    ${push_url}"
+  [[ -n "$hls" ]] && echo "HLS:         ${hls}"
+  echo "---------------------------------------"
+  if [[ "$stream_key" != *"?"* ]] || [[ "$stream_key" != *"exp="* ]] || [[ "$stream_key" != *"sig="* ]]; then
+    echo "WARN: stream_key should include ?exp=&sig= (signed token)." >&2
+  else
+    echo "NOTE: paste full stream_key including ?exp=&sig= (not bare room UUID)."
+  fi
 }
 
 label() {
@@ -149,8 +188,34 @@ ensure_admin() {
 }
 
 echo "AnyLive dogfood API smoke"
-echo "API_BASE=${API_BASE}  OTP_CODE=${OTP_CODE}"
+echo "API_BASE=${API_BASE}  OTP_CODE=${OTP_CODE}  DOGFOOD_STRICT=${DOGFOOD_STRICT}"
+echo "ALLOW_P3_FEATURES=${ALLOW_P3_FEATURES}"
 echo "(API must already be running — docker not required for memory mode)"
+echo "NOTE: control-plane only — does not close V-BE-1/2 or sign risk-accept docs."
+
+# ---------------------------------------------------------------------------
+label "P1-safe feature guard (GET /api/v1/meta)"
+api GET /api/v1/meta
+META_PK="$(json_get "$HTTP_BODY" "obj.get('features',{}).get('pk')")"
+META_COHOST="$(json_get "$HTTP_BODY" "obj.get('features',{}).get('cohost')")"
+echo "features.pk=${META_PK} features.cohost=${META_COHOST}"
+pk_on=0
+cohost_on=0
+[[ "$META_PK" = "True" || "$META_PK" = "true" || "$META_PK" = "1" ]] && pk_on=1
+[[ "$META_COHOST" = "True" || "$META_COHOST" = "true" || "$META_COHOST" = "1" ]] && cohost_on=1
+if [[ "$pk_on" -eq 1 || "$cohost_on" -eq 1 ]]; then
+  if [[ "$ALLOW_P3_FEATURES" = "1" || "$ALLOW_P3_FEATURES" = "true" ]]; then
+    echo "WARN: FEATURE_PK/COHOST on but ALLOW_P3_FEATURES=1 — continuing (not P1 default)"
+  else
+    echo "FAIL: FEATURE_PK/FEATURE_COHOST must be off for default dogfood (P1-safe)." >&2
+    echo "  features.pk=${META_PK} features.cohost=${META_COHOST}" >&2
+    echo "  Set FEATURE_PK=0 FEATURE_COHOST=0 on the API, or ALLOW_P3_FEATURES=1 to soft-allow." >&2
+    echo "  PK/cohost are P3 experimental — never Wave2 DoD." >&2
+    exit 1
+  fi
+else
+  echo "P1-safe: pk/cohost off (expected)"
+fi
 
 # ---------------------------------------------------------------------------
 label "Host OTP send + verify (${HOST_EMAIL})"
@@ -229,14 +294,21 @@ label "Host media/publish (RTMP URL / stream key)"
 api POST "/api/v1/rooms/${ROOM_ID}/media/publish" "" "$HOST_TOKEN"
 PUSH_URL="$(json_get "$HTTP_BODY" "obj['push_url']")"
 STREAM_KEY="$(json_get "$HTTP_BODY" "obj['stream_key']")"
+OBS_SERVER="$(obs_server_from_push "$PUSH_URL" "$STREAM_KEY")"
+if [[ -z "$OBS_SERVER" ]]; then
+  echo "WARN: could not derive OBS server from push_url" >&2
+  OBS_SERVER="(derive from push_url — strip last path segment)"
+fi
 echo "push_url=${PUSH_URL}"
 echo "stream_key=${STREAM_KEY}"
+echo "obs_server=${OBS_SERVER}"
 
 # ---------------------------------------------------------------------------
 label "Fan media/play (HLS URL)"
 api GET "/api/v1/rooms/${ROOM_ID}/media/play"
 HLS_URL="$(json_get "$HTTP_BODY" "obj['hls']")"
 echo "hls=${HLS_URL}"
+print_obs_block "$OBS_SERVER" "$STREAM_KEY" "$PUSH_URL" "$HLS_URL"
 
 # ---------------------------------------------------------------------------
 label "Fan topup + list gifts + send gift"
@@ -720,7 +792,11 @@ if [[ "$ROOM_STATUS" == "live" ]]; then
 fi
 
 echo
+print_obs_block "${OBS_SERVER:-}" "$STREAM_KEY" "$PUSH_URL" "$HLS_URL"
 echo "DOGFOOD_API_SMOKE_PASS"
 echo "room_id=${ROOM_ID} host=${HOST_ID} fan=${FAN_ID}"
+echo "obs_server=${OBS_SERVER:-}"
 echo "publish=${PUSH_URL}  stream_key=${STREAM_KEY}"
 echo "hls=${HLS_URL}"
+echo "NOTE: PASS is control-plane only — not V-BE-1/2 or plan 06 exit signed."
+echo "Human OBS checklist: OBS push → H5/Flutter play → stop/unpublish (see dogfood-media.md)."

@@ -25,12 +25,24 @@ API 服务已注入 dogfood 开关（与 `deploy/.env.test` 一致）：
 | `FEATURE_PK` / `FEATURE_COHOST` | `0` | **P1-safe 默认关**；连麦/PK 属 P3 实验，见 [p3-p4-experimental](../product/p3-p4-experimental.md) |
 | `CHAT_BLOCKLIST` | `spamword` | 聊天词过滤；`dogfood-api-smoke` soft-assert 403 |
 
-启动成功后会打印 OBS 说明，并自动跑：
+启动成功后会打印 OBS 说明、一键重跑命令，并自动跑：
 
-- `./scripts/dogfood-api-smoke.sh`
-- `./scripts/dogfood-media-smoke.sh`
+- `./scripts/dogfood-api-smoke.sh`（日志 tee → `reports/dogfood-api-smoke-<UTC>.log`）
+- `./scripts/dogfood-media-smoke.sh`（同上 media）
 
-跳过冒烟：`SKIP_DOGFOOD_SMOKE=1 ./scripts/deploy-test.sh`。
+跳过冒烟：`SKIP_DOGFOOD_SMOKE=1 ./scripts/deploy-test.sh`。  
+冒烟失败默认 **不** 拆栈；若需严格：`DOGFOOD_SMOKE_REQUIRED=1 ./scripts/deploy-test.sh`。
+
+**Stage 再冒烟（真 OTP + 跳过 mock）：**
+
+```bash
+DOGFOOD_STRICT=1 OTP_CODE=<real> API_BASE=https://api.stage.example \
+  ./scripts/dogfood-api-smoke.sh
+# 可选：DOGFOOD_REPORT_DIR=reports
+```
+
+Stage 模板：`deploy/.env.stage.example`。  
+V-BE 风险接受（**未签**）：[otp-dev-only-risk-accept.md](./otp-dev-only-risk-accept.md) · [ws-1k-soak-risk-accept.md](./ws-1k-soak-risk-accept.md) — CI/脚本 **不得** 自动标 V-BE done。
 
 ## 1.1 运营预设与 10 分钟路径（控制面脚本）
 
@@ -55,9 +67,10 @@ API 服务已注入 dogfood 开关（与 `deploy/.env.test` 一致）：
 本地证据样例：`reports/dogfood-api-smoke-*.log`、`reports/dogfood-10min-path-*.log`。
 CI 非阻塞 job：`dogfood-api-smoke`（memory API + smoke，`continue-on-error: true`）。
 
-环境变量与 `dogfood-api-smoke.sh` 一致：`API_BASE`（默认 `http://localhost:8088`）、`OTP_CODE`（默认 `123456`）、`DOGFOOD_STRICT=1`（跳过 mock topup/pay）、`DOGFOOD_ADMIN_EMAIL`、`DOGFOOD_PG_CONTAINER`。force-close 可跳过：`SKIP_FORCE_CLOSE=1`。
+环境变量与 `dogfood-api-smoke.sh` 一致：`API_BASE`（默认 `http://localhost:8088`）、`OTP_CODE`（默认 `123456`）、`DOGFOOD_STRICT=1`（跳过 mock topup/pay）、`DOGFOOD_ADMIN_EMAIL`、`DOGFOOD_PG_CONTAINER`、`DOGFOOD_REPORT_DIR`（tee 日志）。force-close 可跳过：`SKIP_FORCE_CLOSE=1`（**OBS 周推荐**）。P3 误开时默认 FAIL：`ALLOW_P3_FEATURES=1` 才软放行。
 
-人工 OBS / H5 / Flutter 路径仍按下文清单与 [dogfood-cohort.md](./dogfood-cohort.md) 操作。
+人工 OBS / H5 / Flutter 路径仍按下文清单与 [dogfood-cohort.md](./dogfood-cohort.md) 操作。  
+Wave2 **三端自测打包**（重部署 + APK + admin/h5 preview + dogfood 顺序 + 人工签字项）：[wave2-self-test.md](./wave2-self-test.md)。
 `GET /api/v1/meta` 应返回 `features.pk=false` / `features.cohost=false`（测试栈 `deploy/.env.test`）；Flutter 房间页据此 soft-hide 连麦/PK 菜单。
 
 停止：
@@ -85,6 +98,8 @@ docker compose -f deploy/docker-compose.yml --profile app down
    - 一键复制，无需手调 API
 5. 「直播间」列表中可点 **推流信息**，对已有房间重新签发并展示 OBS 凭证
 6. 其它运营能力：强关、封禁/禁言、举报、礼物配置、审计
+
+**15 分钟运营走查（V-AD-1）：** 预检 + mvp-scope §4 逐步点击清单见 [admin-ops-15min-demo.md](./admin-ops-15min-demo.md)（人工签字才关闭 V-AD-1）。
 
 管理端打包时的 API 地址：`http://localhost:8088`（`VITE_API_BASE`）。Docker 镜像 `anylive-admin` 需重建后才含源码改动：`docker compose -f deploy/docker-compose.yml --profile app build admin`。
 
@@ -124,7 +139,7 @@ docker compose -f deploy/docker-compose.yml --profile app down
 | 字段 | 填写 |
 |---|---|
 | 服务 | 自定义… |
-| 服务器 | `rtmp://localhost:1935/live` |
+| 服务器 | **从 `push_url` 推导**（本地常见 `rtmp://localhost:1935/live`；`dogfood-*-path/smoke` 会打印 paste-ready Server） |
 | 串流密钥 | media/publish 返回的 **完整** `stream_key`（含 `?exp=&sig=`） |
 
 用裸房间 UUID 当串流密钥会被 API 的 `on_publish` 校验 **拒绝**。SRS 会把 stream 拆成裸 UUID + query 参数回调 API：
@@ -155,9 +170,10 @@ GET /api/v1/rooms/{id}/media/play
 
 - [ ] `./scripts/deploy-test.sh` — API 健康、Admin 可访问  
 - [ ] 管理后台 OTP `123456` + bootstrap 管理员  
-- [ ] 主播开播 + media/publish → OBS 服务器 + **签名**串流密钥  
+- [ ] 主播开播 + media/publish → OBS **Server（from push_url）** + **签名**串流密钥  
 - [ ] 观众 H5 `?room=` 或 play 接口 HLS  
 - [ ] 可选：停 OBS → webhook unpublish（或主播 `POST .../stop`）  
+- [ ] **未**把控制面 PASS 写成 V-BE-1/2 已关闭  
 
 ## 相关文档
 
@@ -165,3 +181,5 @@ GET /api/v1/rooms/{id}/media/play
 - `scripts/dogfood-api-smoke.sh` / `scripts/dogfood-media-smoke.sh`  
 - `scripts/dogfood-gift-seed.sh` / `scripts/dogfood-10min-path.sh` — 礼物预设 + 10 分钟控制面路径（§1.1）  
 - `deploy/.env.test` — compose 环境默认值  
+- `deploy/.env.stage.example` — stage 可填模板（mock/OTP 固定码 OFF）  
+- [otp-dev-only-risk-accept.md](./otp-dev-only-risk-accept.md) · [ws-1k-soak-risk-accept.md](./ws-1k-soak-risk-accept.md) — **unsigned** V-BE drafts  

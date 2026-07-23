@@ -124,6 +124,45 @@ def assert_stream_key_matches_room(stream_key: str, room_id: str) -> None:
 
 
 
+def format_obs_paste_block(
+    server: str,
+    stream_key: str,
+    *,
+    push_url: str = "",
+    hls: str = "",
+    flv: str = "",
+    expires_at: str = "",
+) -> str:
+    """Human-facing paste-ready OBS + HLS block (no network I/O).
+
+    Used by dogfood scripts; Server must already be derived via
+    ``obs_server_from_push_url`` (never hardcode localhost in callers when
+    push_url is available).
+    """
+    lines = [
+        "---- OBS (custom RTMP) paste-ready ----",
+        f"Server:      {server}",
+        f"Stream Key:  {stream_key}",
+    ]
+    if push_url:
+        lines.append(f"push_url:    {push_url}")
+    if expires_at:
+        lines.append(f"expires_at:  {expires_at}")
+    if hls:
+        lines.append(f"HLS:         {hls}")
+    if flv:
+        lines.append(f"flv:         {flv}")
+    lines.append("---------------------------------------")
+    sk = (stream_key or "").strip()
+    if "?" not in sk or "exp=" not in sk or "sig=" not in sk:
+        lines.append(
+            "WARN: stream_key should include ?exp=&sig= (signed token; bare UUID rejected)."
+        )
+    else:
+        lines.append("NOTE: paste full stream_key including ?exp=&sig= (not bare room UUID).")
+    return "\n".join(lines)
+
+
 def srs_http_ok_url(base: str) -> str:
     """Build SRS HTTP API versions endpoint used as a liveness probe.
 

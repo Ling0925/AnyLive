@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from media_smoke_lib import (  # noqa: E402
     MediaSmokeError,
     assert_stream_key_matches_room,
+    format_obs_paste_block,
     obs_server_from_push_url,
     parse_play_response,
     parse_publish_response,
@@ -148,6 +149,25 @@ class TestSrsUrls(unittest.TestCase):
             srs_api_base_from_rtmp("rtmp://media.example:1935/live", api_port=1985),
             "http://media.example:1985",
         )
+
+
+class TestFormatObsPasteBlock(unittest.TestCase):
+    def test_includes_server_key_and_sig_note(self) -> None:
+        block = format_obs_paste_block(
+            "rtmp://media.example/live",
+            SIGNED_KEY,
+            push_url=f"rtmp://media.example/live/{SIGNED_KEY}",
+            hls=f"http://cdn.example/live/{ROOM}.m3u8",
+        )
+        self.assertIn("rtmp://media.example/live", block)
+        self.assertIn(SIGNED_KEY, block)
+        self.assertIn("?exp=&sig=", block)
+        self.assertIn("HLS:", block)
+        self.assertNotIn("WARN:", block)
+
+    def test_warns_on_bare_key(self) -> None:
+        block = format_obs_paste_block("rtmp://localhost:1935/live", ROOM)
+        self.assertIn("WARN:", block)
 
 
 if __name__ == "__main__":
