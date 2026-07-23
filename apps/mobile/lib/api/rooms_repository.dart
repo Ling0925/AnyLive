@@ -29,6 +29,88 @@ class Room {
   bool get isLive => status == 'live';
 }
 
+class RoomStats {
+  RoomStats({
+    required this.roomId,
+    required this.onlineCount,
+    required this.likeCount,
+    this.recordingEnabled = false,
+  });
+
+  final String roomId;
+  final int onlineCount;
+  final int likeCount;
+  final bool recordingEnabled;
+
+  factory RoomStats.fromJson(Map<String, dynamic> json) {
+    return RoomStats(
+      roomId: json['room_id'] as String? ?? '',
+      onlineCount: (json['online_count'] as num?)?.toInt() ?? 0,
+      likeCount: (json['like_count'] as num?)?.toInt() ?? 0,
+      recordingEnabled: json['recording_enabled'] as bool? ?? false,
+    );
+  }
+}
+
+class RecordingStatus {
+  RecordingStatus({required this.roomId, required this.recordingEnabled});
+
+  final String roomId;
+  final bool recordingEnabled;
+
+  factory RecordingStatus.fromJson(Map<String, dynamic> json) {
+    return RecordingStatus(
+      roomId: json['room_id'] as String? ?? '',
+      recordingEnabled: json['recording_enabled'] as bool? ?? false,
+    );
+  }
+}
+
+class LikeResult {
+  LikeResult({required this.accepted, required this.likeCount});
+
+  final bool accepted;
+  final int likeCount;
+
+  factory LikeResult.fromJson(Map<String, dynamic> json) {
+    return LikeResult(
+      accepted: json['accepted'] as bool? ?? false,
+      likeCount: (json['like_count'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
+class SearchUserHit {
+  SearchUserHit({required this.id, required this.displayName});
+
+  final String id;
+  final String displayName;
+
+  factory SearchUserHit.fromJson(Map<String, dynamic> json) {
+    return SearchUserHit(
+      id: json['id'] as String? ?? '',
+      displayName: json['display_name'] as String? ?? '',
+    );
+  }
+}
+
+class SearchResult {
+  SearchResult({required this.users, required this.rooms});
+
+  final List<SearchUserHit> users;
+  final List<Room> rooms;
+
+  factory SearchResult.fromJson(Map<String, dynamic> json) {
+    final users = (json['users'] as List<dynamic>? ?? [])
+        .map((e) => SearchUserHit.fromJson(e as Map<String, dynamic>))
+        .toList();
+    final rooms = (json['rooms'] as List<dynamic>? ?? [])
+        .map((e) => Room.fromJson(e as Map<String, dynamic>))
+        .toList();
+    return SearchResult(users: users, rooms: rooms);
+  }
+}
+
 /// Owner publish credentials from `POST /api/v1/rooms/{id}/media/publish`.
 class PublishInfo {
   PublishInfo({
@@ -172,6 +254,87 @@ class RoomsRepository {
       throw RoomsException('play_failed', res.statusCode, res.body);
     }
     return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  /// Public stats: online_count + like_count.
+  Future<RoomStats> roomStats(String roomId) async {
+    final res = await httpClient.get(
+      client.uri('/api/v1/rooms/$roomId/stats'),
+      headers: client.jsonHeaders(),
+    );
+    if (res.statusCode != 200) {
+      throw RoomsException('stats_failed', res.statusCode, res.body);
+    }
+    return RoomStats.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+  }
+
+  /// Presence heartbeat; returns online count.
+  Future<int> presenceHeartbeat(String roomId) async {
+    final res = await httpClient.post(
+      client.uri('/api/v1/rooms/$roomId/presence'),
+      headers: client.jsonHeaders(auth: true),
+    );
+    if (res.statusCode != 200) {
+      throw RoomsException('presence_failed', res.statusCode, res.body);
+    }
+    final map = jsonDecode(res.body) as Map<String, dynamic>;
+    return (map['online_count'] as num?)?.toInt() ?? 0;
+  }
+
+  /// Like the room; returns accepted + total.
+  Future<LikeResult> likeRoom(String roomId) async {
+    final res = await httpClient.post(
+      client.uri('/api/v1/rooms/$roomId/likes'),
+      headers: client.jsonHeaders(auth: true),
+      body: jsonEncode({}),
+    );
+    if (res.statusCode != 200) {
+      throw RoomsException('like_failed', res.statusCode, res.body);
+    }
+    return LikeResult.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+  }
+
+  /// GET `/api/v1/rooms/{id}/recording`
+  Future<RecordingStatus> getRecording(String roomId) async {
+    final res = await httpClient.get(
+      client.uri('/api/v1/rooms/$roomId/recording'),
+      headers: client.jsonHeaders(),
+    );
+    if (res.statusCode != 200) {
+      throw RoomsException('recording_get_failed', res.statusCode, res.body);
+    }
+    return RecordingStatus.fromJson(
+      jsonDecode(res.body) as Map<String, dynamic>,
+    );
+  }
+
+  /// PUT `/api/v1/rooms/{id}/recording` — owner only.
+  Future<RecordingStatus> setRecording(String roomId, bool enabled) async {
+    final res = await httpClient.put(
+      client.uri('/api/v1/rooms/$roomId/recording'),
+      headers: client.jsonHeaders(auth: true),
+      body: jsonEncode({'enabled': enabled}),
+    );
+    if (res.statusCode != 200) {
+      throw RoomsException('recording_set_failed', res.statusCode, res.body);
+    }
+    return RecordingStatus.fromJson(
+      jsonDecode(res.body) as Map<String, dynamic>,
+    );
+  }
+
+  /// Search users/rooms by substring query.
+  Future<SearchResult> search(String q, {String type = 'all', int limit = 20}) async {
+    final path =
+        '/api/v1/search?q=${Uri.encodeQueryComponent(q)}&type=${Uri.encodeQueryComponent(type)}&limit=$limit';
+    final res = await httpClient.get(
+      client.uri(path),
+      headers: client.jsonHeaders(),
+    );
+    if (res.statusCode != 200) {
+      throw RoomsException('search_failed', res.statusCode, res.body);
+    }
+    return SearchResult.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
   Future<List<ChatMessage>> listMessages(String roomId, {int limit = 50}) async {

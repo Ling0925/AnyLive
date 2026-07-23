@@ -72,6 +72,61 @@ class AuthRepository {
     client.accessToken = session.accessToken;
     return session;
   }
+
+  /// List active refresh sessions (`GET /api/v1/me/sessions`).
+  Future<List<RefreshSessionInfo>> listSessions() async {
+    final res = await httpClient.get(
+      client.uri('/api/v1/me/sessions'),
+      headers: client.jsonHeaders(auth: true),
+    );
+    if (res.statusCode != 200) {
+      throw AuthException('list_sessions_failed', res.statusCode, res.body);
+    }
+    final map = jsonDecode(res.body) as Map<String, dynamic>;
+    final items = map['items'] as List<dynamic>? ?? [];
+    return items
+        .map((e) => RefreshSessionInfo.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Revoke all refresh sessions (`DELETE /api/v1/me/sessions`).
+  Future<int> logoutAllSessions() async {
+    final res = await httpClient.delete(
+      client.uri('/api/v1/me/sessions'),
+      headers: client.jsonHeaders(auth: true),
+    );
+    if (res.statusCode != 200) {
+      throw AuthException('logout_all_failed', res.statusCode, res.body);
+    }
+    final map = jsonDecode(res.body) as Map<String, dynamic>;
+    return (map['revoked'] as num?)?.toInt() ?? 0;
+  }
+
+  /// Revoke one refresh session by jti (`DELETE /api/v1/me/sessions/{jti}`).
+  Future<void> revokeSession(String jti) async {
+    final id = Uri.encodeComponent(jti.trim());
+    final res = await httpClient.delete(
+      client.uri('/api/v1/me/sessions/$id'),
+      headers: client.jsonHeaders(auth: true),
+    );
+    if (res.statusCode != 204 && res.statusCode != 200) {
+      throw AuthException('revoke_session_failed', res.statusCode, res.body);
+    }
+  }
+}
+
+class RefreshSessionInfo {
+  RefreshSessionInfo({required this.jti, required this.expiresAt});
+
+  final String jti;
+  final String expiresAt;
+
+  factory RefreshSessionInfo.fromJson(Map<String, dynamic> json) {
+    return RefreshSessionInfo(
+      jti: json['jti'] as String? ?? '',
+      expiresAt: json['expires_at'] as String? ?? '',
+    );
+  }
 }
 
 class AuthException implements Exception {

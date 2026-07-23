@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../api/api_client.dart';
 import '../../api/auth_repository.dart';
+import '../../api/events_repository.dart';
 import '../../api/profile_repository.dart';
+import '../../api/session_store.dart';
 import '../../config/app_config.dart';
 import '../home/home_page.dart';
 
@@ -12,6 +16,8 @@ class LoginPage extends StatefulWidget {
     required this.config,
     this.authRepository,
     this.profileRepositoryFactory,
+    this.sessionStore,
+    this.onLoggedIn,
   });
 
   final AppConfig config;
@@ -20,8 +26,12 @@ class LoginPage extends StatefulWidget {
   final AuthRepository? authRepository;
 
   /// Builds a [ProfileRepository] after OTP verify (token already on [ApiClient]).
-  /// Injectable so tests can assert the best-effort age/privacy PATCH.
   final ProfileRepository Function(ApiClient client)? profileRepositoryFactory;
+
+  final SessionStore? sessionStore;
+
+  /// When set, called after successful verify instead of pushReplacement alone.
+  final void Function(AuthSession session)? onLoggedIn;
 
   @override
   State<LoginPage> createState() => _LoginPageState();
@@ -81,7 +91,6 @@ class _LoginPageState extends State<LoginPage> {
         code: _code.text.trim(),
       );
 
-      // Best-effort compliance PATCH — never block navigation on failure.
       if (_ageConfirmed || _privacyAccepted) {
         try {
           final profileClient = ApiClient(
@@ -95,23 +104,45 @@ class _LoginPageState extends State<LoginPage> {
             ageConfirmed: _ageConfirmed ? true : null,
             privacyAccepted: _privacyAccepted ? true : null,
           );
-        } catch (_) {
-          // Ignore — user can re-confirm on profile page.
-        }
+        } catch (_) {}
       }
 
-      if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => HomePage(
-            config: widget.config,
-            sessionLabel: session.displayName.isEmpty
-                ? session.email ?? session.userId
-                : session.displayName,
-            accessToken: session.accessToken,
+      try {
+        await widget.sessionStore?.save(session);
+      } catch (_) {}
+
+      // Best-effort analytics (must not block login).
+      try {
+        final eventsClient = ApiClient(
+          baseUrl: widget.config.normalizedApiBaseUrl,
+          accessToken: session.accessToken,
+        );
+        unawaited(
+          EventsRepository(client: eventsClient).track(
+            'auth.login',
+            props: {'method': 'otp'},
           ),
-        ),
-      );
+        );
+      } catch (_) {}
+
+      if (!mounted) return;
+      if (widget.onLoggedIn != null) {
+        widget.onLoggedIn!(session);
+        Navigator.of(context).pop();
+      } else {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (_) => HomePage(
+              config: widget.config,
+              sessionLabel: session.displayName.isEmpty
+                  ? session.email ?? session.userId
+                  : session.displayName,
+              accessToken: session.accessToken,
+              sessionStore: widget.sessionStore,
+            ),
+          ),
+        );
+      }
     } on AuthException catch (e) {
       setState(() => _error = e.toString());
     } catch (e) {
@@ -152,7 +183,6 @@ class _LoginPageState extends State<LoginPage> {
               ),
               const SizedBox(height: 12),
             ],
-            // MVP age declaration — required before Verify.
             CheckboxListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('I confirm I am 18 or older'),
@@ -172,18 +202,22 @@ class _LoginPageState extends State<LoginPage> {
               controlAffinity: ListTileControlAffinity.leading,
             ),
             if (_error != null)
-              Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              Text(
+                _error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
             const SizedBox(height: 12),
             FilledButton(
               onPressed: _otpSent
                   ? (canVerify ? _verify : null)
                   : (canSend ? _sendOtp : null),
-              child: Text(_busy
-                  ? 'Please wait…'
-                  : (_otpSent ? 'Verify & continue' : 'Send OTP')),
+              child: Text(
+                _busy
+                    ? 'Please wait…'
+                    : (_otpSent ? 'Verify & continue' : 'Send OTP'),
+              ),
             ),
             const Spacer(),
-            // P1 compliance: show legal URLs (no url_launcher dep yet).
             Text(
               'Privacy Policy',
               style: Theme.of(context).textTheme.labelLarge,

@@ -153,6 +153,20 @@ void main() {
           headers: headers,
         );
       }
+      if (path == '/api/v1/rooms/r1/pk' && request.method == 'GET') {
+        return http.Response(
+          jsonEncode({'session': null}),
+          200,
+          headers: headers,
+        );
+      }
+      if (path == '/api/v1/events' && request.method == 'POST') {
+        return http.Response(
+          jsonEncode({'accepted': 1, 'dropped': 0}),
+          202,
+          headers: headers,
+        );
+      }
       return http.Response('not found: $path', 404);
     });
   }
@@ -408,9 +422,7 @@ void main() {
     await tester.pump(); // schedule snackbar
     await tester.pump(const Duration(milliseconds: 750));
 
-    expect(
-      find.text('Copied - open in VLC / browser player'),
-      findsOneWidget,
-    );
+    expect(find.byKey(const Key('stream-url-copied-snackbar')), findsOneWidget);
+    expect(find.text('Copied stream URL'), findsOneWidget);
   });
 }

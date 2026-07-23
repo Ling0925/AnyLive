@@ -108,5 +108,54 @@ void main() {
         throwsA(isA<ProfileException>()),
       );
     });
+
+    test('getCreatorStats parses host dashboard', () async {
+      final mock = MockClient((request) async {
+        expect(request.url.path, '/api/v1/me/creator');
+        expect(request.method, 'GET');
+        expect(request.headers['Authorization'], 'Bearer tok');
+        return http.Response(
+          jsonEncode({
+            'follower_count': 12,
+            'following_count': 3,
+            'live_rooms': 1,
+            'total_rooms': 2,
+            'gift_coins_received': 500,
+            'gift_credit_entries': 4,
+            'rooms': [
+              {
+                'id': 'r1',
+                'owner_id': 'u1',
+                'title': 'Show',
+                'status': 'live',
+              },
+            ],
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+      final api = ApiClient(baseUrl: 'http://localhost:8088', accessToken: 'tok');
+      final repo = ProfileRepository(client: api, httpClient: mock);
+      final stats = await repo.getCreatorStats();
+      expect(stats.followerCount, 12);
+      expect(stats.followingCount, 3);
+      expect(stats.liveRooms, 1);
+      expect(stats.totalRooms, 2);
+      expect(stats.giftCoinsReceived, 500);
+      expect(stats.giftCreditEntries, 4);
+      expect(stats.rooms, hasLength(1));
+      expect(stats.rooms.first.title, 'Show');
+      expect(stats.rooms.first.isLive, isTrue);
+    });
+
+    test('getCreatorStats throws on error status', () async {
+      final mock = MockClient((_) async => http.Response('nope', 401));
+      final repo = ProfileRepository(
+        client: ApiClient(baseUrl: 'http://x', accessToken: 't'),
+        httpClient: mock,
+      );
+      expect(() => repo.getCreatorStats(), throwsA(isA<ProfileException>()));
+    });
   });
 }
