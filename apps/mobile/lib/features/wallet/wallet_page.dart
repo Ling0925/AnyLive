@@ -36,6 +36,8 @@ class _WalletPageState extends State<WalletPage> {
 
   int _balance = 0;
   List<PayProduct> _products = [];
+  List<LedgerEntry> _ledger = [];
+  String? _ledgerHint;
   String? _error;
   String? _hint;
   bool _loading = true;
@@ -58,6 +60,7 @@ class _WalletPageState extends State<WalletPage> {
     setState(() {
       _loading = true;
       _error = null;
+      _ledgerHint = null;
     });
     try {
       final balance = await _gifts.walletBalance();
@@ -67,10 +70,13 @@ class _WalletPageState extends State<WalletPage> {
       } catch (_) {
         // Pay catalog optional when channel disabled.
       }
+      // Ledger is best-effort — wallet still usable if endpoint lags.
+      final ledger = await _loadLedgerBestEffort();
       if (!mounted) return;
       setState(() {
         _balance = balance;
         _products = products;
+        _ledger = ledger;
         _loading = false;
       });
     } catch (e) {
@@ -80,6 +86,30 @@ class _WalletPageState extends State<WalletPage> {
         _loading = false;
       });
     }
+  }
+
+  Future<List<LedgerEntry>> _loadLedgerBestEffort() async {
+    try {
+      final entries = await _gifts.listLedger();
+      // Newest first when API returns chronological order.
+      final sorted = List<LedgerEntry>.from(entries)
+        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      if (mounted) {
+        setState(() => _ledgerHint = null);
+      }
+      return sorted.take(20).toList();
+    } catch (_) {
+      if (mounted) {
+        setState(() => _ledgerHint = 'Ledger unavailable');
+      }
+      return const [];
+    }
+  }
+
+  Future<void> _refreshLedgerQuiet() async {
+    final ledger = await _loadLedgerBestEffort();
+    if (!mounted) return;
+    setState(() => _ledger = ledger);
   }
 
   Future<void> _mockTopup() async {
@@ -92,6 +122,7 @@ class _WalletPageState extends State<WalletPage> {
         _hint = 'Mock topup +100';
         _busy = false;
       });
+      unawaited(_refreshLedgerQuiet());
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -130,6 +161,7 @@ class _WalletPageState extends State<WalletPage> {
             'Credited ${done.coins} coins (order ${done.id}, ${done.status})';
         _busy = false;
       });
+      unawaited(_refreshLedgerQuiet());
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -137,6 +169,13 @@ class _WalletPageState extends State<WalletPage> {
         _busy = false;
       });
     }
+  }
+
+  String _formatLedgerLine(LedgerEntry e) {
+    final sign = e.amount >= 0 ? '+' : '';
+    final type = e.entryType.isEmpty ? 'entry' : e.entryType;
+    final ref = e.reference.isEmpty ? '' : ' · ${e.reference}';
+    return '$sign${e.amount} ($type)$ref → ${e.balanceAfter}';
   }
 
   @override
@@ -179,6 +218,28 @@ class _WalletPageState extends State<WalletPage> {
                     style: TextStyle(color: Theme.of(context).colorScheme.error),
                   ),
                 ],
+                const SizedBox(height: 24),
+                Text(
+                  'Recent ledger',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 8),
+                if (_ledger.isEmpty)
+                  Text(
+                    key: const Key('wallet-ledger-empty'),
+                    _ledgerHint ?? 'No ledger entries yet',
+                    style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  )
+                else
+                  ..._ledger.map(
+                    (e) => ListTile(
+                      key: Key('wallet-ledger-${e.id}'),
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(_formatLedgerLine(e)),
+                      subtitle: e.createdAt.isEmpty ? null : Text(e.createdAt),
+                    ),
+                  ),
                 const SizedBox(height: 24),
                 Text(
                   'Coin packages',

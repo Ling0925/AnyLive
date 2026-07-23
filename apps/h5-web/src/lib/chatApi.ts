@@ -40,6 +40,35 @@ export function walletTopupPath(): string {
   return '/api/v1/wallet/topups'
 }
 
+export function mePath(): string {
+  return '/api/v1/me'
+}
+
+export function meExportPath(): string {
+  return '/api/v1/me/export'
+}
+
+/** JSON body for PATCH /me (age / privacy declarations). */
+export function patchMeBody(opts: {
+  ageConfirmed?: boolean
+  privacyAccepted?: boolean
+  displayName?: string
+}): {
+  age_confirmed?: boolean
+  privacy_accepted?: boolean
+  display_name?: string
+} {
+  const body: {
+    age_confirmed?: boolean
+    privacy_accepted?: boolean
+    display_name?: string
+  } = {}
+  if (opts.ageConfirmed !== undefined) body.age_confirmed = opts.ageConfirmed
+  if (opts.privacyAccepted !== undefined) body.privacy_accepted = opts.privacyAccepted
+  if (opts.displayName !== undefined) body.display_name = opts.displayName
+  return body
+}
+
 export function payProductsPath(): string {
   return '/api/v1/pay/products'
 }

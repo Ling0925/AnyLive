@@ -8,6 +8,8 @@ import {
   creatorStatsPath,
   eventsPath,
   giftsPath,
+  meExportPath,
+  mePath,
   otpSendBody,
   otpSendPath,
   otpVerifyBody,
@@ -21,6 +23,7 @@ import {
   parsePayProducts,
   parsePkSession,
   parseWalletBalance,
+  patchMeBody,
   payOrdersPath,
   payProductsPath,
   paySandboxCompletePath,
@@ -80,6 +83,17 @@ const authHint = ref('')
 const authError = ref('')
 const session = ref<AuthSession | null>(null)
 const accessToken = ref('')
+/** Age gate required before Verify (mirrors mobile FL-2). */
+const ageConfirmed = ref(false)
+/** Optional privacy acceptance — sent with PATCH /me when checked. */
+const privacyAccepted = ref(false)
+
+// --- privacy / DSAR (authed) ---
+const privacyOpen = ref(false)
+const privacyBusy = ref(false)
+const privacyHint = ref('')
+const privacyError = ref('')
+const exportJson = ref('')
 
 // --- chat / gifts (authed only for send; list is public) ---
 const messages = ref<ChatMessage[]>([])
@@ -400,6 +414,12 @@ function logout() {
   balance.value = 0
   creator.value = null
   creatorHint.value = ''
+  privacyOpen.value = false
+  privacyHint.value = ''
+  privacyError.value = ''
+  exportJson.value = ''
+  ageConfirmed.value = false
+  privacyAccepted.value = false
   try {
     localStorage.removeItem(TOKEN_KEY)
     localStorage.removeItem(SESSION_KEY)
@@ -407,6 +427,93 @@ function logout() {
     // ignore
   }
   authHint.value = 'Logged out'
+}
+
+/** Best-effort PATCH /me after OTP (age / privacy flags). Never blocks login. */
+async function patchAgePrivacy(token: string) {
+  if (!ageConfirmed.value && !privacyAccepted.value) return
+  try {
+    await fetch(apiUrl(apiBase, mePath()), {
+      method: 'PATCH',
+      headers: authHeaders(token),
+      body: JSON.stringify(
+        patchMeBody({
+          ageConfirmed: ageConfirmed.value ? true : undefined,
+          privacyAccepted: privacyAccepted.value ? true : undefined,
+        }),
+      ),
+    })
+  } catch {
+    // non-fatal — session already persisted
+  }
+}
+
+async function exportMyData() {
+  privacyHint.value = ''
+  privacyError.value = ''
+  exportJson.value = ''
+  if (!authed.value) {
+    loginOpen.value = true
+    return
+  }
+  privacyBusy.value = true
+  try {
+    const res = await fetch(apiUrl(apiBase, meExportPath()), {
+      headers: authHeaders(accessToken.value),
+    })
+    if (!res.ok) {
+      privacyError.value = `export ${res.status}`
+      return
+    }
+    const json = await res.json()
+    const pretty = JSON.stringify(json, null, 2)
+    exportJson.value = pretty
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(pretty)
+        privacyHint.value = `Export copied (${pretty.length} chars)`
+        return
+      }
+    } catch {
+      // fall through
+    }
+    privacyHint.value = `Export ready (${pretty.length} chars) — select below to copy`
+  } catch (e) {
+    privacyError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    privacyBusy.value = false
+  }
+}
+
+async function deleteAccount() {
+  privacyHint.value = ''
+  privacyError.value = ''
+  if (!authed.value) {
+    loginOpen.value = true
+    return
+  }
+  const ok = window.confirm(
+    'Delete account? This soft-deletes your account and signs you out.',
+  )
+  if (!ok) return
+  privacyBusy.value = true
+  try {
+    const res = await fetch(apiUrl(apiBase, mePath()), {
+      method: 'DELETE',
+      headers: authHeaders(accessToken.value),
+    })
+    if (!res.ok && res.status !== 204) {
+      privacyError.value = `delete ${res.status}`
+      return
+    }
+    logout()
+    // logout clears authHint; surface delete outcome for the next login panel open.
+    authHint.value = 'Account deleted — signed out'
+  } catch (e) {
+    privacyError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    privacyBusy.value = false
+  }
 }
 
 async function runSearch() {
@@ -556,6 +663,10 @@ async function sendOtp() {
 async function verifyOtp() {
   authError.value = ''
   authHint.value = ''
+  if (!ageConfirmed.value) {
+    authError.value = 'Confirm you are 18 or older to continue'
+    return
+  }
   const em = normalizeEmail(email.value)
   const code = otpCode.value.trim()
   if (!em || !code) {
@@ -580,6 +691,8 @@ async function verifyOtp() {
       return
     }
     persistSession(s)
+    // Best-effort age/privacy flags — same contract as mobile login.
+    await patchAgePrivacy(s.accessToken)
     loginOpen.value = false
     authHint.value = `Hi, ${s.displayName || s.email || 'user'}`
     otpCode.value = ''
@@ -900,6 +1013,9 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
       <div class="auth-chip">
         <template v-if="authed">
           <span class="chip">{{ session?.displayName || session?.email || 'signed in' }}</span>
+          <button type="button" class="ghost" @click="privacyOpen = !privacyOpen">
+            {{ privacyOpen ? 'Hide privacy' : 'Privacy' }}
+          </button>
           <button type="button" class="ghost" @click="logout">Logout</button>
         </template>
         <button v-else type="button" class="ghost" @click="loginOpen = !loginOpen">
@@ -908,7 +1024,7 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
       </div>
     </header>
 
-    <section v-if="loginOpen && !authed" class="panel login">
+    <section v-if="loginOpen && !authed" class="panel login" data-testid="login-panel">
       <h2>Login</h2>
       <p class="muted">Email OTP — optional. Watch works without login.</p>
       <div class="row">
@@ -917,10 +1033,67 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
       </div>
       <div class="row">
         <input v-model="otpCode" placeholder="OTP code" inputmode="numeric" autocomplete="one-time-code" />
-        <button type="button" :disabled="authBusy" @click="verifyOtp">Verify</button>
+        <button
+          type="button"
+          data-testid="verify-otp"
+          :disabled="authBusy || !ageConfirmed"
+          @click="verifyOtp"
+        >
+          Verify
+        </button>
       </div>
+      <label class="check">
+        <input v-model="ageConfirmed" type="checkbox" data-testid="age-confirmed" />
+        I confirm I am 18 or older
+      </label>
+      <label class="check">
+        <input v-model="privacyAccepted" type="checkbox" data-testid="privacy-accepted" />
+        I accept the privacy policy
+      </label>
+      <p class="muted legal-links">
+        <a href="https://anylive.example/privacy" target="_blank" rel="noopener">Privacy</a>
+        ·
+        <a href="https://anylive.example/terms" target="_blank" rel="noopener">Terms</a>
+      </p>
       <p v-if="authHint" class="hint">{{ authHint }}</p>
       <p v-if="authError" class="err">{{ authError }}</p>
+    </section>
+
+    <section v-if="authed && privacyOpen" class="panel privacy" data-testid="privacy-panel">
+      <div class="panel-head">
+        <h2>Privacy</h2>
+        <button type="button" class="ghost" @click="privacyOpen = false">Close</button>
+      </div>
+      <p class="muted">Export your data or delete this account (GDPR self-service).</p>
+      <div class="row">
+        <button
+          type="button"
+          data-testid="export-data"
+          :disabled="privacyBusy"
+          @click="exportMyData"
+        >
+          Export my data
+        </button>
+        <button
+          type="button"
+          class="danger"
+          data-testid="delete-account"
+          :disabled="privacyBusy"
+          @click="deleteAccount"
+        >
+          Delete account
+        </button>
+      </div>
+      <p v-if="privacyHint" class="hint">{{ privacyHint }}</p>
+      <p v-if="privacyError" class="err">{{ privacyError }}</p>
+      <textarea
+        v-if="exportJson"
+        class="export-box"
+        data-testid="export-json"
+        readonly
+        :value="exportJson"
+        rows="8"
+      />
     </section>
 
     <div class="row">
@@ -1242,5 +1415,39 @@ button.link {
   font-weight: 600;
   margin: 0.25rem 0 0;
   color: #fc6;
+}
+.check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+.check input {
+  flex: none;
+  width: auto;
+  min-width: 0;
+}
+.legal-links a {
+  color: #6af;
+}
+button.danger {
+  background: #3a1a1a;
+  border-color: #833;
+  color: #f99;
+}
+.export-box {
+  width: 100%;
+  margin-top: 0.75rem;
+  padding: 0.5rem;
+  border: 1px solid #333;
+  border-radius: 6px;
+  background: #0d0d0d;
+  color: #ccc;
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+  box-sizing: border-box;
+  resize: vertical;
 }
 </style>
