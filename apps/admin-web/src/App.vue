@@ -60,12 +60,55 @@ import {
   type AdminNavKey,
   type PublishInfo,
 } from './lib/admin'
+import {
+  applyTheme,
+  persistTheme,
+  resolveInitialTheme,
+  toggleTheme as flipTheme,
+  type Theme,
+} from './lib/theme'
 
 const { t, locale, setLocale } = useI18n()
 
 const apiBase = import.meta.env.VITE_API_BASE ?? 'http://localhost:8088'
 const envLabel = import.meta.env.MODE === 'production' ? 'prod' : 'local'
 const title = computed(() => adminTitle(envLabel, locale.value))
+
+/** Claude-warm light/dark; persisted under anylive_admin_theme_v1. */
+const theme = ref<Theme>(resolveInitialTheme())
+applyTheme(theme.value)
+
+function setTheme(next: Theme) {
+  theme.value = next
+  applyTheme(next)
+  persistTheme(next)
+}
+
+function onToggleTheme() {
+  setTheme(flipTheme(theme.value))
+}
+
+const themeToggleLabel = computed(() =>
+  theme.value === 'dark' ? t('theme.toLight') : t('theme.toDark'),
+)
+
+const NAV_ICONS: Record<AdminNavKey, string> = {
+  dashboard:
+    'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4',
+  golive:
+    'M15 10l4.553-2.069A1 1 0 0121 8.82v6.36a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z',
+  rooms: 'M4 6a2 2 0 012-2h12a2 2 0 012 2v12a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm4 4h8M8 14h5',
+  reports:
+    'M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z',
+  gifts:
+    'M12 8v13m0-13V6a2 2 0 112 2h-2zm0 0V5.5A2.5 2.5 0 109.5 8H12zm-7 4h14M5 12a2 2 0 110-4h14a2 2 0 110 4M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7',
+  users:
+    'M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zm12 10v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75',
+  moderation:
+    'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z',
+  audit:
+    'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4',
+}
 
 const accessToken = ref<string | null>(null)
 const refreshToken = ref('')
@@ -245,7 +288,12 @@ const giftSeedCmd = './scripts/dogfood-gift-seed.sh'
 const giftSeedCopyHint = ref('')
 
 const loginStep = computed(() => {
-  if (otpSent.value || otpCode.value.trim()) return 2
+  if (useOtpLogin.value) {
+    if (otpSent.value || otpCode.value.trim()) return 2
+    return 1
+  }
+  // Password mode: email filled → step 2 (ready to submit)
+  if (email.value.trim() && password.value) return 2
   return 1
 })
 
@@ -1602,8 +1650,9 @@ onMounted(() => {
               <div class="brand-sub">{{ t('app.console') }}</div>
             </div>
           </div>
-          <h2>{{ t('login.headline') }}</h2>
-          <p>{{ t('login.subhead') }}</p>
+          <span class="login-hero-tag">{{ t('login.heroTag') }}</span>
+          <h2>{{ t('login.heroTitle') }}</h2>
+          <p>{{ t('login.heroBody') }}</p>
         </div>
         <div class="login-features">
           <div class="login-feature">
@@ -1630,24 +1679,69 @@ onMounted(() => {
               <code class="mono">123456</code>
             </p>
           </div>
-          <div class="lang-switch" data-testid="login-lang-switch">
-            <button
-              type="button"
-              :class="{ active: locale === 'zh' }"
-              data-testid="lang-zh"
-              @click="setLocale('zh')"
-            >
-              {{ t('lang.zh') }}
-            </button>
-            <button
-              type="button"
-              :class="{ active: locale === 'en' }"
-              data-testid="lang-en"
-              @click="setLocale('en')"
-            >
-              {{ t('lang.en') }}
-            </button>
+          <div class="login-toolbar">
+            <div class="theme-switch" data-testid="login-theme-switch" role="group" :aria-label="t('theme.label')">
+              <button
+                type="button"
+                :class="{ active: theme === 'light' }"
+                data-testid="theme-light"
+                :aria-pressed="theme === 'light'"
+                @click="setTheme('light')"
+              >
+                {{ t('theme.light') }}
+              </button>
+              <button
+                type="button"
+                :class="{ active: theme === 'dark' }"
+                data-testid="theme-dark"
+                :aria-pressed="theme === 'dark'"
+                @click="setTheme('dark')"
+              >
+                {{ t('theme.dark') }}
+              </button>
+            </div>
+            <div class="lang-switch" data-testid="login-lang-switch">
+              <button
+                type="button"
+                :class="{ active: locale === 'zh' }"
+                data-testid="lang-zh"
+                @click="setLocale('zh')"
+              >
+                {{ t('lang.zh') }}
+              </button>
+              <button
+                type="button"
+                :class="{ active: locale === 'en' }"
+                data-testid="lang-en"
+                @click="setLocale('en')"
+              >
+                {{ t('lang.en') }}
+              </button>
+            </div>
           </div>
+        </div>
+
+        <div class="login-mode-tabs" role="tablist" data-testid="login-mode-tabs">
+          <button
+            type="button"
+            role="tab"
+            :class="{ active: !useOtpLogin }"
+            :aria-selected="!useOtpLogin"
+            data-testid="login-tab-password"
+            @click="useOtpLogin = false"
+          >
+            {{ t('login.modePassword') }}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            :class="{ active: useOtpLogin }"
+            :aria-selected="useOtpLogin"
+            data-testid="login-tab-otp"
+            @click="useOtpLogin = true"
+          >
+            {{ t('login.modeOtp') }}
+          </button>
         </div>
 
         <div class="login-steps" aria-hidden="true">
@@ -1659,7 +1753,7 @@ onMounted(() => {
         <p v-if="error" class="flash err" data-testid="login-error">{{ error }}</p>
 
         <label class="field">
-          <span>{{ t('login.email') }} / username</span>
+          <span>{{ t('login.email') }}</span>
           <input
             v-model="email"
             type="text"
@@ -1671,12 +1765,12 @@ onMounted(() => {
 
         <template v-if="!useOtpLogin">
           <label class="field">
-            <span>Password</span>
+            <span>{{ t('login.password') }}</span>
             <input
               v-model="password"
               type="password"
               autocomplete="current-password"
-              placeholder="••••••••"
+              :placeholder="t('login.passwordPlaceholder')"
               data-testid="login-password"
               @keyup.enter="passwordLogin"
             />
@@ -1689,15 +1783,6 @@ onMounted(() => {
             @click="passwordLogin"
           >
             {{ loginBusy ? t('login.submitting') : t('login.submit') }}
-          </button>
-          <button
-            type="button"
-            class="btn"
-            style="margin-top: 8px"
-            data-testid="login-toggle-otp"
-            @click="useOtpLogin = true"
-          >
-            Dev OTP
           </button>
         </template>
 
@@ -1727,6 +1812,7 @@ onMounted(() => {
               autocomplete="one-time-code"
               :placeholder="t('login.otpPlaceholder')"
               data-testid="login-otp"
+              @keyup.enter="verifyOtp"
             />
             <span class="otp-dev-tip">{{ t('login.tipDev') }} · 123456</span>
           </label>
@@ -1739,18 +1825,9 @@ onMounted(() => {
           >
             {{ loginBusy ? t('login.submitting') : t('login.submit') }}
           </button>
-          <button
-            type="button"
-            class="btn"
-            style="margin-top: 8px"
-            data-testid="login-toggle-password"
-            @click="useOtpLogin = false"
-          >
-            Password
-          </button>
         </template>
 
-        <p class="login-secure">{{ t('login.secureNote') }} · API {{ apiBase }}</p>
+        <p class="login-secure">{{ t('login.secureNote') }} · {{ t('login.api') }} {{ apiBase }}</p>
       </div>
     </div>
   </div>
@@ -1776,11 +1853,34 @@ onMounted(() => {
           :data-testid="`nav-${item.key}`"
           @click="go(item.key)"
         >
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path :d="NAV_ICONS[item.key]" />
+            </svg>
+          </span>
           <span>{{ t(item.labelKey) }}</span>
         </button>
       </nav>
 
       <div class="sidebar-foot">
+        <div class="theme-switch" data-testid="sidebar-theme-switch" role="group" :aria-label="t('theme.label')">
+          <button
+            type="button"
+            :class="{ active: theme === 'light' }"
+            :aria-pressed="theme === 'light'"
+            @click="setTheme('light')"
+          >
+            {{ t('theme.light') }}
+          </button>
+          <button
+            type="button"
+            :class="{ active: theme === 'dark' }"
+            :aria-pressed="theme === 'dark'"
+            @click="setTheme('dark')"
+          >
+            {{ t('theme.dark') }}
+          </button>
+        </div>
         <div class="lang-switch" data-testid="sidebar-lang-switch">
           <button
             type="button"
@@ -1819,22 +1919,41 @@ onMounted(() => {
           <h1>{{ pageTitle }}</h1>
           <p class="muted">{{ pageBlurb }}</p>
         </div>
-        <div class="session">
-          <div class="avatar">{{ avatarLetter }}</div>
-          <div>
-            <div style="font-weight: 600">{{ displayName || 'operator' }}</div>
-            <div
-              class="dim mono"
-              style="font-size: 0.72rem; display: flex; gap: 0.35rem; align-items: center; min-width: 0; flex-wrap: wrap"
-            >
-              <span style="overflow: hidden; text-overflow: ellipsis">{{ shortId(userId, 10) }}</span>
-              <span
-                class="role-pill"
-                :class="{ admin: isAdmin === true }"
-                data-testid="session-role"
+        <div class="session-tools">
+          <button
+            type="button"
+            class="theme-icon-btn"
+            data-testid="topbar-theme-toggle"
+            :title="themeToggleLabel"
+            :aria-label="themeToggleLabel"
+            @click="onToggleTheme"
+          >
+            <!-- sun when dark (click → light); moon when light (click → dark) -->
+            <svg v-if="theme === 'dark'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="4" />
+              <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+            </svg>
+            <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 14.5A8.5 8.5 0 1111.5 3a7 7 0 009.5 11.5z" />
+            </svg>
+          </button>
+          <div class="session">
+            <div class="avatar">{{ avatarLetter }}</div>
+            <div>
+              <div style="font-weight: 600">{{ displayName || 'operator' }}</div>
+              <div
+                class="dim mono"
+                style="font-size: 0.72rem; display: flex; gap: 0.35rem; align-items: center; min-width: 0; flex-wrap: wrap"
               >
-                {{ sessionRoleLabel }}
-              </span>
+                <span style="overflow: hidden; text-overflow: ellipsis">{{ shortId(userId, 10) }}</span>
+                <span
+                  class="role-pill"
+                  :class="{ admin: isAdmin === true }"
+                  data-testid="session-role"
+                >
+                  {{ sessionRoleLabel }}
+                </span>
+              </div>
             </div>
           </div>
         </div>
