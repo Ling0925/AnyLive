@@ -126,6 +126,7 @@ export type AdminNavKey =
   | 'rooms'
   | 'reports'
   | 'gifts'
+  | 'users'
   | 'moderation'
   | 'audit'
 
@@ -143,6 +144,7 @@ export const ADMIN_NAV: AdminNavItem[] = [
   { key: 'rooms', labelKey: 'nav.rooms', blurbKey: 'navBlurb.rooms' },
   { key: 'reports', labelKey: 'nav.reports', blurbKey: 'navBlurb.reports' },
   { key: 'gifts', labelKey: 'nav.gifts', blurbKey: 'navBlurb.gifts' },
+  { key: 'users', labelKey: 'nav.users', blurbKey: 'navBlurb.users' },
   { key: 'moderation', labelKey: 'nav.moderation', blurbKey: 'navBlurb.moderation' },
   { key: 'audit', labelKey: 'nav.audit', blurbKey: 'navBlurb.audit' },
 ]
@@ -271,9 +273,13 @@ export const API_PATHS = {
   publicGifts: '/api/v1/gifts',
   adminGifts: '/api/v1/admin/gifts',
   adminBan: '/api/v1/admin/ban',
+  adminUnban: '/api/v1/admin/unban',
   adminMute: '/api/v1/admin/mute',
   adminUnmute: '/api/v1/admin/unmute',
   adminForceClose: '/api/v1/admin/rooms/force-close',
+  adminUsersBanned: '/api/v1/admin/users/banned',
+  adminUsersMuted: '/api/v1/admin/users/muted',
+  adminUserModeration: '/api/v1/admin/users',
   adminReports: '/api/v1/admin/reports',
   adminAudit: '/api/v1/admin/audit',
   adminGrant: '/api/v1/admin/grant',
@@ -316,12 +322,30 @@ export function banUserPath(): string {
   return API_PATHS.adminBan
 }
 
+export function unbanUserPath(): string {
+  return API_PATHS.adminUnban
+}
+
 export function muteUserPath(): string {
   return API_PATHS.adminMute
 }
 
 export function unmuteUserPath(): string {
   return API_PATHS.adminUnmute
+}
+
+export function bannedUsersPath(): string {
+  return API_PATHS.adminUsersBanned
+}
+
+export function mutedUsersPath(): string {
+  return API_PATHS.adminUsersMuted
+}
+
+/** Lookup path: `/api/v1/admin/users/{id}/moderation`. */
+export function userModerationPath(id: string): string {
+  const clean = id.replace(/^\/+|\/+$/g, '')
+  return `${API_PATHS.adminUserModeration}/${encodeURIComponent(clean)}/moderation`
 }
 
 export function forceCloseRoomPath(): string {
