@@ -22,6 +22,7 @@ API 服务已注入 dogfood 开关（与 `deploy/.env.test` 一致）：
 | `SRS_PUBLISH_SECRET` | 测试值 | 推流 stream key 的 HMAC 密钥 |
 | `SRS_WEBHOOK_SECRET` | 测试值 | SRS 回调鉴权（请求头） |
 | `PAY_CHANNELS` / `PAY_MOCK_SECRET` | mock / 测试值 | Mock 充值通道 + sandbox-complete |
+| `FEATURE_PK` / `FEATURE_COHOST` | `0` | **P1-safe 默认关**；连麦/PK 属 P3 实验，见 [p3-p4-experimental](../product/p3-p4-experimental.md) |
 
 启动成功后会打印 OBS 说明，并自动跑：
 
@@ -29,6 +30,29 @@ API 服务已注入 dogfood 开关（与 `deploy/.env.test` 一致）：
 - `./scripts/dogfood-media-smoke.sh`
 
 跳过冒烟：`SKIP_DOGFOOD_SMOKE=1 ./scripts/deploy-test.sh`。
+
+## 1.1 运营预设与 10 分钟路径（控制面脚本）
+
+全栈起来后，可用下面两条脚本补齐「礼物目录预设」与「主播+观众 10 分钟路径」（仅控制面，不含真实 OBS 推流）：
+
+```bash
+# 管理员登录 → upsert Rose/1 · Heart/10 · Rocket/100（固定 UUID 可重复跑）→ 打印 catalog
+./scripts/dogfood-gift-seed.sh
+# 已有管理员时：DOGFOOD_ADMIN_EMAIL=ops@example.com ./scripts/dogfood-gift-seed.sh
+
+# 主播 OTP → 建房/开播/publish → 打印 OBS 字段 + HLS
+# 观众 OTP → feed → 进房 → 聊天 → mock topup → 送礼（同 client_request_id 打两次，断言不双扣）
+# → 可选 admin force-close
+./scripts/dogfood-10min-path.sh
+
+# 全量控制面冒烟（含 mute→chat/gift 403→unmute；ban→authed 403 + re-login 403；P3 invite/PK 在 FEATURE_*=0 时 soft-skip）
+./scripts/dogfood-api-smoke.sh
+```
+
+环境变量与 `dogfood-api-smoke.sh` 一致：`API_BASE`（默认 `http://localhost:8088`）、`OTP_CODE`（默认 `123456`）、`DOGFOOD_STRICT=1`（跳过 mock topup/pay）、`DOGFOOD_ADMIN_EMAIL`、`DOGFOOD_PG_CONTAINER`。force-close 可跳过：`SKIP_FORCE_CLOSE=1`。
+
+人工 OBS / H5 / Flutter 路径仍按下文清单与 [dogfood-cohort.md](./dogfood-cohort.md) 操作。
+`GET /api/v1/meta` 应返回 `features.pk=false` / `features.cohost=false`（测试栈 `deploy/.env.test`）；Flutter 房间页据此 soft-hide 连麦/PK 菜单。
 
 停止：
 
@@ -38,9 +62,17 @@ docker compose -f deploy/docker-compose.yml --profile app down
 
 ## 2. 管理后台初始化与网页开播
 
-1. 打开 **http://localhost:8090/**
+1. 打开 **http://localhost:8090/**（源码热更新：`cd apps/admin-web && pnpm dev`，默认 Vite 端口）
 2. 邮箱 OTP 登录 — 验证码 **`123456`**（开发固定码）
-3. 首次启动（尚无管理员）时，UI 会对当前用户调用 `POST /api/v1/admin/grant` 做 **bootstrap 授权**
+3. **管理员授权**
+   - **首次**（`admin_users` 为空）：UI 对当前用户调用 `POST /api/v1/admin/grant` 做 bootstrap，成功后侧栏显示 `admin`
+   - **已有管理员时**（常见于 dogfood 反复跑）：bootstrap 会 403，控制台顶部会提示「非管理员」并给出补救命令。任选其一：
+     ```bash
+     # 推荐：把任意邮箱登记为本地管理员（OTP 登录后即可强关/禁言）
+     ./scripts/seed-admin-local.sh ops@example.com
+     # 之后用 ops@example.com + 123456 登录后台
+     ```
+     或设置 `DOGFOOD_ADMIN_EMAIL` 指向已在 `admin_users` 中的邮箱；或已有管理员账号登录后 `POST /api/v1/admin/grant` 授权他人。
 4. 侧栏进入 **「开播」**：
    - 填写直播标题 → **一键开播**
    - 页面直接显示 **OBS 服务器**、**串流密钥**、完整推流 URL、观众 HLS
@@ -48,7 +80,7 @@ docker compose -f deploy/docker-compose.yml --profile app down
 5. 「直播间」列表中可点 **推流信息**，对已有房间重新签发并展示 OBS 凭证
 6. 其它运营能力：强关、封禁/禁言、举报、礼物配置、审计
 
-管理端打包时的 API 地址：`http://localhost:8088`（`VITE_API_BASE`）。
+管理端打包时的 API 地址：`http://localhost:8088`（`VITE_API_BASE`）。Docker 镜像 `anylive-admin` 需重建后才含源码改动：`docker compose -f deploy/docker-compose.yml --profile app build admin`。
 
 ## 3. 各端 API 地址
 
@@ -111,7 +143,7 @@ GET /api/v1/rooms/{id}/media/play
 |---|---|
 | H5 | 启动 `apps/h5-web`，打开 `?room={room_id}`（如 `http://localhost:5173/?room=<uuid>`） |
 | 直接 HLS | 把 `hls` 粘贴到 Safari / VLC / ffplay |
-| Flutter | 房间页复制流地址到外部播放器（内嵌 media_kit 仍待接入） |
+| Flutter | 房间页 `StreamPreview` 可嵌 media_kit HLS（`ANYLIVE_EMBEDDED_PLAYER=true` dart-define；测试默认关）；也可复制流地址到外部播放器 |
 
 ## 6. 快速检查清单
 
@@ -125,4 +157,5 @@ GET /api/v1/rooms/{id}/media/play
 
 - `scripts/dogfood-media.md` — 媒体面细节  
 - `scripts/dogfood-api-smoke.sh` / `scripts/dogfood-media-smoke.sh`  
+- `scripts/dogfood-gift-seed.sh` / `scripts/dogfood-10min-path.sh` — 礼物预设 + 10 分钟控制面路径（§1.1）  
 - `deploy/.env.test` — compose 环境默认值  
