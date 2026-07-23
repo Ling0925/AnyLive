@@ -1,6 +1,5 @@
 //! Admin moderation: ban/mute users, force-close rooms, audit log.
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use anylive_common::{AppError, ErrorCode};
@@ -18,6 +17,32 @@ pub struct AuditEvent {
     pub target: String,
     pub detail: String,
     pub created_at: DateTime<Utc>,
+}
+
+/// One row from the ban/mute lists (ops console).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ModerationEntry {
+    pub user_id: UserId,
+    pub reason: String,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Combined ban/mute flags for a single user lookup.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct UserModerationStatus {
+    pub user_id: UserId,
+    pub banned: bool,
+    pub muted: bool,
+    pub ban_reason: Option<String>,
+    pub mute_reason: Option<String>,
+    pub banned_at: Option<DateTime<Utc>>,
+    pub muted_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone)]
+struct Sanction {
+    reason: String,
+    created_at: DateTime<Utc>,
 }
 
 /// Admin RBAC roles (WBS E7.1).
@@ -73,9 +98,10 @@ pub struct MemoryModeration {
 
 #[derive(Default)]
 struct ModState {
-    banned_users: HashSet<Uuid>,
+    /// Global ban (P1: no expiry).
+    banned_users: std::collections::HashMap<Uuid, Sanction>,
     /// Global mute (P1: no expiry). Muted users cannot chat or send gifts.
-    muted_users: HashSet<Uuid>,
+    muted_users: std::collections::HashMap<Uuid, Sanction>,
     /// user_id -> admin role (presence = is_admin for backward compat)
     admins: std::collections::HashMap<Uuid, AdminRole>,
     audit: Vec<AuditEvent>,
@@ -179,12 +205,40 @@ impl MemoryModeration {
         reason: impl Into<String>,
     ) -> Result<(), AppError> {
         self.require_admin(actor).await?;
+        let reason = reason.into();
         let mut g = self.inner.lock().await;
-        g.banned_users.insert(target.0);
+        g.banned_users.insert(
+            target.0,
+            Sanction {
+                reason: reason.clone(),
+                created_at: Utc::now(),
+            },
+        );
         g.audit.push(AuditEvent {
             id: Uuid::new_v4(),
             actor_id: actor,
             action: "ban_user".into(),
+            target: target.0.to_string(),
+            detail: reason,
+            created_at: Utc::now(),
+        });
+        Ok(())
+    }
+
+    /// Remove a ban (admin). Idempotent when the user is not banned.
+    pub async fn unban_user(
+        &self,
+        actor: UserId,
+        target: UserId,
+        reason: impl Into<String>,
+    ) -> Result<(), AppError> {
+        self.require_admin(actor).await?;
+        let mut g = self.inner.lock().await;
+        g.banned_users.remove(&target.0);
+        g.audit.push(AuditEvent {
+            id: Uuid::new_v4(),
+            actor_id: actor,
+            action: "unban_user".into(),
             target: target.0.to_string(),
             detail: reason.into(),
             created_at: Utc::now(),
@@ -193,7 +247,7 @@ impl MemoryModeration {
     }
 
     pub async fn is_banned(&self, user_id: UserId) -> bool {
-        self.inner.lock().await.banned_users.contains(&user_id.0)
+        self.inner.lock().await.banned_users.contains_key(&user_id.0)
     }
 
     /// Mute a user (admin). Global mute for P1 — blocks chat + gifts.
@@ -204,14 +258,21 @@ impl MemoryModeration {
         reason: impl Into<String>,
     ) -> Result<(), AppError> {
         self.require_admin(actor).await?;
+        let reason = reason.into();
         let mut g = self.inner.lock().await;
-        g.muted_users.insert(target.0);
+        g.muted_users.insert(
+            target.0,
+            Sanction {
+                reason: reason.clone(),
+                created_at: Utc::now(),
+            },
+        );
         g.audit.push(AuditEvent {
             id: Uuid::new_v4(),
             actor_id: actor,
             action: "mute_user".into(),
             target: target.0.to_string(),
-            detail: reason.into(),
+            detail: reason,
             created_at: Utc::now(),
         });
         Ok(())
@@ -239,7 +300,59 @@ impl MemoryModeration {
     }
 
     pub async fn is_muted(&self, user_id: UserId) -> bool {
-        self.inner.lock().await.muted_users.contains(&user_id.0)
+        self.inner.lock().await.muted_users.contains_key(&user_id.0)
+    }
+
+    /// Banned users newest-first (limit clamped 1..=200).
+    pub async fn list_banned(&self, limit: usize) -> Vec<ModerationEntry> {
+        let g = self.inner.lock().await;
+        let limit = limit.clamp(1, 200);
+        let mut items: Vec<ModerationEntry> = g
+            .banned_users
+            .iter()
+            .map(|(id, s)| ModerationEntry {
+                user_id: UserId(*id),
+                reason: s.reason.clone(),
+                created_at: s.created_at,
+            })
+            .collect();
+        items.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        items.truncate(limit);
+        items
+    }
+
+    /// Muted users newest-first (limit clamped 1..=200).
+    pub async fn list_muted(&self, limit: usize) -> Vec<ModerationEntry> {
+        let g = self.inner.lock().await;
+        let limit = limit.clamp(1, 200);
+        let mut items: Vec<ModerationEntry> = g
+            .muted_users
+            .iter()
+            .map(|(id, s)| ModerationEntry {
+                user_id: UserId(*id),
+                reason: s.reason.clone(),
+                created_at: s.created_at,
+            })
+            .collect();
+        items.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        items.truncate(limit);
+        items
+    }
+
+    /// Lookup ban/mute status for one user (ops console).
+    pub async fn user_status(&self, user_id: UserId) -> UserModerationStatus {
+        let g = self.inner.lock().await;
+        let ban = g.banned_users.get(&user_id.0);
+        let mute = g.muted_users.get(&user_id.0);
+        UserModerationStatus {
+            user_id,
+            banned: ban.is_some(),
+            muted: mute.is_some(),
+            ban_reason: ban.map(|s| s.reason.clone()),
+            mute_reason: mute.map(|s| s.reason.clone()),
+            banned_at: ban.map(|s| s.created_at),
+            muted_at: mute.map(|s| s.created_at),
+        }
     }
 
     pub async fn audit_force_close(
@@ -352,8 +465,17 @@ mod tests {
         assert_eq!(m.admin_count().await, 1);
         m.ban_user(admin, user, "spam").await.unwrap();
         assert!(m.is_banned(user).await);
+        let status = m.user_status(user).await;
+        assert!(status.banned);
+        assert_eq!(status.ban_reason.as_deref(), Some("spam"));
+        let banned = m.list_banned(10).await;
+        assert_eq!(banned.len(), 1);
+        assert_eq!(banned[0].user_id, user);
+        m.unban_user(admin, user, "appeal").await.unwrap();
+        assert!(!m.is_banned(user).await);
         let audit = m.recent_audit(10).await;
-        assert_eq!(audit[0].action, "ban_user");
+        assert_eq!(audit[0].action, "unban_user");
+        assert_eq!(audit[1].action, "ban_user");
     }
 
     #[tokio::test]
