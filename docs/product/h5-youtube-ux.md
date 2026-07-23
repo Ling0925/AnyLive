@@ -98,6 +98,14 @@ Desktop `≥900px`: CSS grid `1fr | 340px` with sticky side column.
 - [x] Shared surfaces `#0F0F0F` / `#212121` / stage black; LIVE red; CTA magenta  
 - [x] English primary UI strings for end/offline  
 
+### UX-2 / empty-shell fix (solo · 2026-07-23)
+
+- [x] Cold open without `?room=` shows **Live now** hot feed (not player-only void)  
+- [x] Room tools `<details>` auto-open when no room; collapses after load  
+- [x] Meta / channel / chat / gift dock bind to `hasRoom` (not only `canWatch`)  
+- [x] Gift catalog + chat history load for known rooms even if HLS not ready  
+- [x] Room title from API in meta row  
+
 ---
 
 ## 6. Files
@@ -106,6 +114,7 @@ Desktop `≥900px`: CSS grid `1fr | 340px` with sticky side column.
 |---|---|
 | `apps/h5-web/src/style.css` | Shared token `:root` |
 | `apps/h5-web/src/App.vue` | RoomWatch template + scoped layout |
+| `apps/h5-web/src/lib/chatApi.ts` | Paths/parsers incl. `feedHotPath` |
 | `apps/h5-web/index.html` | `theme-color` `#0F0F0F`, title |
 | `docs/product/flutter-youtube-ux.md` | Flutter counterpart |
 

@@ -516,3 +516,44 @@ export function parseSearchResult(json: unknown): SearchResult {
     .filter((r): r is SearchRoomHit => r !== null)
   return { users, rooms }
 }
+
+// --- Hot feed (public discover) ---
+
+export function feedHotPath(limit = 12): string {
+  const n = Math.max(1, Math.min(limit, 50))
+  return `/api/v1/feed/hot?limit=${n}`
+}
+
+/** Room card for hot/discover lists (subset of API room fields). */
+export type FeedRoom = {
+  id: string
+  title: string
+  status: string
+  ownerId: string
+}
+
+/** Parse `/api/v1/feed/hot` body: `{ items: Room[] }` or bare array. */
+export function parseFeedRooms(json: unknown): FeedRoom[] {
+  let raw: unknown[] = []
+  if (Array.isArray(json)) {
+    raw = json
+  } else if (json && typeof json === 'object') {
+    const root = json as Record<string, unknown>
+    if (Array.isArray(root.items)) raw = root.items
+    else if (Array.isArray(root.rooms)) raw = root.rooms
+  }
+  return raw
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null
+      const r = item as Record<string, unknown>
+      const id = typeof r.id === 'string' ? r.id : ''
+      if (!id) return null
+      return {
+        id,
+        title: typeof r.title === 'string' ? r.title : '',
+        status: typeof r.status === 'string' ? r.status : '',
+        ownerId: typeof r.owner_id === 'string' ? r.owner_id : '',
+      } satisfies FeedRoom
+    })
+    .filter((r): r is FeedRoom => r !== null)
+}

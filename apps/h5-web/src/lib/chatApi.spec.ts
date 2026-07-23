@@ -38,6 +38,8 @@ import {
   startPkBody,
   searchPath,
   parseSearchResult,
+  feedHotPath,
+  parseFeedRooms,
 } from './chatApi'
 
 describe('url helpers', () => {
@@ -299,5 +301,26 @@ describe('creator / events / interactive paths', () => {
       users: [{ id: 'u1', displayName: 'Alice' }],
       rooms: [{ id: 'r1', title: 'Live', status: 'live', ownerId: 'u1' }],
     })
+  })
+
+  it('feed hot path and parse', () => {
+    expect(feedHotPath(12)).toBe('/api/v1/feed/hot?limit=12')
+    expect(feedHotPath(0)).toBe('/api/v1/feed/hot?limit=1')
+    expect(
+      parseFeedRooms({
+        items: [
+          {
+            id: 'r1',
+            title: 'Dogfood',
+            status: 'live',
+            owner_id: 'u1',
+          },
+        ],
+      }),
+    ).toEqual([{ id: 'r1', title: 'Dogfood', status: 'live', ownerId: 'u1' }])
+    expect(parseFeedRooms([{ id: 'r2', title: 'B', status: 'idle', owner_id: 'u2' }])).toEqual([
+      { id: 'r2', title: 'B', status: 'idle', ownerId: 'u2' },
+    ])
+    expect(parseFeedRooms(null)).toEqual([])
   })
 })

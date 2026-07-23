@@ -7,6 +7,7 @@ import {
   createPayOrderBody,
   creatorStatsPath,
   eventsPath,
+  feedHotPath,
   giftsPath,
   meExportPath,
   mePath,
@@ -17,6 +18,7 @@ import {
   parseChatMessage,
   parseChatMessages,
   parseCreatorStats,
+  parseFeedRooms,
   parseGiftCatalog,
   parseGiftOrder,
   parsePayOrder,
@@ -39,6 +41,7 @@ import {
   walletTopupPath,
   type ChatMessage,
   type CreatorStats,
+  type FeedRoom,
   type GiftItem,
   type PayProduct,
   type PkSession,
@@ -66,6 +69,7 @@ const SESSION_KEY = 'anylive_h5_session'
 const apiBase = import.meta.env.VITE_API_BASE ?? 'http://localhost:8088'
 const roomId = ref('')
 const status = ref('')
+const roomTitle = ref('')
 const ownerId = ref('')
 const hlsUrl = ref('')
 const error = ref('')
@@ -73,6 +77,11 @@ const loading = ref(false)
 const shareHint = ref('')
 const videoEl = ref<HTMLVideoElement | null>(null)
 let detach: (() => void) | null = null
+
+/** Public hot rooms — shown when no room is loaded so watch chrome is discoverable. */
+const hotRooms = ref<FeedRoom[]>([])
+const hotLoading = ref(false)
+const hotError = ref('')
 
 // --- optional login ---
 const loginOpen = ref(false)
@@ -125,11 +134,20 @@ const searchHint = ref('')
 const searchResult = ref<SearchResult | null>(null)
 
 const canWatch = computed(() => isLiveStatus(status.value) && !!hlsUrl.value)
+/** Room loaded from API (id + status) — drives meta / chat chrome. */
+const hasRoom = computed(() => !!roomId.value.trim() && !!status.value)
 /** Not watchable (idle host-stop or closed/ended). */
 const roomOffline = computed(() => isRoomOffline(status.value))
 /** Permanent end only (force-close). Host stop is idle → offline, not terminal. */
 const roomTerminal = computed(() => isRoomTerminal(status.value))
 const authed = computed(() => isLoggedIn(accessToken.value))
+/** Display title for meta row. */
+const displayTitle = computed(() => {
+  const t = roomTitle.value.trim()
+  if (t) return t
+  const id = roomId.value.trim()
+  return id ? `Room ${id.slice(0, 8)}` : 'Live room'
+})
 
 function teardownPlayer() {
   detach?.()
@@ -323,6 +341,9 @@ async function pollRoomStatus() {
     if (next && next !== status.value) {
       const wasLive = isLiveStatus(status.value)
       status.value = next
+      if (typeof room.title === 'string' && room.title) {
+        roomTitle.value = room.title
+      }
       if (!isLiveStatus(next)) {
         hlsUrl.value = ''
         teardownPlayer()
@@ -343,7 +364,10 @@ async function pollRoomStatus() {
           // play may lag until OBS
         }
         startPresencePoll()
+        void refreshGifts()
       }
+    } else if (typeof room.title === 'string' && room.title && room.title !== roomTitle.value) {
+      roomTitle.value = room.title
     }
     void refreshPk()
   } catch {
@@ -362,12 +386,37 @@ onBeforeUnmount(() => {
 onMounted(() => {
   restoreSession()
   void loadFeatureFlags()
+  void loadHotFeed()
   const fromQuery = readRoomFromQuery(window.location.search)
   if (fromQuery) {
     roomId.value = fromQuery
     void loadRoom()
   }
 })
+
+async function loadHotFeed() {
+  hotLoading.value = true
+  hotError.value = ''
+  try {
+    const res = await fetch(apiUrl(apiBase, feedHotPath(12)))
+    if (!res.ok) {
+      hotError.value = `feed ${res.status}`
+      hotRooms.value = []
+      return
+    }
+    hotRooms.value = parseFeedRooms(await res.json())
+  } catch (e) {
+    hotError.value = e instanceof Error ? e.message : String(e)
+    hotRooms.value = []
+  } finally {
+    hotLoading.value = false
+  }
+}
+
+function openHotRoom(id: string) {
+  roomId.value = id
+  void loadRoom()
+}
 
 /** Soft-hide PK banner when FEATURE_PK is off (default for P1 dogfood). */
 async function loadFeatureFlags() {
@@ -553,8 +602,10 @@ async function loadRoom() {
   shareHint.value = ''
   hlsUrl.value = ''
   status.value = ''
+  roomTitle.value = ''
   ownerId.value = ''
   messages.value = []
+  gifts.value = []
   loading.value = true
   try {
     const id = roomId.value.trim()
@@ -568,25 +619,32 @@ async function loadRoom() {
       return
     }
     const room = await roomRes.json()
-    status.value = room.status
+    status.value = typeof room.status === 'string' ? room.status : ''
+    roomTitle.value = typeof room.title === 'string' ? room.title : ''
     ownerId.value = typeof room.owner_id === 'string' ? room.owner_id : ''
     // Always poll status so idle→live and closed are visible without full reload.
     startStatusPoll()
-    if (isRoomOffline(room.status)) {
-      // Terminal / temporary offline UI — no HLS until live again.
-      if (!isRoomTerminal(room.status)) {
-        startChatPoll()
-        void refreshMessages()
-      }
-      if (authed.value) {
-        void trackEvent('room.view', { room_id: id, status: status.value })
-      }
+
+    // RoomWatch chrome (chat history + gift catalog) whenever room is known —
+    // not only when HLS is ready, so the page never looks like "player only".
+    if (!isRoomTerminal(status.value)) {
+      startChatPoll()
+      void refreshMessages()
+    }
+    void refreshGifts()
+    void refreshPayProducts()
+    void refreshPk()
+    void refreshStats()
+    if (authed.value) {
+      void refreshBalance()
+      void trackEvent('room.view', { room_id: id, status: status.value })
+    }
+
+    if (isRoomOffline(room.status) || !isLiveStatus(room.status)) {
+      // Offline / non-live: keep meta+chat+gifts; no HLS until live.
       return
     }
-    if (!isLiveStatus(room.status)) {
-      error.value = `Room status: ${room.status}`
-      return
-    }
+
     const playRes = await fetch(`${apiBase}/api/v1/rooms/${id}/media/play`)
     if (!playRes.ok) {
       error.value = `play ${playRes.status}`
@@ -594,20 +652,9 @@ async function loadRoom() {
     }
     const play = await playRes.json()
     hlsUrl.value = play.hls ?? buildPlayUrl('http://localhost:8080/live', id)
-    startChatPoll()
     if (authed.value) {
       void tryConnectCentrifugo()
       startPresencePoll()
-    }
-
-    // Public chat history + gift catalog (no auth required)
-    void refreshMessages()
-    void refreshGifts()
-    void refreshPayProducts()
-    void refreshPk()
-    if (authed.value) {
-      void refreshBalance()
-      void trackEvent('room.view', { room_id: id, status: status.value })
     }
   } catch (e) {
     error.value = String(e)
@@ -1111,14 +1158,49 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
       />
     </section>
 
-    <!-- Dev/deep-link helpers — compact collapsible, not main focus -->
-    <details class="util-details">
-      <summary class="util-summary muted">Room · Search · Tools</summary>
+    <!-- Discover + room tools — open when no room so the page is never empty chrome -->
+    <details class="util-details" :open="!hasRoom">
+      <summary class="util-summary muted">
+        {{ hasRoom ? 'Room · Search · Tools' : 'Pick a live room · Search · Tools' }}
+      </summary>
       <div class="util-strip row">
-        <input v-model="roomId" placeholder="Room UUID" />
-        <button type="button" class="btn primary" :disabled="loading" @click="loadRoom">Load</button>
+        <input v-model="roomId" placeholder="Room UUID" data-testid="room-id-input" />
+        <button
+          type="button"
+          class="btn primary"
+          data-testid="load-room"
+          :disabled="loading"
+          @click="loadRoom"
+        >
+          Load
+        </button>
         <button type="button" class="ghost" :disabled="!roomId.trim()" @click="shareRoom">Share</button>
+        <button type="button" class="ghost" :disabled="hotLoading" @click="loadHotFeed">Refresh hot</button>
       </div>
+
+      <section class="panel hot-feed" data-testid="hot-feed">
+        <div class="panel-head">
+          <h2>Live now</h2>
+          <span v-if="hotLoading" class="muted">Loading…</span>
+        </div>
+        <p v-if="hotError" class="err">{{ hotError }}</p>
+        <ul v-if="hotRooms.length" class="hot-list">
+          <li v-for="r in hotRooms" :key="r.id">
+            <button type="button" class="hot-card" @click="openHotRoom(r.id)">
+              <span class="hot-card-title">{{ r.title || r.id.slice(0, 8) }}</span>
+              <span class="hot-card-meta">
+                <span
+                  class="live-chip live-chip-solid"
+                  :class="{ dim: r.status !== 'live' }"
+                >{{ r.status === 'live' ? 'LIVE' : r.status || '—' }}</span>
+                <span class="muted mono">{{ r.id.slice(0, 8) }}…</span>
+              </span>
+            </button>
+          </li>
+        </ul>
+        <p v-else-if="!hotLoading" class="muted">No hot rooms — paste a room UUID above</p>
+      </section>
+
       <section class="panel search" data-testid="search-panel">
         <div class="row">
           <input
@@ -1191,25 +1273,32 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
           </div>
 
           <div v-else class="player player-placeholder">
-            <p class="muted">{{ status ? `status: ${status}` : 'Load a room to watch' }}</p>
+            <p class="muted">
+              {{
+                hasRoom
+                  ? `status: ${status}${hlsUrl ? '' : ' · waiting for stream'}`
+                  : 'Pick a live room above to watch'
+              }}
+            </p>
           </div>
         </div>
 
-        <!-- Meta row: title · LIVE · online · like -->
-        <div v-if="roomId.trim() && status" class="meta-row">
+        <!-- Meta row: title · LIVE · online · like (always when room loaded) -->
+        <div v-if="hasRoom" class="meta-row" data-testid="meta-row">
           <div class="meta-title">
             <span v-if="canWatch" class="live-chip live-chip-solid" role="status">
               <span class="live-dot" aria-hidden="true" />
               LIVE
             </span>
-            <h2 class="room-title">Live room</h2>
+            <span v-else-if="status" class="status-chip muted">{{ status }}</span>
+            <h2 class="room-title">{{ displayTitle }}</h2>
           </div>
           <div id="room-stats" class="room-stats meta-stats">
             <span class="stat-pill">{{ onlineCount }} watching</span>
             <button
               type="button"
               class="like-btn"
-              :disabled="!authed || likeBusy || roomOffline"
+              :disabled="!authed || likeBusy || roomOffline || !canWatch"
               @click="likeRoom"
             >
               ♥ {{ likeCount }}
@@ -1219,7 +1308,7 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
         </div>
 
         <!-- Channel row: host chip · more (creator) -->
-        <div v-if="roomId.trim() && status" class="channel-row">
+        <div v-if="hasRoom" class="channel-row" data-testid="channel-row">
           <span class="channel-chip">
             <span class="channel-avatar" aria-hidden="true" />
             <span class="channel-meta">
@@ -1260,10 +1349,11 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
       </div>
 
       <div class="side-col">
-        <!-- Chat panel -->
+        <!-- Chat panel — show whenever room is known (not only while HLS is up) -->
         <section
-          v-if="roomId.trim() && status && !roomTerminal"
+          v-if="hasRoom && !roomTerminal"
           class="panel chat chat-panel"
+          data-testid="chat-panel"
         >
           <div class="panel-head">
             <h2>Live chat</h2>
@@ -1281,6 +1371,7 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
             <button type="button" class="btn primary" :disabled="chatBusy" @click="sendChat">Send</button>
           </div>
           <p v-else-if="authed && roomOffline" class="muted">Room offline — chat send disabled</p>
+          <p v-else-if="authed && !canWatch" class="muted">Waiting for live stream — chat send disabled</p>
           <p v-else class="muted">
             <button type="button" class="link" @click="loginOpen = true">Login</button>
             to send chat
@@ -1288,10 +1379,11 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
           <p v-if="chatHint" class="hint">{{ chatHint }}</p>
         </section>
 
-        <!-- Gift dock: sticky bottom on mobile, horizontal pills -->
+        <!-- Gift dock — catalog visible for any loaded room; send still requires live + auth -->
         <section
-          v-if="roomId.trim() && status && canWatch"
+          v-if="hasRoom && !roomTerminal"
           class="panel gifts gift-dock"
+          data-testid="gift-dock"
         >
           <div class="panel-head">
             <h2>Gifts</h2>
@@ -1325,7 +1417,7 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
               :key="g.id"
               type="button"
               class="gift-btn"
-              :disabled="giftBusy || !authed"
+              :disabled="giftBusy || !authed || !canWatch"
               @click="sendGift(g)"
             >
               {{ g.name }}
@@ -1337,6 +1429,7 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
             <button type="button" class="link" @click="loginOpen = true">Login</button>
             to send gifts &amp; top up
           </p>
+          <p v-else-if="!canWatch" class="muted">Gifts send when the room is live</p>
           <p v-if="giftHint" class="hint">{{ giftHint }}</p>
         </section>
       </div>
@@ -1486,6 +1579,61 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
 
 .util-strip {
   margin: 0.25rem 0 0.5rem;
+}
+
+.hot-feed {
+  margin: 0.5rem 0 0.75rem;
+  padding: 0.75rem;
+}
+
+.hot-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.hot-card {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  padding: 0.65rem 0.75rem;
+  text-align: left;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.hot-card:hover {
+  border-color: var(--border-accent);
+  background: var(--accent-soft);
+}
+
+.hot-card-title {
+  font-weight: 600;
+  font-size: var(--fs-sm);
+  line-height: 1.3;
+}
+
+.hot-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: var(--fs-xs);
+}
+
+.status-chip {
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.1rem 0.45rem;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
 }
 
 /* --- Rows / form controls --- */
