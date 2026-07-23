@@ -59,6 +59,9 @@ pub const MIGRATION_FILES: &[&str] = &[
     "005_otp_challenges.sql",
     "006_wallet_topup_idempotency.sql",
     "007_pay_orders.sql",
+    "008_avatar_recording.sql",
+    "009_profile_region.sql",
+    "010_admin_roles.sql",
 ];
 
 /// Validate that a SQL identifier is safe for use in limited admin tooling.
@@ -118,6 +121,9 @@ mod tests {
                 "005_otp_challenges.sql",
                 "006_wallet_topup_idempotency.sql",
                 "007_pay_orders.sql",
+                "008_avatar_recording.sql",
+                "009_profile_region.sql",
+                "010_admin_roles.sql",
             ]
         );
     }

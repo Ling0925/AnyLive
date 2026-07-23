@@ -90,6 +90,36 @@ impl PostgresSocial {
         });
         rows.into_iter().map(UserId).collect()
     }
+
+    pub async fn follower_count(&self, user: UserId) -> u64 {
+        let n: i64 = sqlx::query_scalar(
+            r#"
+            SELECT COUNT(*)::bigint
+            FROM follows
+            WHERE followee_id = $1
+            "#,
+        )
+        .bind(user.0)
+        .fetch_one(&self.pool)
+        .await
+        .unwrap_or(0);
+        n.max(0) as u64
+    }
+
+    pub async fn following_count(&self, user: UserId) -> u64 {
+        let n: i64 = sqlx::query_scalar(
+            r#"
+            SELECT COUNT(*)::bigint
+            FROM follows
+            WHERE follower_id = $1
+            "#,
+        )
+        .bind(user.0)
+        .fetch_one(&self.pool)
+        .await
+        .unwrap_or(0);
+        n.max(0) as u64
+    }
 }
 
 /// Dual backend so the API can switch memory ↔ Postgres without generics on `AppState`.
@@ -137,6 +167,20 @@ impl AnySocial {
         match self {
             Self::Memory(s) => s.following_ids(follower).await,
             Self::Postgres(s) => s.following_ids(follower).await,
+        }
+    }
+
+    pub async fn follower_count(&self, user: UserId) -> u64 {
+        match self {
+            Self::Memory(s) => s.follower_count(user).await,
+            Self::Postgres(s) => s.follower_count(user).await,
+        }
+    }
+
+    pub async fn following_count(&self, user: UserId) -> u64 {
+        match self {
+            Self::Memory(s) => s.following_count(user).await,
+            Self::Postgres(s) => s.following_count(user).await,
         }
     }
 }

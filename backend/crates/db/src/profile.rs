@@ -1,6 +1,7 @@
-//! Profile extras dual store: age confirmation + privacy acceptance.
+//! Profile extras dual store: age confirmation + privacy acceptance + avatar + region.
 //!
-//! Kept off the `users` table (`profile_extras` from `003_profile_extras.sql`).
+//! Kept off the `users` table (`profile_extras` from `003_profile_extras.sql`,
+//! avatar column from `008_avatar_recording.sql`, region from `009_profile_region.sql`).
 //! Display name lives on UserStore; these flags live here.
 
 use std::collections::HashMap;
@@ -13,11 +14,15 @@ use sqlx::PgPool;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-/// Per-user age / privacy declaration timestamps.
+/// Per-user age / privacy declaration timestamps + optional avatar URL + region.
 #[derive(Debug, Clone, Default)]
 pub struct ProfileExtras {
     pub age_confirmed_at: Option<DateTime<Utc>>,
     pub privacy_accepted_at: Option<DateTime<Utc>>,
+    /// Public avatar object URL (MinIO / CDN), when set.
+    pub avatar_url: Option<String>,
+    /// Optional ISO 3166-1 alpha-2 region / country code (WBS E2.5).
+    pub region: Option<String>,
 }
 
 impl ProfileExtras {
@@ -74,12 +79,14 @@ impl MemoryProfileExtras {
         entry.clone()
     }
 
-    /// Apply optional age/privacy patches and return the resulting extras.
+    /// Apply optional age/privacy/region patches and return the resulting extras.
+    /// `region: Some(None)` clears; `Some(Some(code))` sets; `None` leaves unchanged.
     pub async fn patch(
         &self,
         user_id: UserId,
         age_confirmed: Option<bool>,
         privacy_accepted: Option<bool>,
+        region: Option<Option<String>>,
     ) -> ProfileExtras {
         let mut g = self.inner.write().await;
         let entry = g.entry(user_id.0).or_default();
@@ -89,6 +96,33 @@ impl MemoryProfileExtras {
         if let Some(v) = privacy_accepted {
             entry.privacy_accepted_at = if v { Some(Utc::now()) } else { None };
         }
+        if let Some(r) = region {
+            entry.region = r;
+        }
+        entry.clone()
+    }
+
+    /// Set or clear the public avatar URL.
+    pub async fn set_avatar_url(
+        &self,
+        user_id: UserId,
+        avatar_url: Option<String>,
+    ) -> ProfileExtras {
+        let mut g = self.inner.write().await;
+        let entry = g.entry(user_id.0).or_default();
+        entry.avatar_url = avatar_url;
+        entry.clone()
+    }
+
+    /// Set or clear region code.
+    pub async fn set_region(
+        &self,
+        user_id: UserId,
+        region: Option<String>,
+    ) -> ProfileExtras {
+        let mut g = self.inner.write().await;
+        let entry = g.entry(user_id.0).or_default();
+        entry.region = region;
         entry.clone()
     }
 }
@@ -121,11 +155,21 @@ impl PostgresProfileExtras {
     }
 
     pub async fn set_age_confirmed(&self, user_id: UserId, confirmed: bool) -> ProfileExtras {
-        self.patch(user_id, Some(confirmed), None).await
+        self.patch(user_id, Some(confirmed), None, None).await
     }
 
     pub async fn set_privacy_accepted(&self, user_id: UserId, accepted: bool) -> ProfileExtras {
-        self.patch(user_id, None, Some(accepted)).await
+        self.patch(user_id, None, Some(accepted), None).await
+    }
+
+    pub async fn set_avatar_url(
+        &self,
+        user_id: UserId,
+        avatar_url: Option<String>,
+    ) -> ProfileExtras {
+        let mut current = self.get(user_id).await;
+        current.avatar_url = avatar_url;
+        self.persist(user_id, &current).await
     }
 
     pub async fn patch(
@@ -133,8 +177,9 @@ impl PostgresProfileExtras {
         user_id: UserId,
         age_confirmed: Option<bool>,
         privacy_accepted: Option<bool>,
+        region: Option<Option<String>>,
     ) -> ProfileExtras {
-        // Load current so partial patches preserve the other column.
+        // Load current so partial patches preserve the other columns.
         let mut current = self.get(user_id).await;
         if let Some(v) = age_confirmed {
             current.age_confirmed_at = if v { Some(Utc::now()) } else { None };
@@ -142,11 +187,19 @@ impl PostgresProfileExtras {
         if let Some(v) = privacy_accepted {
             current.privacy_accepted_at = if v { Some(Utc::now()) } else { None };
         }
+        if let Some(r) = region {
+            current.region = r;
+        }
+        self.persist(user_id, &current).await
+    }
 
+    async fn persist(&self, user_id: UserId, current: &ProfileExtras) -> ProfileExtras {
         let row = sqlx::query_as::<_, ProfileExtrasRow>(sql::UPSERT_EXTRAS)
             .bind(user_id.0)
             .bind(current.age_confirmed_at)
             .bind(current.privacy_accepted_at)
+            .bind(current.avatar_url.as_deref())
+            .bind(current.region.as_deref())
             .fetch_one(&self.pool)
             .await;
 
@@ -156,7 +209,7 @@ impl PostgresProfileExtras {
                 tracing::error!(error = %err, "postgres profile_extras patch failed");
                 // Fall back to the computed value so callers still see the patch intent offline
                 // of a transient write failure; production should monitor the error log.
-                current
+                current.clone()
             }
         }
     }
@@ -208,10 +261,35 @@ impl AnyProfileExtras {
         user_id: UserId,
         age_confirmed: Option<bool>,
         privacy_accepted: Option<bool>,
+        region: Option<Option<String>>,
     ) -> ProfileExtras {
         match self {
-            Self::Memory(s) => s.patch(user_id, age_confirmed, privacy_accepted).await,
-            Self::Postgres(s) => s.patch(user_id, age_confirmed, privacy_accepted).await,
+            Self::Memory(s) => s.patch(user_id, age_confirmed, privacy_accepted, region).await,
+            Self::Postgres(s) => s.patch(user_id, age_confirmed, privacy_accepted, region).await,
+        }
+    }
+
+    pub async fn set_avatar_url(
+        &self,
+        user_id: UserId,
+        avatar_url: Option<String>,
+    ) -> ProfileExtras {
+        match self {
+            Self::Memory(s) => s.set_avatar_url(user_id, avatar_url).await,
+            Self::Postgres(s) => s.set_avatar_url(user_id, avatar_url).await,
+        }
+    }
+
+    pub async fn set_region(
+        &self,
+        user_id: UserId,
+        region: Option<String>,
+    ) -> ProfileExtras {
+        match self {
+            Self::Memory(s) => s.set_region(user_id, region).await,
+            Self::Postgres(s) => {
+                s.patch(user_id, None, None, Some(region)).await
+            }
         }
     }
 }
@@ -222,6 +300,8 @@ struct ProfileExtrasRow {
     user_id: Uuid,
     age_confirmed_at: Option<DateTime<Utc>>,
     privacy_accepted_at: Option<DateTime<Utc>>,
+    avatar_url: Option<String>,
+    region: Option<String>,
 }
 
 impl From<ProfileExtrasRow> for ProfileExtras {
@@ -229,6 +309,8 @@ impl From<ProfileExtrasRow> for ProfileExtras {
         Self {
             age_confirmed_at: r.age_confirmed_at,
             privacy_accepted_at: r.privacy_accepted_at,
+            avatar_url: r.avatar_url,
+            region: r.region,
         }
     }
 }
@@ -248,18 +330,20 @@ fn map_db(err: sqlx::Error) -> AppError {
 #[allow(dead_code)]
 pub mod sql {
     pub const SELECT_EXTRAS: &str = r#"
-            SELECT user_id, age_confirmed_at, privacy_accepted_at
+            SELECT user_id, age_confirmed_at, privacy_accepted_at, avatar_url, region
             FROM profile_extras
             WHERE user_id = $1
             "#;
 
     pub const UPSERT_EXTRAS: &str = r#"
-            INSERT INTO profile_extras (user_id, age_confirmed_at, privacy_accepted_at)
-            VALUES ($1, $2, $3)
+            INSERT INTO profile_extras (user_id, age_confirmed_at, privacy_accepted_at, avatar_url, region)
+            VALUES ($1, $2, $3, $4, $5)
             ON CONFLICT (user_id) DO UPDATE SET
                 age_confirmed_at = EXCLUDED.age_confirmed_at,
-                privacy_accepted_at = EXCLUDED.privacy_accepted_at
-            RETURNING user_id, age_confirmed_at, privacy_accepted_at
+                privacy_accepted_at = EXCLUDED.privacy_accepted_at,
+                avatar_url = EXCLUDED.avatar_url,
+                region = EXCLUDED.region
+            RETURNING user_id, age_confirmed_at, privacy_accepted_at, avatar_url, region
             "#;
 }
 
@@ -282,20 +366,33 @@ mod tests {
         let e = s.get(UserId::new()).await;
         assert!(!e.age_confirmed());
         assert!(!e.privacy_accepted());
+        assert!(e.region.is_none());
         assert!(!s.is_postgres());
+    }
+
+    #[tokio::test]
+    async fn region_patch_sets_and_clears() {
+        let s = AnyProfileExtras::memory();
+        let id = UserId::new();
+        let e = s
+            .patch(id, None, None, Some(Some("US".into())))
+            .await;
+        assert_eq!(e.region.as_deref(), Some("US"));
+        let e = s.patch(id, None, None, Some(None)).await;
+        assert!(e.region.is_none());
     }
 
     #[tokio::test]
     async fn memory_patch_sets_and_clears() {
         let s = AnyProfileExtras::memory();
         let id = UserId::new();
-        let e = s.patch(id, Some(true), Some(true)).await;
+        let e = s.patch(id, Some(true), Some(true), None).await;
         assert!(e.age_confirmed());
         assert!(e.privacy_accepted());
         assert!(e.age_confirmed_at.is_some());
         assert!(e.privacy_accepted_at.is_some());
 
-        let e = s.patch(id, Some(false), None).await;
+        let e = s.patch(id, Some(false), None, None).await;
         assert!(!e.age_confirmed());
         assert!(e.privacy_accepted());
     }
@@ -313,6 +410,21 @@ mod tests {
         let e = s.set_age_confirmed(id, false).await;
         assert!(!e.age_confirmed());
         assert!(e.privacy_accepted());
+    }
+
+    #[tokio::test]
+    async fn memory_set_avatar_url() {
+        let s = AnyProfileExtras::memory();
+        let id = UserId::new();
+        let e = s
+            .set_avatar_url(id, Some("http://localhost:9000/a.jpg".into()))
+            .await;
+        assert_eq!(
+            e.avatar_url.as_deref(),
+            Some("http://localhost:9000/a.jpg")
+        );
+        let e = s.set_avatar_url(id, None).await;
+        assert!(e.avatar_url.is_none());
     }
 
     /// Optional integration — skipped unless `USE_POSTGRES=1` + `DATABASE_URL`.
@@ -337,7 +449,7 @@ mod tests {
         assert!(!e.age_confirmed());
         assert!(!e.privacy_accepted());
 
-        let e = s.patch(user.id, Some(true), Some(true)).await;
+        let e = s.patch(user.id, Some(true), Some(true), None).await;
         assert!(e.age_confirmed());
         assert!(e.privacy_accepted());
 
@@ -345,7 +457,7 @@ mod tests {
         assert!(e.age_confirmed());
         assert!(e.privacy_accepted());
 
-        let e = s.patch(user.id, Some(false), None).await;
+        let e = s.patch(user.id, Some(false), None, None).await;
         assert!(!e.age_confirmed());
         assert!(e.privacy_accepted());
     }

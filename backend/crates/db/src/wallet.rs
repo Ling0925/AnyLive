@@ -5,7 +5,8 @@
 use anylive_common::{AppError, ErrorCode};
 use anylive_domain::UserId;
 use anylive_wallet::{
-    GiftCatalogItem, GiftOrder, LedgerEntry, LedgerType, MemoryWallet, WalletSnapshot,
+    BalanceMismatch, GiftCatalogItem, GiftOrder, LedgerEntry, LedgerType, MemoryWallet,
+    ReconcileReport, WalletSnapshot,
 };
 use chrono::{DateTime, Utc};
 use sqlx::{PgPool, Postgres, Transaction};
@@ -433,6 +434,58 @@ impl PostgresWallet {
             .filter_map(|r| r.into_entry().ok())
             .collect()
     }
+
+    /// Verify each user's balance equals Σ ledger.amount (P1 dogfood gate).
+    ///
+    /// Users are the union of `wallet_balances` and distinct `wallet_ledger.user_id`.
+    /// Missing balance rows are treated as stored=0.
+    pub async fn reconcile(&self) -> ReconcileReport {
+        #[derive(sqlx::FromRow)]
+        struct Row {
+            user_id: Uuid,
+            stored_balance: i64,
+            ledger_sum: i64,
+        }
+
+        let rows = sqlx::query_as::<_, Row>(
+            r#"
+            WITH users AS (
+                SELECT user_id FROM wallet_balances
+                UNION
+                SELECT DISTINCT user_id FROM wallet_ledger
+            )
+            SELECT
+                u.user_id,
+                COALESCE(b.balance, 0) AS stored_balance,
+                COALESCE((
+                    SELECT SUM(l.amount)::BIGINT
+                    FROM wallet_ledger l
+                    WHERE l.user_id = u.user_id
+                ), 0) AS ledger_sum
+            FROM users u
+            LEFT JOIN wallet_balances b ON b.user_id = u.user_id
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .unwrap_or_default();
+
+        let checked_users = rows.len() as u64;
+        let mismatches: Vec<BalanceMismatch> = rows
+            .into_iter()
+            .filter(|r| r.stored_balance != r.ledger_sum)
+            .map(|r| BalanceMismatch {
+                user_id: UserId(r.user_id),
+                stored_balance: r.stored_balance,
+                ledger_sum: r.ledger_sum,
+            })
+            .collect();
+        ReconcileReport {
+            checked_users,
+            imbalance_count: mismatches.len() as u64,
+            mismatches,
+        }
+    }
 }
 
 /// Dual backend so the API can switch memory ↔ Postgres without generics on `AppState`.
@@ -520,6 +573,13 @@ impl AnyWallet {
         match self {
             Self::Memory(w) => w.ledger_for(user_id).await,
             Self::Postgres(w) => w.ledger_for(user_id).await,
+        }
+    }
+
+    pub async fn reconcile(&self) -> ReconcileReport {
+        match self {
+            Self::Memory(w) => w.reconcile().await,
+            Self::Postgres(w) => w.reconcile().await,
         }
     }
 }

@@ -2,7 +2,7 @@
 
 use anylive_common::{AppError, ErrorCode};
 use anylive_domain::{RoomId, UserId};
-use anylive_moderation::{AuditEvent, MemoryModeration};
+use anylive_moderation::{AdminRole, AuditEvent, MemoryModeration};
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -23,14 +23,19 @@ impl PostgresModeration {
     }
 
     pub async fn grant_admin(&self, user_id: UserId) {
+        self.grant_role(user_id, AdminRole::Admin).await;
+    }
+
+    pub async fn grant_role(&self, user_id: UserId, role: AdminRole) {
         let _ = sqlx::query(
             r#"
-            INSERT INTO admin_users (user_id)
-            VALUES ($1)
-            ON CONFLICT (user_id) DO NOTHING
+            INSERT INTO admin_users (user_id, role)
+            VALUES ($1, $2)
+            ON CONFLICT (user_id) DO UPDATE SET role = EXCLUDED.role
             "#,
         )
         .bind(user_id.0)
+        .bind(role.as_str())
         .execute(&self.pool)
         .await;
     }
@@ -42,16 +47,28 @@ impl PostgresModeration {
         target: UserId,
         detail: impl Into<String>,
     ) -> Result<(), AppError> {
-        let detail = detail.into();
+        self.grant_role_audited(actor, target, AdminRole::Admin, detail)
+            .await
+    }
+
+    pub async fn grant_role_audited(
+        &self,
+        actor: UserId,
+        target: UserId,
+        role: AdminRole,
+        detail: impl Into<String>,
+    ) -> Result<(), AppError> {
+        let detail = format!("{} role={}", detail.into(), role.as_str());
         let mut tx = self.pool.begin().await.map_err(map_db)?;
         sqlx::query(
             r#"
-            INSERT INTO admin_users (user_id)
-            VALUES ($1)
-            ON CONFLICT (user_id) DO NOTHING
+            INSERT INTO admin_users (user_id, role)
+            VALUES ($1, $2)
+            ON CONFLICT (user_id) DO UPDATE SET role = EXCLUDED.role
             "#,
         )
         .bind(target.0)
+        .bind(role.as_str())
         .execute(&mut *tx)
         .await
         .map_err(map_db)?;
@@ -72,8 +89,8 @@ impl PostgresModeration {
     pub async fn try_bootstrap_admin(&self, user_id: UserId) -> Result<bool, AppError> {
         let res = sqlx::query(
             r#"
-            INSERT INTO admin_users (user_id)
-            SELECT $1
+            INSERT INTO admin_users (user_id, role)
+            SELECT $1, 'admin'
             WHERE (SELECT COUNT(*) FROM admin_users) = 0
             ON CONFLICT (user_id) DO NOTHING
             "#,
@@ -98,16 +115,24 @@ impl PostgresModeration {
 
     /// Fallible admin check — use when callers must distinguish DB failure.
     pub async fn try_is_admin(&self, user_id: UserId) -> Result<bool, AppError> {
-        let row: Option<bool> = sqlx::query_scalar(
+        Ok(self.try_admin_role(user_id).await?.is_some())
+    }
+
+    pub async fn admin_role(&self, user_id: UserId) -> Option<AdminRole> {
+        self.try_admin_role(user_id).await.ok().flatten()
+    }
+
+    pub async fn try_admin_role(&self, user_id: UserId) -> Result<Option<AdminRole>, AppError> {
+        let row: Option<String> = sqlx::query_scalar(
             r#"
-            SELECT true FROM admin_users WHERE user_id = $1
+            SELECT COALESCE(role, 'admin') FROM admin_users WHERE user_id = $1
             "#,
         )
         .bind(user_id.0)
         .fetch_optional(&self.pool)
         .await
         .map_err(map_db)?;
-        Ok(row.unwrap_or(false))
+        Ok(row.and_then(|s| AdminRole::parse(&s)))
     }
 
     pub async fn admin_count(&self) -> usize {
@@ -131,10 +156,21 @@ impl PostgresModeration {
     }
 
     pub async fn require_admin(&self, user_id: UserId) -> Result<(), AppError> {
-        if self.try_is_admin(user_id).await? {
-            Ok(())
-        } else {
-            Err(AppError::new(ErrorCode::Forbidden, "admin only"))
+        self.require_role(user_id, AdminRole::Admin).await.map(|_| ())
+    }
+
+    pub async fn require_role(
+        &self,
+        user_id: UserId,
+        min: AdminRole,
+    ) -> Result<AdminRole, AppError> {
+        match self.try_admin_role(user_id).await? {
+            Some(role) if role.meets(min) => Ok(role),
+            Some(_) => Err(AppError::new(
+                ErrorCode::Forbidden,
+                format!("requires role {} or higher", min.as_str()),
+            )),
+            None => Err(AppError::new(ErrorCode::Forbidden, "admin only")),
         }
     }
 
@@ -392,6 +428,13 @@ impl AnyModeration {
         }
     }
 
+    pub async fn grant_role(&self, user_id: UserId, role: AdminRole) {
+        match self {
+            Self::Memory(m) => m.grant_role(user_id, role).await,
+            Self::Postgres(m) => m.grant_role(user_id, role).await,
+        }
+    }
+
     pub async fn grant_admin_audited(
         &self,
         actor: UserId,
@@ -408,6 +451,23 @@ impl AnyModeration {
         }
     }
 
+    pub async fn grant_role_audited(
+        &self,
+        actor: UserId,
+        target: UserId,
+        role: AdminRole,
+        detail: impl Into<String>,
+    ) -> Result<(), AppError> {
+        let detail = detail.into();
+        match self {
+            Self::Memory(m) => {
+                m.grant_role_audited(actor, target, role, detail).await;
+                Ok(())
+            }
+            Self::Postgres(m) => m.grant_role_audited(actor, target, role, detail).await,
+        }
+    }
+
     /// Atomic bootstrap grant. Returns true if this call created the first admin.
     pub async fn try_bootstrap_admin(&self, user_id: UserId) -> Result<bool, AppError> {
         match self {
@@ -420,6 +480,13 @@ impl AnyModeration {
         match self {
             Self::Memory(m) => m.is_admin(user_id).await,
             Self::Postgres(m) => m.is_admin(user_id).await,
+        }
+    }
+
+    pub async fn admin_role(&self, user_id: UserId) -> Option<AdminRole> {
+        match self {
+            Self::Memory(m) => m.admin_role(user_id).await,
+            Self::Postgres(m) => m.admin_role(user_id).await,
         }
     }
 
@@ -450,6 +517,17 @@ impl AnyModeration {
         match self {
             Self::Memory(m) => m.require_admin(user_id).await,
             Self::Postgres(m) => m.require_admin(user_id).await,
+        }
+    }
+
+    pub async fn require_role(
+        &self,
+        user_id: UserId,
+        min: AdminRole,
+    ) -> Result<AdminRole, AppError> {
+        match self {
+            Self::Memory(m) => m.require_role(user_id, min).await,
+            Self::Postgres(m) => m.require_role(user_id, min).await,
         }
     }
 
@@ -553,13 +631,13 @@ fn map_db(err: sqlx::Error) -> AppError {
 #[allow(dead_code)]
 pub mod sql {
     pub const INSERT_ADMIN: &str = r#"
-            INSERT INTO admin_users (user_id)
-            VALUES ($1)
-            ON CONFLICT (user_id) DO NOTHING
+            INSERT INTO admin_users (user_id, role)
+            VALUES ($1, $2)
+            ON CONFLICT (user_id) DO UPDATE SET role = EXCLUDED.role
             "#;
 
     pub const SELECT_IS_ADMIN: &str = r#"
-            SELECT true FROM admin_users WHERE user_id = $1
+            SELECT COALESCE(role, 'admin') FROM admin_users WHERE user_id = $1
             "#;
 
     pub const UPSERT_BANNED: &str = r#"

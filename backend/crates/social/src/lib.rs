@@ -49,6 +49,20 @@ impl MemorySocial {
             .map(|s| s.iter().copied().map(UserId).collect())
             .unwrap_or_default()
     }
+
+    /// Number of followers for a user (reverse edge scan).
+    pub async fn follower_count(&self, user: UserId) -> u64 {
+        let g = self.inner.lock().await;
+        g.values()
+            .filter(|set| set.contains(&user.0))
+            .count() as u64
+    }
+
+    /// Number of users this account follows.
+    pub async fn following_count(&self, user: UserId) -> u64 {
+        let g = self.inner.lock().await;
+        g.get(&user.0).map(|s| s.len() as u64).unwrap_or(0)
+    }
 }
 
 #[cfg(test)]
@@ -65,6 +79,19 @@ mod tests {
         assert_eq!(s.following_ids(a).await.len(), 1);
         s.unfollow(a, b).await.unwrap();
         assert!(!s.is_following(a, b).await);
+        assert_eq!(s.follower_count(b).await, 0);
+    }
+
+    #[tokio::test]
+    async fn follower_count_tracks_reverse_edges() {
+        let s = MemorySocial::new();
+        let host = UserId::new();
+        let f1 = UserId::new();
+        let f2 = UserId::new();
+        s.follow(f1, host).await.unwrap();
+        s.follow(f2, host).await.unwrap();
+        assert_eq!(s.follower_count(host).await, 2);
+        assert_eq!(s.following_count(f1).await, 1);
     }
 
     #[tokio::test]

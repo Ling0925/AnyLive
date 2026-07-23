@@ -1,6 +1,13 @@
 //! Realtime plane helpers: chat messages + Centrifugo connection tokens + publish.
 //!
 //! Actual WebSocket fan-out is Centrifugo (or in-memory bus for tests).
+//! Optional NATS domain events: [`nats`].
+
+mod nats;
+pub use nats::{
+    gift_sent_nats_event, nats_publisher_from_env, NatsPublisher, NoopNatsPublisher,
+    RecordingNatsPublisher, TcpNatsPublisher, SUBJECT_GIFT_SENT,
+};
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;

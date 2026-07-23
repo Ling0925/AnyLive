@@ -36,8 +36,8 @@ pub use service::{
     RefreshRequest,
 };
 pub use store::{
-    InMemoryOtpStore, InMemoryRefreshStore, InMemoryUserStore, OtpChallenge, OtpStore, RefreshStore,
-    UserStore,
+    InMemoryOtpStore, InMemoryRefreshStore, InMemoryUserStore, OtpChallenge, OtpStore,
+    RefreshSessionInfo, RefreshStore, UserStore,
 };
 
 /// Dev-mode fixed OTP accepted when no pending challenge exists (or always in tests).

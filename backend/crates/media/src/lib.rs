@@ -53,6 +53,159 @@ pub trait MediaProvider: Send + Sync {
     async fn play_urls(&self, room_id: RoomId) -> Result<PlayUrls, AppError>;
 }
 
+// ── LiveKit interactive plane (P3 co-host / PK scaffold) ─────────────────────
+
+/// Short-lived credentials for a LiveKit room participant (host or co-host).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LiveKitJoinInfo {
+    pub url: String,
+    pub room_name: String,
+    pub token: String,
+    pub identity: String,
+    pub expires_at: Timestamp,
+}
+
+/// Port for interactive WebRTC (LiveKit). Broadcast still uses [`MediaProvider`].
+#[async_trait]
+pub trait InteractiveMediaProvider: Send + Sync {
+    async fn issue_join(
+        &self,
+        room_id: RoomId,
+        user: UserId,
+        role: LiveKitRole,
+    ) -> Result<LiveKitJoinInfo, AppError>;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LiveKitRole {
+    Host,
+    CoHost,
+    Viewer,
+}
+
+impl LiveKitRole {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Host => "host",
+            Self::CoHost => "cohost",
+            Self::Viewer => "viewer",
+        }
+    }
+}
+
+/// Env-configured LiveKit join issuer (HS256-compatible JWT for LiveKit access tokens).
+///
+/// Enable with `LIVEKIT_URL` + `LIVEKIT_API_KEY` + `LIVEKIT_API_SECRET`. When unset,
+/// [`LiveKitProvider::from_env`] returns `None` and interactive routes stay disabled.
+#[derive(Debug, Clone)]
+pub struct LiveKitProvider {
+    url: String,
+    api_key: String,
+    api_secret: String,
+    ttl_secs: i64,
+}
+
+impl LiveKitProvider {
+    pub const DEFAULT_TTL_SECS: i64 = 60 * 60;
+
+    pub fn new(
+        url: impl Into<String>,
+        api_key: impl Into<String>,
+        api_secret: impl Into<String>,
+    ) -> Self {
+        Self {
+            url: trim_trailing_slash(url.into()),
+            api_key: api_key.into(),
+            api_secret: api_secret.into(),
+            ttl_secs: Self::DEFAULT_TTL_SECS,
+        }
+    }
+
+    pub fn from_env() -> Option<Self> {
+        let url = std::env::var("LIVEKIT_URL").ok().filter(|s| !s.trim().is_empty())?;
+        let api_key = std::env::var("LIVEKIT_API_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty())?;
+        let api_secret = std::env::var("LIVEKIT_API_SECRET")
+            .ok()
+            .filter(|s| !s.trim().is_empty())?;
+        Some(Self::new(url, api_key, api_secret))
+    }
+
+    pub fn with_ttl(mut self, ttl_secs: i64) -> Self {
+        self.ttl_secs = ttl_secs.max(60);
+        self
+    }
+
+    pub fn room_name(room_id: RoomId) -> String {
+        format!("room-{}", room_id.0)
+    }
+
+    /// Minimal LiveKit access token (video grant) signed with HS256.
+    ///
+    /// Compatible with LiveKit's expected JWT shape for join; full grant matrix
+    /// (roomAdmin, canPublishData, …) can expand in P3 UI work.
+    pub fn mint_token(
+        &self,
+        room_id: RoomId,
+        user: UserId,
+        role: LiveKitRole,
+    ) -> Result<LiveKitJoinInfo, AppError> {
+        use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+        use serde_json::json;
+
+        let expires_at = Utc::now() + Duration::seconds(self.ttl_secs);
+        let exp = expires_at.timestamp();
+        let nbf = Utc::now().timestamp();
+        let identity = format!("user-{}", user.0);
+        let room_name = Self::room_name(room_id);
+        let can_publish = matches!(role, LiveKitRole::Host | LiveKitRole::CoHost);
+        let claims = json!({
+            "iss": self.api_key,
+            "sub": identity,
+            "nbf": nbf,
+            "exp": exp,
+            "name": identity,
+            "video": {
+                "roomJoin": true,
+                "room": room_name,
+                "canPublish": can_publish,
+                "canSubscribe": true,
+                "canPublishData": can_publish,
+            },
+            "metadata": format!("{{\"role\":\"{}\"}}", role.as_str()),
+        });
+        let mut header = Header::new(Algorithm::HS256);
+        header.kid = Some(self.api_key.clone());
+        let token = encode(
+            &header,
+            &claims,
+            &EncodingKey::from_secret(self.api_secret.as_bytes()),
+        )
+        .map_err(|e| AppError::new(ErrorCode::MediaProviderError, format!("livekit jwt: {e}")))?;
+        Ok(LiveKitJoinInfo {
+            url: self.url.clone(),
+            room_name,
+            token,
+            identity,
+            expires_at,
+        })
+    }
+}
+
+#[async_trait]
+impl InteractiveMediaProvider for LiveKitProvider {
+    async fn issue_join(
+        &self,
+        room_id: RoomId,
+        user: UserId,
+        role: LiveKitRole,
+    ) -> Result<LiveKitJoinInfo, AppError> {
+        self.mint_token(room_id, user, role)
+    }
+}
+
 /// SRS-backed provider using RTMP publish + HTTP-FLV/HLS play.
 #[derive(Debug, Clone)]
 pub struct SrsMediaProvider {
@@ -276,6 +429,146 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
     bool::from(a.as_bytes().ct_eq(b.as_bytes()))
 }
 
+
+// ── Cloudflare Stream (control plane scaffold, WBS E3.2 / E10.1) ─────────────
+//
+// Issues RTMPS push credentials + HLS playback URLs against Cloudflare Stream.
+// Does **not** call Cloudflare's REST API at runtime (no network side effects in
+// the control plane); operators pre-create Live Inputs or use Stream Live and
+// inject the resulting RTMPS path / playback id via env.
+//
+// Enable with:
+//   MEDIA_PROVIDER=cloudflare
+//   CF_STREAM_RTMPS_URL=rtmps://live.cloudflare.com:443/live
+//   CF_STREAM_PLAYBACK_BASE=https://customer-XXXX.cloudflarestream.com
+//   CF_STREAM_INPUT_UID=<live-input-uid>   # used as stream key prefix
+// Optional:
+//   CF_STREAM_CUSTOMER_CODE=customer-XXXX  # if playback base omitted
+
+/// Cloudflare Stream–oriented publish/play URL builder (no REST client).
+#[derive(Debug, Clone)]
+pub struct CloudflareStreamProvider {
+    rtmps_url: String,
+    playback_base: String,
+    /// Live Input UID or pre-shared stream key material.
+    input_uid: String,
+    publish_ttl_secs: i64,
+    publish_secret: String,
+}
+
+impl CloudflareStreamProvider {
+    pub fn new(
+        rtmps_url: impl Into<String>,
+        playback_base: impl Into<String>,
+        input_uid: impl Into<String>,
+    ) -> Self {
+        Self {
+            rtmps_url: trim_trailing_slash(rtmps_url.into()),
+            playback_base: trim_trailing_slash(playback_base.into()),
+            input_uid: input_uid.into(),
+            publish_ttl_secs: DEFAULT_PUBLISH_TTL_SECS,
+            publish_secret: std::env::var("CF_STREAM_PUBLISH_SECRET")
+                .or_else(|_| std::env::var("SRS_PUBLISH_SECRET"))
+                .unwrap_or_else(|_| default_publish_secret()),
+        }
+    }
+
+    pub fn with_publish_ttl(mut self, secs: i64) -> Self {
+        self.publish_ttl_secs = secs;
+        self
+    }
+
+    /// Build from env when `MEDIA_PROVIDER=cloudflare` (or `cf` / `cloudflare_stream`).
+    /// Returns `None` when not selected or required vars missing.
+    pub fn from_env() -> Option<Self> {
+        let kind = std::env::var("MEDIA_PROVIDER")
+            .unwrap_or_else(|_| "srs".into())
+            .to_ascii_lowercase();
+        if kind != "cloudflare" && kind != "cf" && kind != "cloudflare_stream" {
+            return None;
+        }
+        let rtmps = std::env::var("CF_STREAM_RTMPS_URL").ok()?;
+        let input = std::env::var("CF_STREAM_INPUT_UID")
+            .or_else(|_| std::env::var("CF_STREAM_STREAM_KEY"))
+            .ok()?;
+        let playback = std::env::var("CF_STREAM_PLAYBACK_BASE").ok().or_else(|| {
+            std::env::var("CF_STREAM_CUSTOMER_CODE").ok().map(|c| {
+                format!("https://{c}.cloudflarestream.com")
+            })
+        })?;
+        Some(Self::new(rtmps, playback, input))
+    }
+
+    /// Stream key ties Live Input to room so multi-room maps cleanly.
+    fn stream_key_for(&self, room_id: RoomId, exp: i64) -> String {
+        let room = room_id.0.to_string();
+        let mut mac = HmacSha256::new_from_slice(self.publish_secret.as_bytes())
+            .expect("HMAC key length");
+        mac.update(self.input_uid.as_bytes());
+        mac.update(b"|");
+        mac.update(room.as_bytes());
+        mac.update(b"|");
+        mac.update(exp.to_string().as_bytes());
+        let bytes = mac.finalize().into_bytes();
+        let sig = hex::encode(&bytes[..16]);
+        // Cloudflare Live Input stream key is usually a single secret; we embed
+        // room+exp+sig so control-plane can audit. Operators may still use bare
+        // `input_uid` as the OBS password when CF rejects custom keys — document
+        // both modes in docs/runbooks/go-live-stage.md.
+        format!("{}?room={}&exp={}&sig={}", self.input_uid, room, exp, sig)
+    }
+
+    pub fn build_publish(&self, room_id: RoomId, _owner: UserId) -> PublishInfo {
+        let expires_at = Utc::now() + Duration::seconds(self.publish_ttl_secs);
+        let exp = expires_at.timestamp();
+        let stream_key = self.stream_key_for(room_id, exp);
+        let push_url = format!("{}/{}", self.rtmps_url, stream_key);
+        PublishInfo {
+            push_url,
+            stream_key,
+            expires_at,
+        }
+    }
+
+    pub fn build_play(&self, room_id: RoomId) -> PlayUrls {
+        // Playback id = room uuid by convention when each room maps to a CF asset;
+        // stage may override with a fixed demo playback id via env on the URL base.
+        let id = room_id.0.to_string();
+        PlayUrls {
+            hls: format!("{}/{}/manifest/video.m3u8", self.playback_base, id),
+            flv: None,
+        }
+    }
+
+    pub fn name() -> &'static str {
+        "cloudflare_stream"
+    }
+}
+
+#[async_trait]
+impl MediaProvider for CloudflareStreamProvider {
+    async fn issue_publish(
+        &self,
+        room_id: RoomId,
+        owner: UserId,
+    ) -> Result<PublishInfo, AppError> {
+        Ok(self.build_publish(room_id, owner))
+    }
+
+    async fn play_urls(&self, room_id: RoomId) -> Result<PlayUrls, AppError> {
+        Ok(self.build_play(room_id))
+    }
+}
+
+/// Which broadcast media backend the process is configured for (diagnostics).
+pub fn media_provider_kind_from_env() -> &'static str {
+    if CloudflareStreamProvider::from_env().is_some() {
+        "cloudflare_stream"
+    } else {
+        "srs"
+    }
+}
+
 /// Map media failures to the stable API code.
 #[allow(dead_code)]
 pub fn media_error(message: impl Into<String>) -> AppError {
@@ -432,5 +725,55 @@ mod tests {
         assert!(play.hls.ends_with(".m3u8"));
         assert!(play.hls.contains(&room.0.to_string()));
         assert!(!play.hls.contains('?'));
+    }
+
+
+    #[test]
+    fn cloudflare_stream_urls() {
+        let p = CloudflareStreamProvider::new(
+            "rtmps://live.cloudflare.com:443/live",
+            "https://customer-demo.cloudflarestream.com",
+            "input-uid-abc",
+        )
+        .with_publish_ttl(3600);
+        let (room, owner) = fixed_ids();
+        let info = p.build_publish(room, owner);
+        assert!(info.push_url.starts_with("rtmps://live.cloudflare.com:443/live/"));
+        assert!(info.stream_key.starts_with("input-uid-abc?"));
+        assert!(info.stream_key.contains("room="));
+        let play = p.build_play(room);
+        assert!(play.hls.contains("manifest/video.m3u8"));
+        assert!(play.hls.contains(&room.0.to_string()));
+        assert!(play.flv.is_none());
+        assert_eq!(CloudflareStreamProvider::name(), "cloudflare_stream");
+    }
+
+    #[test]
+    fn media_provider_kind_defaults_srs() {
+        // from_env CF requires MEDIA_PROVIDER + vars; default is srs.
+        assert_eq!(media_provider_kind_from_env(), "srs");
+    }
+
+    #[tokio::test]
+    async fn livekit_mints_join_token() {
+        let lk = LiveKitProvider::new(
+            "wss://livekit.example",
+            "APItestkey",
+            "secret-for-tests-32chars-minimum!!",
+        )
+        .with_ttl(600);
+        let (room, user) = fixed_ids();
+        let info = lk
+            .issue_join(room, user, LiveKitRole::Host)
+            .await
+            .unwrap();
+        assert_eq!(info.url, "wss://livekit.example");
+        assert_eq!(info.room_name, format!("room-{}", room.0));
+        assert!(info.identity.starts_with("user-"));
+        assert!(!info.token.is_empty());
+        // three JWT segments
+        assert_eq!(info.token.split('.').count(), 3);
+        assert!(info.expires_at > Utc::now());
+        assert!(LiveKitProvider::from_env().is_none());
     }
 }

@@ -166,6 +166,47 @@ impl AnyUserStore {
     pub fn is_postgres(&self) -> bool {
         matches!(self, Self::Postgres(_))
     }
+
+    /// Case-insensitive substring search on display_name.
+    pub async fn search_display_name(
+        &self,
+        q: &str,
+        limit: usize,
+    ) -> Result<Vec<User>, AppError> {
+        let needle = q.trim();
+        if needle.is_empty() || limit == 0 {
+            return Ok(Vec::new());
+        }
+        match self {
+            Self::Memory(s) => Ok(s.search_display_name(needle, limit).await),
+            Self::Postgres(s) => s.search_display_name(needle, limit).await,
+        }
+    }
+}
+
+impl PostgresUserStore {
+    pub async fn search_display_name(
+        &self,
+        q: &str,
+        limit: usize,
+    ) -> Result<Vec<User>, AppError> {
+        let pattern = format!("%{}%", q.trim());
+        let rows = sqlx::query_as::<_, UserRow>(
+            r#"
+            SELECT id, display_name, email, created_at
+            FROM users
+            WHERE display_name ILIKE $1
+            ORDER BY display_name ASC
+            LIMIT $2
+            "#,
+        )
+        .bind(&pattern)
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_db)?;
+        Ok(rows.into_iter().map(Into::into).collect())
+    }
 }
 
 #[async_trait]

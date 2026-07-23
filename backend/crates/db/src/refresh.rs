@@ -105,6 +105,87 @@ impl RefreshStore for PostgresRefreshStore {
     }
 }
 
+impl PostgresRefreshStore {
+    /// Lookup a refresh session by jti (includes expired rows still present).
+    pub async fn get(
+        &self,
+        jti: Uuid,
+    ) -> Result<Option<anylive_auth::RefreshSessionInfo>, AppError> {
+        #[derive(sqlx::FromRow)]
+        struct Row {
+            jti: Uuid,
+            user_id: Uuid,
+            expires_at: DateTime<Utc>,
+        }
+        let row = sqlx::query_as::<_, Row>(
+            r#"
+            SELECT jti, user_id, expires_at
+            FROM refresh_tokens
+            WHERE jti = $1
+            "#,
+        )
+        .bind(jti)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_db)?;
+        Ok(row.map(|r| anylive_auth::RefreshSessionInfo {
+            jti: r.jti,
+            user_id: UserId(r.user_id),
+            exp: r.expires_at.timestamp(),
+        }))
+    }
+
+    /// Delete only if jti belongs to `user_id`.
+    pub async fn revoke_for_user(&self, jti: Uuid, user_id: UserId) -> Result<bool, AppError> {
+        let res = sqlx::query(
+            r#"
+            DELETE FROM refresh_tokens
+            WHERE jti = $1 AND user_id = $2
+            "#,
+        )
+        .bind(jti)
+        .bind(user_id.0)
+        .execute(&self.pool)
+        .await
+        .map_err(map_db)?;
+        Ok(res.rows_affected() > 0)
+    }
+
+    /// List non-expired refresh sessions for a user (jti + exp only; no device metadata).
+    pub async fn list_for_user(
+        &self,
+        user_id: UserId,
+    ) -> Result<Vec<anylive_auth::RefreshSessionInfo>, AppError> {
+        #[derive(sqlx::FromRow)]
+        struct Row {
+            jti: Uuid,
+            user_id: Uuid,
+            expires_at: DateTime<Utc>,
+        }
+        let rows = sqlx::query_as::<_, Row>(
+            r#"
+            SELECT jti, user_id, expires_at
+            FROM refresh_tokens
+            WHERE user_id = $1
+              AND expires_at >= now()
+            ORDER BY expires_at DESC
+            "#,
+        )
+        .bind(user_id.0)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_db)?;
+        Ok(rows
+            .into_iter()
+            .map(|r| anylive_auth::RefreshSessionInfo {
+                jti: r.jti,
+                user_id: UserId(r.user_id),
+                exp: r.expires_at.timestamp(),
+            })
+            .collect())
+    }
+}
+
 /// Dual backend so the API can switch memory ↔ Postgres without generics on `AppState`.
 #[derive(Clone)]
 pub enum AnyRefreshStore {
@@ -153,6 +234,35 @@ impl RefreshStore for AnyRefreshStore {
         match self {
             Self::Memory(s) => s.revoke_all_for_user(user_id).await,
             Self::Postgres(s) => s.revoke_all_for_user(user_id).await,
+        }
+    }
+}
+
+impl AnyRefreshStore {
+    pub async fn get(
+        &self,
+        jti: Uuid,
+    ) -> Result<Option<anylive_auth::RefreshSessionInfo>, AppError> {
+        match self {
+            Self::Memory(s) => Ok(s.get(jti).await),
+            Self::Postgres(s) => s.get(jti).await,
+        }
+    }
+
+    pub async fn revoke_for_user(&self, jti: Uuid, user_id: UserId) -> Result<bool, AppError> {
+        match self {
+            Self::Memory(s) => s.revoke_for_user(jti, user_id).await,
+            Self::Postgres(s) => s.revoke_for_user(jti, user_id).await,
+        }
+    }
+
+    pub async fn list_for_user(
+        &self,
+        user_id: UserId,
+    ) -> Result<Vec<anylive_auth::RefreshSessionInfo>, AppError> {
+        match self {
+            Self::Memory(s) => Ok(s.list_for_user(user_id).await),
+            Self::Postgres(s) => s.list_for_user(user_id).await,
         }
     }
 }

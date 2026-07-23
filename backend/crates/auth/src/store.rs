@@ -135,6 +135,24 @@ impl UserStore for InMemoryUserStore {
     }
 }
 
+impl InMemoryUserStore {
+    /// Case-insensitive substring match on display name (dogfood search).
+    pub async fn search_display_name(&self, q: &str, limit: usize) -> Vec<User> {
+        let needle = q.trim().to_ascii_lowercase();
+        if needle.is_empty() || limit == 0 {
+            return Vec::new();
+        }
+        let guard = self.by_id.read().await;
+        let mut items: Vec<User> = guard
+            .values()
+            .filter(|u| u.display_name.to_ascii_lowercase().contains(&needle))
+            .cloned()
+            .collect();
+        items.sort_by(|a, b| a.display_name.cmp(&b.display_name));
+        items.into_iter().take(limit).collect()
+    }
+}
+
 #[derive(Debug, Clone)]
 struct RefreshRecord {
     user_id: UserId,
@@ -174,6 +192,54 @@ impl RefreshStore for InMemoryRefreshStore {
         let before = guard.len();
         guard.retain(|_, rec| rec.user_id != user_id);
         Ok(before - guard.len())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RefreshSessionInfo {
+    pub jti: Uuid,
+    pub user_id: UserId,
+    pub exp: i64,
+}
+
+impl InMemoryRefreshStore {
+    /// Lookup a refresh session by jti (includes expired rows still present).
+    pub async fn get(&self, jti: Uuid) -> Option<RefreshSessionInfo> {
+        let guard = self.active.read().await;
+        guard.get(&jti).map(|rec| RefreshSessionInfo {
+            jti,
+            user_id: rec.user_id,
+            exp: rec.exp,
+        })
+    }
+
+    /// Revoke only if the jti belongs to `user_id` (returns false when missing or other user).
+    pub async fn revoke_for_user(&self, jti: Uuid, user_id: UserId) -> Result<bool, AppError> {
+        let mut guard = self.active.write().await;
+        match guard.get(&jti) {
+            Some(rec) if rec.user_id == user_id => {
+                guard.remove(&jti);
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    /// List non-expired refresh sessions for a user (no device metadata in v0).
+    pub async fn list_for_user(&self, user_id: UserId) -> Vec<RefreshSessionInfo> {
+        let now = Utc::now().timestamp();
+        let guard = self.active.read().await;
+        let mut items: Vec<RefreshSessionInfo> = guard
+            .iter()
+            .filter(|(_, rec)| rec.user_id == user_id && rec.exp >= now)
+            .map(|(jti, rec)| RefreshSessionInfo {
+                jti: *jti,
+                user_id: rec.user_id,
+                exp: rec.exp,
+            })
+            .collect();
+        items.sort_by(|a, b| b.exp.cmp(&a.exp));
+        items
     }
 }
 
@@ -234,6 +300,22 @@ mod tests {
             .unwrap();
         assert!(store.is_active(jti).await.unwrap());
         assert!(store.revoke(jti).await.unwrap());
+        assert!(!store.is_active(jti).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn revoke_for_user_respects_ownership() {
+        let store = InMemoryRefreshStore::default();
+        let jti = Uuid::new_v4();
+        let owner = UserId::new();
+        let other = UserId::new();
+        store
+            .insert(jti, owner, Utc::now().timestamp() + 3600)
+            .await
+            .unwrap();
+        assert!(!store.revoke_for_user(jti, other).await.unwrap());
+        assert!(store.is_active(jti).await.unwrap());
+        assert!(store.revoke_for_user(jti, owner).await.unwrap());
         assert!(!store.is_active(jti).await.unwrap());
     }
 }

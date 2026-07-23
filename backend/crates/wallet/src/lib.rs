@@ -273,6 +273,61 @@ impl MemoryWallet {
             .cloned()
             .collect()
     }
+
+    /// Verify each user's balance equals the sum of ledger amounts (P1 dogfood gate).
+    pub async fn reconcile(&self) -> ReconcileReport {
+        let g = self.inner.lock().await;
+        let mut user_ids: std::collections::HashSet<Uuid> = g.balances.keys().copied().collect();
+        for e in &g.ledger {
+            user_ids.insert(e.user_id.0);
+        }
+        let mut mismatches = Vec::new();
+        let mut checked = 0u64;
+        for id in user_ids {
+            checked += 1;
+            let stored = *g.balances.get(&id).unwrap_or(&0);
+            let summed: i64 = g
+                .ledger
+                .iter()
+                .filter(|e| e.user_id.0 == id)
+                .map(|e| e.amount)
+                .sum();
+            if stored != summed {
+                mismatches.push(BalanceMismatch {
+                    user_id: UserId(id),
+                    stored_balance: stored,
+                    ledger_sum: summed,
+                });
+            }
+        }
+        ReconcileReport {
+            checked_users: checked,
+            imbalance_count: mismatches.len() as u64,
+            mismatches,
+        }
+    }
+}
+
+/// One user whose balance map disagrees with Σ ledger.amount.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BalanceMismatch {
+    pub user_id: UserId,
+    pub stored_balance: i64,
+    pub ledger_sum: i64,
+}
+
+/// Result of a wallet ledger/balance consistency scan.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReconcileReport {
+    pub checked_users: u64,
+    pub imbalance_count: u64,
+    pub mismatches: Vec<BalanceMismatch>,
+}
+
+impl ReconcileReport {
+    pub fn is_balanced(&self) -> bool {
+        self.imbalance_count == 0
+    }
 }
 
 #[cfg(test)]
@@ -413,5 +468,21 @@ mod tests {
         assert_eq!(w.balance(u).await, 10);
         let c = w.credit_topup(u, 5, "other-ref").await.unwrap();
         assert_eq!(c.balance, 15);
+    }
+
+    #[tokio::test]
+    async fn reconcile_reports_balanced_after_gift() {
+        let w = MemoryWallet::new();
+        w.seed_default_gifts().await;
+        let rose = w.list_gifts().await[0].clone();
+        let s = UserId::new();
+        let r = UserId::new();
+        w.credit_topup(s, 10, "t").await.unwrap();
+        w.send_gift(Uuid::new_v4(), s, r, rose.id, 3, "k")
+            .await
+            .unwrap();
+        let report = w.reconcile().await;
+        assert!(report.is_balanced(), "{report:?}");
+        assert!(report.checked_users >= 2);
     }
 }

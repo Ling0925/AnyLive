@@ -89,6 +89,59 @@ impl PostgresRoomStore {
             .collect()
     }
 
+    pub async fn list_by_owner(&self, owner_id: UserId, status: Option<RoomStatus>) -> Vec<Room> {
+        let status_str = status.map(|s| s.as_str().to_string());
+        let rows = sqlx::query_as::<_, RoomRow>(
+            r#"
+            SELECT id, owner_id, title, status, created_at, updated_at
+            FROM rooms
+            WHERE owner_id = $1
+              AND ($2::text IS NULL OR status = $2)
+            ORDER BY created_at DESC
+            "#,
+        )
+        .bind(owner_id.0)
+        .bind(status_str)
+        .fetch_all(&self.pool)
+        .await
+        .unwrap_or_else(|err| {
+            tracing::error!(error = %err, "postgres room list_by_owner failed");
+            Vec::new()
+        });
+        rows.into_iter()
+            .filter_map(|r| r.into_room().ok())
+            .collect()
+    }
+
+    /// Case-insensitive substring match on title.
+    pub async fn search_title(&self, q: &str, limit: usize) -> Vec<Room> {
+        let needle = q.trim();
+        if needle.is_empty() || limit == 0 {
+            return Vec::new();
+        }
+        let pattern = format!("%{needle}%");
+        let rows = sqlx::query_as::<_, RoomRow>(
+            r#"
+            SELECT id, owner_id, title, status, created_at, updated_at
+            FROM rooms
+            WHERE title ILIKE $1
+            ORDER BY created_at DESC
+            LIMIT $2
+            "#,
+        )
+        .bind(&pattern)
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await
+        .unwrap_or_else(|err| {
+            tracing::error!(error = %err, "postgres room search_title failed");
+            Vec::new()
+        });
+        rows.into_iter()
+            .filter_map(|r| r.into_room().ok())
+            .collect()
+    }
+
     /// Owner-only: Idle -> Live.
     pub async fn start(&self, id: RoomId, actor: UserId) -> Result<Room, AppError> {
         self.transition(id, Some(actor), RoomStatus::Live).await

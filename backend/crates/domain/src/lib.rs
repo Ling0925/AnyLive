@@ -4,9 +4,14 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+pub mod interactive;
 pub mod room;
 pub mod user;
 
+pub use interactive::{
+    InteractiveError, InteractiveSession, InteractiveStatus, PkError, PkSession, PkStatus,
+    DEFAULT_PK_DURATION_SECS,
+};
 pub use room::{Room, RoomStatus};
 pub use user::User;
 

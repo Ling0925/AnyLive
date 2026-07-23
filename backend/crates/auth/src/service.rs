@@ -94,6 +94,10 @@ where
         &self.users
     }
 
+    pub fn refresh_store(&self) -> &R {
+        &self.refresh
+    }
+
     pub fn otp_config(&self) -> &crate::otp::OtpConfig {
         self.otp.config()
     }
@@ -113,6 +117,11 @@ where
         // and *before* refresh insert when possible. We issue here; routes that need
         // ban/delete checks must run them before calling this, or revoke on reject.
         // For the common path, routes check after and we add hooks below.
+        self.issue_session(user).await
+    }
+
+    /// Mint a session for an already-resolved user (OAuth / SSO paths).
+    pub async fn issue_session(&self, user: User) -> Result<AuthSession, AppError> {
         let issued = self.jwt.issue_pair(user.id, user.email.clone())?;
         self.refresh
             .insert(issued.refresh_jti, issued.user_id, issued.refresh_exp)
@@ -121,6 +130,27 @@ where
             user,
             tokens: issued.pair,
         })
+    }
+
+    /// Upsert by email and mint a session (used by OAuth after identity resolve).
+    pub async fn login_by_email(&self, email: &str) -> Result<AuthSession, AppError> {
+        let user = self.users.upsert_by_email(email).await?;
+        self.issue_session(user).await
+    }
+
+    /// Like [`login_by_email`] with a gate after user upsert / before tokens.
+    pub async fn login_by_email_gated<F, Fut>(
+        &self,
+        email: &str,
+        gate: F,
+    ) -> Result<AuthSession, AppError>
+    where
+        F: FnOnce(User) -> Fut,
+        Fut: std::future::Future<Output = Result<User, AppError>>,
+    {
+        let user = self.users.upsert_by_email(email).await?;
+        let user = gate(user).await?;
+        self.issue_session(user).await
     }
 
     /// Like [`verify_otp`] but runs `gate` after user upsert and **before**
@@ -138,14 +168,7 @@ where
         let email = self.otp.verify(&req.email, &req.code).await?;
         let user = self.users.upsert_by_email(&email).await?;
         let user = gate(user).await?;
-        let issued = self.jwt.issue_pair(user.id, user.email.clone())?;
-        self.refresh
-            .insert(issued.refresh_jti, issued.user_id, issued.refresh_exp)
-            .await?;
-        Ok(AuthSession {
-            user,
-            tokens: issued.pair,
-        })
+        self.issue_session(user).await
     }
 
     /// Rotate refresh: insert the new jti first, then revoke the old one.
