@@ -528,7 +528,6 @@ void previewVideoEl
           <section
             v-if="isAdmin === true"
             class="panel"
-           
             data-testid="demo-prep"
           >
             <div class="panel-head">
@@ -607,7 +606,6 @@ void previewVideoEl
             <pre
               v-if="metricsText"
               class="mono"
-             
             >{{ metricsText.slice(0, 4000) }}</pre>
           </section>
 
@@ -654,8 +652,8 @@ void previewVideoEl
                 <h2>{{ t('dashboard.roomsPreview') }}</h2>
                 <button type="button" class="btn sm" @click="go('rooms')">{{ t('common.all') }}</button>
               </div>
-              <div class="table-wrap" v-if="rooms.length">
-                <table class="data">
+              <div class="table-wrap is-compact" v-if="rooms.length">
+                <table class="data data-compact">
                   <thead>
                     <tr>
                       <th>{{ t('rooms.colTitle') }}</th>
@@ -691,8 +689,8 @@ void previewVideoEl
                 <h2>{{ t('dashboard.reportsPreview') }}</h2>
                 <button type="button" class="btn sm" @click="go('reports')">{{ t('dashboard.queue') }}</button>
               </div>
-              <div class="table-wrap" v-if="reports.length">
-                <table class="data">
+              <div class="table-wrap is-compact" v-if="reports.length">
+                <table class="data data-compact">
                   <thead>
                     <tr>
                       <th>{{ t('reports.colTarget') }}</th>
@@ -781,7 +779,6 @@ void previewVideoEl
           <div
             v-if="goLiveRoomId"
             class="action-card"
-           
             data-testid="golive-room-info"
           >
             <h3>{{ t('golive.roomInfo') }}</h3>
@@ -810,7 +807,6 @@ void previewVideoEl
           <div
             v-if="goLivePublish"
             class="split-actions"
-           
             data-testid="golive-obs"
           >
             <div class="action-card">
@@ -840,7 +836,7 @@ void previewVideoEl
               >
                 {{ t('golive.copyStreamKey') }}
               </button>
-              <p class="dim" style="margin-top: 0.5rem; font-size: 0.8rem">
+              <p class="card-note">
                 {{ t('golive.streamKeyHint') }}
               </p>
             </div>
@@ -857,7 +853,7 @@ void previewVideoEl
               >
                 {{ t('golive.copyPushUrl') }}
               </button>
-              <p v-if="goLivePublish.expiresAt" class="dim" style="margin-top: 0.5rem; font-size: 0.8rem">
+              <p v-if="goLivePublish.expiresAt" class="card-note">
                 {{ t('golive.expires') }}：{{ formatTs(goLivePublish.expiresAt) }}
               </p>
             </div>
@@ -886,15 +882,15 @@ void previewVideoEl
                   >{{ t('golive.openHls') }}</a
                 >
               </div>
-              <p class="dim" style="margin-top: 0.5rem; font-size: 0.8rem">
+              <p class="card-note">
                 {{ t('golive.h5Hint') }}{{ goLiveRoomId || 'roomId' }}
               </p>
             </div>
           </div>
 
-          <div class="panel">
-            <h3 style="margin: 0 0 0.5rem; font-size: 0.95rem">{{ t('golive.obsGuide') }}</h3>
-            <ol class="muted" style="margin: 0; padding-left: 1.2rem; font-size: 0.88rem">
+          <div class="inset-guide" data-testid="golive-obs-guide">
+            <h3>{{ t('golive.obsGuide') }}</h3>
+            <ol class="guide-list">
               <li>{{ t('golive.obsStep1') }}</li>
               <li>{{ t('golive.obsStep2') }}</li>
               <li>{{ t('golive.obsStep3') }}</li>
@@ -1085,7 +1081,7 @@ void previewVideoEl
             </button>
           </div>
           <p class="panel-desc">{{ t('reports.desc') }}</p>
-          <label class="field" style="max-width: min(420px, 100%)">
+          <label class="field field-md">
             <span>{{ t('reports.note') }}</span>
             <input
               v-model="actionReason"
@@ -1094,7 +1090,7 @@ void previewVideoEl
               data-testid="report-note"
             />
           </label>
-          <div class="table-wrap" v-if="reports.length" data-testid="reports-table">
+          <div class="table-wrap is-dense" v-if="reports.length" data-testid="reports-table">
             <table class="data">
               <thead>
                 <tr>
@@ -1120,33 +1116,35 @@ void previewVideoEl
                   <td class="mono">{{ shortId(r.reporter_id) }}</td>
                   <td class="mono">{{ formatTs(r.created_at) }}</td>
                   <td class="actions">
-                    <button
-                      type="button"
-                      class="btn sm primary"
-                      data-testid="report-resolve"
-                      :disabled="actionBusy || r.status === 'resolved'"
-                      @click="resolveReport(r.id)"
-                    >
-                      {{ t('reports.resolve') }}
-                    </button>
-                    <button
-                      v-if="r.target_type === 'room'"
-                      type="button"
-                      class="btn sm"
-                      data-testid="report-to-force-close"
-                      @click="useRoomId(r.target_id)"
-                    >
-                      {{ t('reports.toForceClose') }}
-                    </button>
-                    <button
-                      v-if="r.target_type === 'user'"
-                      type="button"
-                      class="btn sm"
-                      data-testid="report-to-moderation"
-                      @click="useUserId(r.target_id)"
-                    >
-                      {{ t('reports.toModeration') }}
-                    </button>
+                    <div class="row-actions">
+                      <button
+                        type="button"
+                        class="btn sm primary"
+                        data-testid="report-resolve"
+                        :disabled="actionBusy || r.status === 'resolved'"
+                        @click="resolveReport(r.id)"
+                      >
+                        {{ t('reports.resolve') }}
+                      </button>
+                      <button
+                        v-if="r.target_type === 'room'"
+                        type="button"
+                        class="btn sm"
+                        data-testid="report-to-force-close"
+                        @click="useRoomId(r.target_id)"
+                      >
+                        {{ t('reports.toForceClose') }}
+                      </button>
+                      <button
+                        v-if="r.target_type === 'user'"
+                        type="button"
+                        class="btn sm"
+                        data-testid="report-to-moderation"
+                        @click="useUserId(r.target_id)"
+                      >
+                        {{ t('reports.toModeration') }}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               </tbody>
@@ -1173,7 +1171,7 @@ void previewVideoEl
             </button>
           </div>
           <p class="panel-desc">{{ t('gifts.desc') }}</p>
-          <p class="hint" data-testid="gifts-seed-hint" style="margin-top: 0">
+          <p class="hint seed-hint" data-testid="gifts-seed-hint">
             {{ t('gifts.seedHint') }}
             <code class="mono">./scripts/dogfood-gift-seed.sh</code>
             {{ t('gifts.seedHint2') }}
@@ -1183,14 +1181,13 @@ void previewVideoEl
             {{ t('gifts.seedHint4') }}
             <button
               type="button"
-              class="btn sm"
-              style="margin-left: 0.35rem"
+              class="btn sm inline-btn"
               data-testid="gifts-copy-seed-cmd"
               @click="copyGiftSeedCmd"
             >
               {{ t('gifts.copyCmd') }}
             </button>
-            <span v-if="giftSeedCopyHint" class="dim" style="margin-left: 0.35rem">{{
+            <span v-if="giftSeedCopyHint" class="dim inline-hint">{{
               giftSeedCopyHint
             }}</span>
           </p>
@@ -1204,7 +1201,7 @@ void previewVideoEl
                 data-testid="gift-name"
               />
             </label>
-            <label class="field" style="max-width: min(160px, 100%)">
+            <label class="field field-sm">
               <span>{{ t('gifts.price') }}</span>
               <input
                 v-model="giftPrice"
@@ -1215,7 +1212,7 @@ void previewVideoEl
                 data-testid="gift-price"
               />
             </label>
-            <label v-if="giftEditId" class="field" style="max-width: min(140px, 100%)">
+            <label v-if="giftEditId" class="field field-sm">
               <span>{{ t('gifts.status') }}</span>
               <select v-model="giftEditActive" data-testid="gift-active">
                 <option :value="true">{{ t('gifts.active') }}</option>
@@ -1256,7 +1253,7 @@ void previewVideoEl
           <p v-if="giftEditId" class="hint" data-testid="gift-edit-hint">
             {{ t('gifts.editing', { id: shortId(giftEditId, 12) }) }}
           </p>
-          <div class="table-wrap" v-if="gifts.length" data-testid="gifts-table">
+          <div class="table-wrap is-dense" v-if="gifts.length" data-testid="gifts-table">
             <table class="data">
               <thead>
                 <tr>
@@ -1282,25 +1279,27 @@ void previewVideoEl
                   </td>
                   <td class="mono">{{ shortId(g.id, 12) }}</td>
                   <td class="actions">
-                    <button
-                      type="button"
-                      class="btn sm"
-                      data-testid="gift-edit"
-                      :disabled="giftBusy"
-                      @click="beginEditGift(g)"
-                    >
-                      {{ t('gifts.edit') }}
-                    </button>
-                    <button
-                      type="button"
-                      class="btn sm"
-                      :class="g.active === false ? 'primary' : 'danger'"
-                      data-testid="gift-toggle-active"
-                      :disabled="giftBusy"
-                      @click="toggleGiftActive(g)"
-                    >
-                      {{ g.active === false ? t('gifts.enable') : t('gifts.disable') }}
-                    </button>
+                    <div class="row-actions">
+                      <button
+                        type="button"
+                        class="btn sm"
+                        data-testid="gift-edit"
+                        :disabled="giftBusy"
+                        @click="beginEditGift(g)"
+                      >
+                        {{ t('gifts.edit') }}
+                      </button>
+                      <button
+                        type="button"
+                        class="btn sm"
+                        :class="g.active === false ? 'primary' : 'danger'"
+                        data-testid="gift-toggle-active"
+                        :disabled="giftBusy"
+                        @click="toggleGiftActive(g)"
+                      >
+                        {{ g.active === false ? t('gifts.enable') : t('gifts.disable') }}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               </tbody>
@@ -1325,7 +1324,7 @@ void previewVideoEl
             {{ tempPasswordNotice }}
           </p>
 
-          <div class="split-actions" style="margin-bottom: 16px">
+          <div class="split-actions section-block">
             <div class="action-card">
               <h3>{{ t('users.create') }}</h3>
               <label class="field">
@@ -1372,8 +1371,8 @@ void previewVideoEl
             </div>
           </div>
 
-          <div v-if="usersList.length" class="table-wrap">
-            <table data-testid="users-table">
+          <div v-if="usersList.length" class="table-wrap is-dense">
+            <table class="data data-users" data-testid="users-table">
               <thead>
                 <tr>
                   <th>{{ t('users.displayName') }}</th>
@@ -1387,58 +1386,60 @@ void previewVideoEl
                 <tr v-for="u in usersList" :key="u.id">
                   <td>
                     {{ u.display_name }}
-                    <div class="dim mono" style="font-size: 0.72rem">{{ shortId(u.id) }}</div>
+                    <div class="cell-sub mono">{{ shortId(u.id) }}</div>
                   </td>
                   <td class="mono">{{ u.username || '—' }}</td>
                   <td>{{ u.email || '—' }}</td>
-                  <td>
-                    {{ u.status }}
-                    <span v-if="u.banned" class="pill danger">{{ t('users.banned') }}</span>
-                    <span v-if="u.muted" class="pill">{{ t('users.muted') }}</span>
+                  <td class="col-status-mix">
+                    <span class="status-text">{{ u.status }}</span>
+                    <span v-if="u.banned" class="badge closed">{{ t('users.banned') }}</span>
+                    <span v-if="u.muted" class="badge idle">{{ t('users.muted') }}</span>
                   </td>
-                  <td class="row" style="gap: 4px; flex-wrap: wrap">
-                    <button type="button" class="btn sm" :disabled="actionBusy" @click="resetUserPassword(u.id)">
-                      {{ t('users.resetPassword') }}
-                    </button>
-                    <button type="button" class="btn sm" :disabled="actionBusy" @click="revokeUserSessions(u.id)">
-                      {{ t('users.revokeSessions') }}
-                    </button>
-                    <button
-                      v-if="!u.banned"
-                      type="button"
-                      class="btn sm danger"
-                      :disabled="actionBusy"
-                      @click="banUserId(u.id)"
-                    >
-                      {{ t('users.ban') }}
-                    </button>
-                    <button
-                      v-else
-                      type="button"
-                      class="btn sm"
-                      :disabled="actionBusy"
-                      @click="unbanUserId(u.id)"
-                    >
-                      {{ t('users.unban') }}
-                    </button>
-                    <button
-                      v-if="u.status === 'active'"
-                      type="button"
-                      class="btn sm"
-                      :disabled="actionBusy"
-                      @click="setUserStatus(u.id, 'disabled')"
-                    >
-                      {{ t('users.disable') }}
-                    </button>
-                    <button
-                      v-else-if="u.status === 'disabled'"
-                      type="button"
-                      class="btn sm primary"
-                      :disabled="actionBusy"
-                      @click="setUserStatus(u.id, 'active')"
-                    >
-                      {{ t('users.enable') }}
-                    </button>
+                  <td class="actions">
+                    <div class="row-actions">
+                      <button type="button" class="btn sm" :disabled="actionBusy" @click="resetUserPassword(u.id)">
+                        {{ t('users.resetPassword') }}
+                      </button>
+                      <button type="button" class="btn sm" :disabled="actionBusy" @click="revokeUserSessions(u.id)">
+                        {{ t('users.revokeSessions') }}
+                      </button>
+                      <button
+                        v-if="!u.banned"
+                        type="button"
+                        class="btn sm danger"
+                        :disabled="actionBusy"
+                        @click="banUserId(u.id)"
+                      >
+                        {{ t('users.ban') }}
+                      </button>
+                      <button
+                        v-else
+                        type="button"
+                        class="btn sm"
+                        :disabled="actionBusy"
+                        @click="unbanUserId(u.id)"
+                      >
+                        {{ t('users.unban') }}
+                      </button>
+                      <button
+                        v-if="u.status === 'active'"
+                        type="button"
+                        class="btn sm"
+                        :disabled="actionBusy"
+                        @click="setUserStatus(u.id, 'disabled')"
+                      >
+                        {{ t('users.disable') }}
+                      </button>
+                      <button
+                        v-else-if="u.status === 'disabled'"
+                        type="button"
+                        class="btn sm primary"
+                        :disabled="actionBusy"
+                        @click="setUserStatus(u.id, 'active')"
+                      >
+                        {{ t('users.enable') }}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               </tbody>
@@ -1449,7 +1450,7 @@ void previewVideoEl
             {{ usersBusy ? t('common.loading') : t('users.empty') }}
           </div>
         
-          <div class="panel-head" style="margin-top: 1.5rem">
+          <div class="panel-head section-divider">
             <h3>{{ t('users.moderationLists') }}</h3>
             <button
               type="button"
@@ -1463,7 +1464,7 @@ void previewVideoEl
           </div>
           <p class="panel-desc">{{ t('users.desc') }}</p>
 
-          <div class="action-card" style="max-width: 640px; margin-bottom: 1rem" data-testid="users-lookup">
+          <div class="action-card action-card-md section-block" data-testid="users-lookup">
             <h3>{{ t('users.lookup') }}</h3>
             <label class="field">
               <span>{{ t('moderation.userId') }}</span>
@@ -1475,7 +1476,7 @@ void previewVideoEl
                 data-testid="users-lookup-id"
               />
             </label>
-            <div class="row" style="gap: 0.5rem; flex-wrap: wrap">
+            <div class="row row-tight">
               <button
                 type="button"
                 class="btn primary"
@@ -1506,9 +1507,9 @@ void previewVideoEl
             </div>
             <div v-if="lookupStatus" class="hint" data-testid="users-lookup-result">
               <strong>{{ t('users.statusTitle') }}</strong>
-              <div class="mono" style="margin-top: 0.25rem">{{ shortId(lookupStatus.user_id, 16) }}</div>
-              <div v-if="lookupStatus.banned || lookupStatus.muted" style="margin-top: 0.35rem">
-                <span v-if="lookupStatus.banned" class="badge closed" style="margin-right: 0.35rem">
+              <div class="mono mt-xs">{{ shortId(lookupStatus.user_id, 16) }}</div>
+              <div v-if="lookupStatus.banned || lookupStatus.muted" class="mt-xs badge-row">
+                <span v-if="lookupStatus.banned" class="badge closed">
                   {{ t('users.statusBanned') }}
                   <template v-if="lookupStatus.ban_reason"> · {{ lookupStatus.ban_reason }}</template>
                   <template v-if="lookupStatus.banned_at">
@@ -1523,8 +1524,8 @@ void previewVideoEl
                   </template>
                 </span>
               </div>
-              <div v-else class="dim" style="margin-top: 0.35rem">{{ t('users.statusClear') }}</div>
-              <div class="row" style="gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap">
+              <div v-else class="dim mt-xs">{{ t('users.statusClear') }}</div>
+              <div class="row row-tight mt-sm">
                 <button
                   v-if="lookupStatus.banned"
                   type="button"
@@ -1631,7 +1632,7 @@ void previewVideoEl
           <p class="panel-desc">{{ t('moderation.desc') }}</p>
           <p class="danger-note">{{ t('moderation.dangerHint') }}</p>
 
-          <label class="field" style="max-width: min(480px, 100%)">
+          <label class="field field-lg">
             <span>{{ t('moderation.reason') }}</span>
             <input
               v-model="actionReason"
@@ -1762,7 +1763,7 @@ void previewVideoEl
               />
             </label>
           </div>
-          <div class="table-wrap" v-if="filteredAudit.length" data-testid="audit-table">
+          <div class="table-wrap is-dense" v-if="filteredAudit.length" data-testid="audit-table">
             <table class="data">
               <thead>
                 <tr>
