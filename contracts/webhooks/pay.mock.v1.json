@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://anylive.dev/schemas/webhooks/pay.mock.v1.json",
+  "title": "Pay mock sandbox notify",
+  "description": "POST /api/v1/webhooks/pay/mock — HMAC of order_id with PAY_MOCK_SECRET.",
+  "type": "object",
+  "required": ["order_id", "sig"],
+  "additionalProperties": true,
+  "properties": {
+    "order_id": { "type": "string", "format": "uuid" },
+    "sig": {
+      "type": "string",
+      "description": "hex-encoded HMAC-SHA256(order_id bytes, PAY_MOCK_SECRET)"
+    }
+  },
+  "examples": [
+    {
+      "order_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "sig": "deadbeef"
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://anylive.dev/schemas/webhooks/srs.on_publish.v1.json",
+  "title": "SRS on_publish / on_unpublish callback (subset)",
+  "description": "POST /api/v1/webhooks/srs/on_publish|on_unpublish. Stream name is room UUID (optionally with ?exp=&sig= query).",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "action": { "type": "string" },
+    "client_id": { "type": "string" },
+    "ip": { "type": "string" },
+    "vhost": { "type": "string" },
+    "app": { "type": "string" },
+    "stream": {
+      "type": "string",
+      "description": "Room id or roomId?exp=&sig= signed publish key"
+    },
+    "param": { "type": "string" }
+  },
+  "examples": [
+    {
+      "action": "on_publish",
+      "app": "live",
+      "stream": "22222222-2222-2222-2222-222222222222",
+      "param": "?exp=1700000000&sig=abc"
+    }
+  ]
+}

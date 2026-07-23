@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://anylive.dev/schemas/webhooks/pay.hmac.v1.json",
+  "title": "Pay HMAC sandbox notify (stripe/iap/jeepay/epay/tokenpay adapters)",
+  "description": "Shared body shape for sandbox adapters. Production Stripe/IAP will replace verification.",
+  "type": "object",
+  "required": ["order_id", "sig"],
+  "additionalProperties": true,
+  "properties": {
+    "order_id": { "type": "string", "format": "uuid" },
+    "sig": { "type": "string" },
+    "receipt": {
+      "type": "string",
+      "description": "Optional IAP receipt blob (sandbox may ignore content)"
+    },
+    "event_id": {
+      "type": "string",
+      "description": "Optional provider event id for webhook dedupe"
+    }
+  }
+}
