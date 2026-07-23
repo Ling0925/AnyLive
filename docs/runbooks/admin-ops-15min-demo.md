@@ -115,7 +115,8 @@
 - Dogfood 队列与预检：[dogfood-cohort.md](./dogfood-cohort.md)  
 - Admin 源码快速开始：[`apps/admin-web/README.md`](../../apps/admin-web/README.md)  
 - MVP 演示原文：[mvp-scope.md §4](../product/mvp-scope.md)  
-- 并行轨状态板：[p1-parallel-tracks.md](../product/p1-parallel-tracks.md)（**勿在此自动关闭 V-AD-1**）
+- 并行轨状态板：[p1-parallel-tracks.md](../product/p1-parallel-tracks.md)（**勿在此自动关闭 V-AD-1**）  
+- Wave2 Admin 演示包（prep 证据，**≠ 关闭 V-AD-1**）：[`reports/wave2-ad-demo-pack-20260723.md`](../../reports/wave2-ad-demo-pack-20260723.md)
 
 ---
 
