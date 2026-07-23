@@ -26,6 +26,18 @@ import {
   parsePayProducts,
   parsePayOrder,
   createPayOrderBody,
+  creatorStatsPath,
+  eventsPath,
+  roomPkPath,
+  roomPkStartPath,
+  roomInteractiveInvitePath,
+  parseCreatorStats,
+  parsePkSession,
+  clientEventsBody,
+  interactiveInviteBody,
+  startPkBody,
+  searchPath,
+  parseSearchResult,
 } from './chatApi'
 
 describe('url helpers', () => {
@@ -204,6 +216,88 @@ describe('pay parse / body', () => {
       product_id: 'p1',
       channel: 'mock',
       client_request_id: 'c1',
+    })
+  })
+})
+
+describe('creator / events / interactive paths', () => {
+  it('builds paths', () => {
+    expect(creatorStatsPath()).toBe('/api/v1/me/creator')
+    expect(eventsPath()).toBe('/api/v1/events')
+    expect(roomPkPath('r1')).toBe('/api/v1/rooms/r1/pk')
+    expect(roomPkStartPath('/r1/')).toBe('/api/v1/rooms/r1/pk/start')
+    expect(roomInteractiveInvitePath('r1')).toBe(
+      '/api/v1/rooms/r1/interactive/invite',
+    )
+  })
+
+  it('parses creator stats', () => {
+    expect(
+      parseCreatorStats({
+        follower_count: 10,
+        following_count: 2,
+        live_rooms: 1,
+        total_rooms: 3,
+        gift_coins_received: 99,
+        gift_credit_entries: 4,
+      }),
+    ).toEqual({
+      followerCount: 10,
+      followingCount: 2,
+      liveRooms: 1,
+      totalRooms: 3,
+      giftCoinsReceived: 99,
+      giftCreditEntries: 4,
+    })
+  })
+
+  it('parses pk session nested or flat', () => {
+    expect(
+      parsePkSession({
+        session: {
+          id: 'pk1',
+          room_a_id: 'r1',
+          room_b_id: 'r2',
+          status: 'active',
+          score_a: 3,
+          score_b: 1,
+        },
+      }),
+    ).toEqual({
+      id: 'pk1',
+      roomAId: 'r1',
+      roomBId: 'r2',
+      status: 'active',
+      scoreA: 3,
+      scoreB: 1,
+      winnerRoomId: null,
+    })
+    expect(parsePkSession({ session: null })).toBeNull()
+  })
+
+  it('builds event and invite bodies', () => {
+    expect(clientEventsBody([{ name: 'room.view', props: { room_id: 'r1' } }])).toEqual({
+      events: [{ name: 'room.view', props: { room_id: 'r1' } }],
+    })
+    expect(interactiveInviteBody('u2')).toEqual({ invitee_id: 'u2' })
+    expect(startPkBody({ opponentRoomId: 'r2', durationSecs: 60 })).toEqual({
+      opponent_room_id: 'r2',
+      duration_secs: 60,
+    })
+  })
+
+  it('search path and parse', () => {
+    expect(searchPath('Dogfood', { type: 'rooms', limit: 10 })).toBe(
+      '/api/v1/search?q=Dogfood&type=rooms&limit=10',
+    )
+    expect(
+      parseSearchResult({
+        users: [{ id: 'u1', display_name: 'Alice' }],
+        rooms: [{ id: 'r1', title: 'Live', status: 'live', owner_id: 'u1' }],
+      }),
+    ).toEqual({
+      users: [{ id: 'u1', displayName: 'Alice' }],
+      rooms: [{ id: 'r1', title: 'Live', status: 'live', ownerId: 'u1' }],
     })
   })
 })

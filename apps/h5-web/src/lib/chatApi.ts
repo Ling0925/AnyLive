@@ -296,3 +296,194 @@ export function authHeaders(token: string | null | undefined): Record<string, st
   }
   return headers
 }
+
+// --- Creator center / analytics / interactive (P3–P4) ---
+
+export function creatorStatsPath(): string {
+  return '/api/v1/me/creator'
+}
+
+export function eventsPath(): string {
+  return '/api/v1/events'
+}
+
+export function roomInteractivePath(roomId: string): string {
+  return `/api/v1/rooms/${cleanId(roomId)}/interactive`
+}
+
+export function roomInteractiveInvitePath(roomId: string): string {
+  return `/api/v1/rooms/${cleanId(roomId)}/interactive/invite`
+}
+
+export function roomInteractiveRespondPath(roomId: string): string {
+  return `/api/v1/rooms/${cleanId(roomId)}/interactive/respond`
+}
+
+export function roomInteractiveLeavePath(roomId: string): string {
+  return `/api/v1/rooms/${cleanId(roomId)}/interactive/leave`
+}
+
+export function roomPkPath(roomId: string): string {
+  return `/api/v1/rooms/${cleanId(roomId)}/pk`
+}
+
+export function roomPkStartPath(roomId: string): string {
+  return `/api/v1/rooms/${cleanId(roomId)}/pk/start`
+}
+
+export function roomPkEndPath(roomId: string): string {
+  return `/api/v1/rooms/${cleanId(roomId)}/pk/end`
+}
+
+export function roomLivekitJoinPath(roomId: string): string {
+  return `/api/v1/rooms/${cleanId(roomId)}/livekit/join`
+}
+
+export type CreatorStats = {
+  followerCount: number
+  followingCount: number
+  liveRooms: number
+  totalRooms: number
+  giftCoinsReceived: number
+  giftCreditEntries: number
+}
+
+export function parseCreatorStats(json: unknown): CreatorStats | null {
+  if (!json || typeof json !== 'object') return null
+  const o = json as Record<string, unknown>
+  const num = (v: unknown) => (typeof v === 'number' ? v : 0)
+  return {
+    followerCount: num(o.follower_count),
+    followingCount: num(o.following_count),
+    liveRooms: num(o.live_rooms),
+    totalRooms: num(o.total_rooms),
+    giftCoinsReceived: num(o.gift_coins_received),
+    giftCreditEntries: num(o.gift_credit_entries),
+  }
+}
+
+export type PkSession = {
+  id: string
+  roomAId: string
+  roomBId: string
+  status: string
+  scoreA: number
+  scoreB: number
+  winnerRoomId: string | null
+}
+
+export function parsePkSession(json: unknown): PkSession | null {
+  if (!json || typeof json !== 'object') return null
+  const root = json as Record<string, unknown>
+  const o = (root.session && typeof root.session === 'object'
+    ? root.session
+    : root) as Record<string, unknown>
+  if (typeof o.id !== 'string') return null
+  const num = (v: unknown) => (typeof v === 'number' ? v : 0)
+  return {
+    id: o.id,
+    roomAId: typeof o.room_a_id === 'string' ? o.room_a_id : '',
+    roomBId: typeof o.room_b_id === 'string' ? o.room_b_id : '',
+    status: typeof o.status === 'string' ? o.status : '',
+    scoreA: num(o.score_a),
+    scoreB: num(o.score_b),
+    winnerRoomId: typeof o.winner_room_id === 'string' ? o.winner_room_id : null,
+  }
+}
+
+/** JSON body for POST /events batch. */
+export function clientEventsBody(
+  events: Array<{
+    name: string
+    props?: Record<string, unknown>
+    clientEventId?: string
+  }>,
+): { events: Array<Record<string, unknown>> } {
+  return {
+    events: events.map((e) => {
+      const item: Record<string, unknown> = { name: e.name }
+      if (e.props) item.props = e.props
+      if (e.clientEventId) item.client_event_id = e.clientEventId
+      return item
+    }),
+  }
+}
+
+export function interactiveInviteBody(inviteeId: string): { invitee_id: string } {
+  return { invitee_id: inviteeId }
+}
+
+export function startPkBody(opts: {
+  opponentRoomId: string
+  durationSecs?: number
+}): { opponent_room_id: string; duration_secs?: number } {
+  const body: { opponent_room_id: string; duration_secs?: number } = {
+    opponent_room_id: opts.opponentRoomId,
+  }
+  if (opts.durationSecs != null) body.duration_secs = opts.durationSecs
+  return body
+}
+
+// --- Search (WBS E6.3) ---
+
+export function searchPath(
+  q: string,
+  opts?: { type?: 'all' | 'users' | 'rooms'; limit?: number },
+): string {
+  const params = new URLSearchParams()
+  params.set('q', q)
+  if (opts?.type) params.set('type', opts.type)
+  if (opts?.limit != null) params.set('limit', String(opts.limit))
+  return `/api/v1/search?${params.toString()}`
+}
+
+export type SearchUserHit = {
+  id: string
+  displayName: string
+}
+
+export type SearchRoomHit = {
+  id: string
+  title: string
+  status: string
+  ownerId: string
+}
+
+export type SearchResult = {
+  users: SearchUserHit[]
+  rooms: SearchRoomHit[]
+}
+
+export function parseSearchResult(json: unknown): SearchResult {
+  if (!json || typeof json !== 'object') return { users: [], rooms: [] }
+  const root = json as Record<string, unknown>
+  const usersRaw = Array.isArray(root.users) ? root.users : []
+  const roomsRaw = Array.isArray(root.rooms) ? root.rooms : []
+  const users = usersRaw
+    .map((raw) => {
+      if (!raw || typeof raw !== 'object') return null
+      const u = raw as Record<string, unknown>
+      const id = typeof u.id === 'string' ? u.id : ''
+      if (!id) return null
+      return {
+        id,
+        displayName: typeof u.display_name === 'string' ? u.display_name : '',
+      } satisfies SearchUserHit
+    })
+    .filter((u): u is SearchUserHit => u !== null)
+  const rooms = roomsRaw
+    .map((raw) => {
+      if (!raw || typeof raw !== 'object') return null
+      const r = raw as Record<string, unknown>
+      const id = typeof r.id === 'string' ? r.id : ''
+      if (!id) return null
+      return {
+        id,
+        title: typeof r.title === 'string' ? r.title : '',
+        status: typeof r.status === 'string' ? r.status : '',
+        ownerId: typeof r.owner_id === 'string' ? r.owner_id : '',
+      } satisfies SearchRoomHit
+    })
+    .filter((r): r is SearchRoomHit => r !== null)
+  return { users, rooms }
+}
