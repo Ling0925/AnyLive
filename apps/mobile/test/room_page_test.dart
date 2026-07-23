@@ -214,9 +214,15 @@ void main() {
     expect(find.byType(StreamPreview), findsOneWidget);
     expect(find.byKey(const Key('stream-preview-play-icon')), findsOneWidget);
     expect(find.text('http://cdn/live/r1.m3u8'), findsOneWidget);
-    // RoomWatch pins balance/gifts at the bottom (no scroll needed).
+    // Gift dock is pinned; balance/top-up visible without scroll.
     expect(find.textContaining('Balance: 42'), findsOneWidget);
     expect(find.text('Top up'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.textContaining('hello room'),
+      80,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
     expect(find.textContaining('Bob:'), findsOneWidget);
     expect(find.textContaining('hello room'), findsOneWidget);
     expect(find.text('Rose (1)'), findsOneWidget);
@@ -247,6 +253,12 @@ void main() {
     await tester.tap(find.byIcon(Icons.send));
     await tester.pumpAndSettle();
 
+    await tester.scrollUntilVisible(
+      find.textContaining('nice stream'),
+      80,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
     expect(find.textContaining('nice stream'), findsOneWidget);
   });
 
@@ -294,6 +306,12 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    await tester.scrollUntilVisible(
+      find.text('Follow'),
+      80,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
     expect(find.text('Follow'), findsOneWidget);
     await tester.tap(find.text('Follow'));
     await tester.pumpAndSettle();
@@ -391,6 +409,12 @@ void main() {
 
     final copyBtn = find.byKey(const Key('copy-stream-url'));
     expect(copyBtn, findsOneWidget);
+    await tester.scrollUntilVisible(
+      copyBtn,
+      80,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
     await tester.tap(copyBtn);
     await tester.pump(); // schedule snackbar
     await tester.pump(const Duration(milliseconds: 750));

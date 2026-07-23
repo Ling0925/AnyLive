@@ -201,10 +201,13 @@ void main() {
       ),
     );
     await tester.pump();
-    // You tab is in IndexedStack so Profile/Logout are already built; also
-    // switch the bottom nav for realism.
-    await tester.tap(find.text('You'));
+    // NavigationBar labels can appear multiple times; select the destination.
+    final youDest = find.text('You');
+    expect(youDest, findsWidgets);
+    await tester.tap(youDest.last);
+    // Allow IndexedStack to bring You on-stage (offstage finders skip inactive tabs).
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('Profile & privacy'), findsOneWidget);
     expect(find.byKey(const Key('you-logout')), findsOneWidget);
     expect(find.byKey(const Key('home-logout')), findsOneWidget);

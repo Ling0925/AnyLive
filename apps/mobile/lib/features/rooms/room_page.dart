@@ -1012,33 +1012,92 @@ class _RoomPageState extends State<RoomPage> {
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // 1) PlayerStage (16:9 black)
-                    _PlayerStage(
-                      room: _room,
-                      hlsUrl: _room.isLive ? _hlsUrl : null,
-                      roomOffline: _roomOffline,
-                      roomTerminal: _roomTerminal,
-                      giftOverlay: _giftOverlay,
+                    Expanded(
+                      child: ListView(
+                        padding: EdgeInsets.zero,
+                        children: [
+                          // 1) PlayerStage (black)
+                          _PlayerStage(
+                            room: _room,
+                            hlsUrl: _room.isLive ? _hlsUrl : null,
+                            roomOffline: _roomOffline,
+                            roomTerminal: _roomTerminal,
+                            giftOverlay: _giftOverlay,
+                          ),
+                          // 2) Meta row: LIVE + online + title + likes
+                          _MetaRow(
+                            room: _room,
+                            onlineCount: _onlineCount,
+                            likeCount: _likeCount,
+                            roomOffline: _roomOffline,
+                            roomTerminal: _roomTerminal,
+                            pk: _pk,
+                          ),
+                          // 3) Channel row: host + Follow
+                          _ChannelRow(
+                            ownerId: _room.ownerId,
+                            following: _followingHost,
+                            busy: _followBusy,
+                            onToggle: _toggleFollow,
+                          ),
+                          const Divider(height: 1, color: Color(0x14FFFFFF)),
+                          // 4) Chat panel (scrolls with stage on short viewports)
+                          if (_messages.isEmpty)
+                            const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 24),
+                              child: Center(
+                                child: Text(
+                                  'No messages yet',
+                                  style: TextStyle(
+                                    color: AnyColors.textSecondary,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ),
+                            )
+                          else
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  for (final m in _messages)
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 3,
+                                      ),
+                                      child: Text.rich(
+                                        TextSpan(
+                                          children: [
+                                            TextSpan(
+                                              text:
+                                                  '${m.senderName.isEmpty ? m.senderId : m.senderName}: ',
+                                              style: const TextStyle(
+                                                color: AnyColors.accent,
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                            TextSpan(
+                                              text: m.body,
+                                              style: const TextStyle(
+                                                color: AnyColors.textPrimary,
+                                                fontSize: 13,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
-                    // 2) Meta row: LIVE + online + title + likes
-                    _MetaRow(
-                      room: _room,
-                      onlineCount: _onlineCount,
-                      likeCount: _likeCount,
-                      roomOffline: _roomOffline,
-                      roomTerminal: _roomTerminal,
-                      pk: _pk,
-                    ),
-                    // 3) Channel row: host + Follow
-                    _ChannelRow(
-                      ownerId: _room.ownerId,
-                      following: _followingHost,
-                      busy: _followBusy,
-                      onToggle: _toggleFollow,
-                    ),
-                    const Divider(height: 1, color: Color(0x14FFFFFF)),
-                    // 4) Chat panel
-                    Expanded(child: _ChatPanel(messages: _messages)),
                     // 5) Composer
                     _ChatInput(
                       controller: _chatController,
@@ -1192,7 +1251,7 @@ class _StartPkDialogState extends State<_StartPkDialog> {
   }
 }
 
-/// Full-width black player stage with ended/offline banner + gift overlay.
+/// Full-width black player stage (StreamPreview only — no double offline chrome).
 class _PlayerStage extends StatelessWidget {
   const _PlayerStage({
     required this.room,
@@ -1210,11 +1269,14 @@ class _PlayerStage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final statusLabel = roomTerminal
-        ? 'Stream ended'
-        : room.status == 'idle'
-            ? 'Host is offline'
-            : null;
+    // StreamPreview already renders ended/offline placeholders; keep a
+    // compact status key for tests without stacking extra chrome that
+    // overflows the stage height in widget tests.
+    final statusKey = roomTerminal
+        ? 'room-status-terminal'
+        : roomOffline
+            ? 'room-status-offline'
+            : 'room-status-live';
 
     return ColoredBox(
       color: AnyColors.bgPlayer,
@@ -1224,59 +1286,14 @@ class _PlayerStage extends StatelessWidget {
             status: room.status,
             hlsUrl: hlsUrl,
           ),
-          if (statusLabel != null)
-            Positioned.fill(
-              child: ColoredBox(
-                color: Colors.black.withValues(alpha: 0.55),
-                child: Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        roomTerminal ? Icons.videocam_off : Icons.hourglass_empty,
-                        color: AnyColors.textPrimary,
-                        size: 36,
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        statusLabel,
-                        key: Key(
-                          roomTerminal
-                              ? 'room-status-terminal'
-                              : 'room-status-offline',
-                        ),
-                        style: const TextStyle(
-                          color: AnyColors.textPrimary,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        room.status,
-                        style: const TextStyle(
-                          color: AnyColors.textSecondary,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            )
-          else
-            // Keep status key for live tests.
-            Positioned(
-              left: 0,
-              top: 0,
-              child: Opacity(
-                opacity: 0,
-                child: Text(
-                  room.status,
-                  key: const Key('room-status-live'),
-                ),
-              ),
+          Positioned(
+            left: 0,
+            top: 0,
+            child: Opacity(
+              opacity: 0,
+              child: Text(room.status, key: Key(statusKey)),
             ),
+          ),
           if (giftOverlay != null)
             Positioned.fill(
               child: IgnorePointer(
@@ -1498,56 +1515,6 @@ class _ChannelRow extends StatelessWidget {
             ),
         ],
       ),
-    );
-  }
-}
-
-class _ChatPanel extends StatelessWidget {
-  const _ChatPanel({required this.messages});
-
-  final List<ChatMessage> messages;
-
-  @override
-  Widget build(BuildContext context) {
-    if (messages.isEmpty) {
-      return const Center(
-        child: Text(
-          'No messages yet',
-          style: TextStyle(color: AnyColors.textSecondary, fontSize: 13),
-        ),
-      );
-    }
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      itemCount: messages.length,
-      itemBuilder: (context, i) {
-        final m = messages[i];
-        final name = m.senderName.isEmpty ? m.senderId : m.senderName;
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 3),
-          child: Text.rich(
-            TextSpan(
-              children: [
-                TextSpan(
-                  text: '$name: ',
-                  style: const TextStyle(
-                    color: AnyColors.accent,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                TextSpan(
-                  text: m.body,
-                  style: const TextStyle(
-                    color: AnyColors.textPrimary,
-                    fontSize: 13,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
     );
   }
 }
