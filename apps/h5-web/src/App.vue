@@ -271,6 +271,7 @@ async function tryConnectCentrifugo() {
             ...messages.value,
             {
               id: m.id,
+              roomId: id,
               body: m.body,
               senderId: m.senderId,
               senderName: m.senderName,
@@ -594,6 +595,10 @@ async function loadRoom() {
     const play = await playRes.json()
     hlsUrl.value = play.hls ?? buildPlayUrl('http://localhost:8080/live', id)
     startChatPoll()
+    if (authed.value) {
+      void tryConnectCentrifugo()
+      startPresencePoll()
+    }
 
     // Public chat history + gift catalog (no auth required)
     void refreshMessages()

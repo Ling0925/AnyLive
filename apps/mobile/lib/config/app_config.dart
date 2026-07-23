@@ -2,6 +2,12 @@
 ///
 /// Flavors (WBS E8.1): pass `--dart-define=APP_FLAVOR=local|stage|prod`.
 /// When unset, [flavor] falls back to [environment] / `APP_ENV`.
+///
+/// [API_BASE_URL] defaults to `http://localhost:8088` (iOS Simulator / desktop).
+/// Override for Android:
+/// - Emulator: `--dart-define=API_BASE_URL=http://10.0.2.2:8088`
+/// - Real device: host LAN IP, or `adb reverse tcp:8088 tcp:8088` + localhost
+/// See `apps/mobile/README.md` and `apps/mobile/store/README.md`.
 class AppConfig {
   const AppConfig({
     required this.apiBaseUrl,
