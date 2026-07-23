@@ -1,0 +1,70 @@
+# Stage-like overlay on the shared stack (P2 · M2.1).
+# Local dogfood still uses docker-compose.yml + deploy/.env.test via ./scripts/deploy-test.sh.
+#
+# Usage:
+#   cp deploy/.env.stage.local.example deploy/.env.stage.local   # fill secrets
+#   ./scripts/stage-up.sh
+#
+# Or manually:
+#   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.stage.yml \
+#     --env-file deploy/.env.stage.local --profile app up -d --build
+#
+# Same compose project as base (`anylive` from docker-compose.yml) — do NOT set
+# a different `name:` here or host ports (8088/1935/…) will double-bind.
+#
+# Rules: APP_ENV=staging; no PAY mock / mock topup by default; FEATURE_PK/COHOST=0.
+# Prefer OTP_HTTP_URL; local rehearsal may use STAGE_LOCAL_ALLOW_DEV_OTP=1.
+
+services:
+  api:
+    profiles: ["app"]
+    environment:
+      APP_ENV: ${APP_ENV:-staging}
+      API_BIND: ${API_BIND:-0.0.0.0:8088}
+      RUST_LOG: ${RUST_LOG:-info,anylive_api=info}
+      RUST_LOG_FORMAT: ${RUST_LOG_FORMAT:-json}
+      USE_POSTGRES: "1"
+      DATABASE_URL: ${DATABASE_URL:-postgres://anylive:anylive@postgres:5432/anylive}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-stage-local-access-secret-change-me-32}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-stage-local-refresh-secret-change-me-32}
+      CENTRIFUGO_URL: ${CENTRIFUGO_URL:-http://centrifugo:8000}
+      CENTRIFUGO_API_KEY: ${CENTRIFUGO_API_KEY:-stage-local-centrifugo-api-key}
+      CENTRIFUGO_TOKEN_SECRET: ${CENTRIFUGO_TOKEN_SECRET:-stage-local-centrifugo-token-secret}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:8090,http://127.0.0.1:5173}
+      ALLOW_DEV_OTP: ${ALLOW_DEV_OTP:-0}
+      OTP_NOTIFIER: ${OTP_NOTIFIER:-http}
+      OTP_HTTP_URL: ${OTP_HTTP_URL:-}
+      OTP_HTTP_BEARER: ${OTP_HTTP_BEARER:-}
+      OTP_HTTP_FROM: ${OTP_HTTP_FROM:-noreply@stage.local}
+      OTP_HTTP_SUBJECT: ${OTP_HTTP_SUBJECT:-Your AnyLive login code}
+      ALLOW_MOCK_TOPUP: ${ALLOW_MOCK_TOPUP:-0}
+      PAY_CHANNELS: ${PAY_CHANNELS:-}
+      PAY_ENABLE_MOCK: ${PAY_ENABLE_MOCK:-0}
+      PAY_MOCK_SECRET: ${PAY_MOCK_SECRET:-}
+      PAY_PUBLIC_BASE_URL: ${PAY_PUBLIC_BASE_URL:-http://localhost:8088}
+      PAY_STRIPE_SECRET: ${PAY_STRIPE_SECRET:-}
+      SRS_RTMP_URL: ${SRS_RTMP_URL:-rtmp://localhost:1935/live}
+      SRS_HLS_BASE: ${SRS_HLS_BASE:-http://localhost:8080/live}
+      SRS_API_URL: ${SRS_API_URL:-http://srs:1985}
+      SRS_PUBLISH_SECRET: ${SRS_PUBLISH_SECRET:-stage-local-srs-publish-secret-change-me}
+      SRS_WEBHOOK_SECRET: ${SRS_WEBHOOK_SECRET:-stage-local-srs-webhook-secret-change-me}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      NATS_URL: ${NATS_URL:-nats://nats:4222}
+      INVITE_ONLY: ${INVITE_ONLY:-0}
+      FEATURE_PUBLIC_REGISTER: ${FEATURE_PUBLIC_REGISTER:-1}
+      FEATURE_REAL_PAY: ${FEATURE_REAL_PAY:-1}
+      FEATURE_PK: ${FEATURE_PK:-0}
+      FEATURE_COHOST: ${FEATURE_COHOST:-0}
+      FEATURE_CLIENT_EVENTS: ${FEATURE_CLIENT_EVENTS:-1}
+      CHAT_BLOCKLIST: ${CHAT_BLOCKLIST:-}
+      LEGAL_PRIVACY_URL: ${LEGAL_PRIVACY_URL:-}
+      LEGAL_TERMS_URL: ${LEGAL_TERMS_URL:-}
+
+  admin:
+    profiles: ["app"]
+    build:
+      context: ../apps/admin-web
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE: ${VITE_API_BASE:-http://localhost:8088}
+    image: anylive-admin:stage

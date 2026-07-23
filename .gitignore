@@ -14,6 +14,8 @@ Thumbs.db
 .env.*
 !.env.example
 !deploy/.env.test
+!deploy/.env.stage.example
+!deploy/.env.stage.local.example
 *.pem
 *.key
 secrets/

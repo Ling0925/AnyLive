@@ -1,0 +1,19 @@
+# Minimal Prometheus scrape fragment for AnyLive API /metrics (P2 · M2.1).
+# Merge into your Prometheus / Alloy config; do not treat as a full observability stack.
+#
+# API: GET /metrics (Prometheus text)
+# Logs: RUST_LOG_FORMAT=json (see docs/runbooks/otel.md)
+# Alerts: docs/runbooks/slo-alerts.md
+
+scrape_configs:
+  - job_name: anylive-api
+    metrics_path: /metrics
+    scrape_interval: 15s
+    static_configs:
+      - targets:
+          # Local stage-up / deploy-test API on host
+          - host.docker.internal:8088
+          # In-compose sidecar would use: api:8088
+        labels:
+          env: stage
+          service: anylive-api

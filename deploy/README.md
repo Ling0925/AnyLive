@@ -36,6 +36,29 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env.test --profil
 Stage/生产清单见：`docs/runbooks/go-live-stage.md`。  
 **Stage env 模板（可填、无 mock）：** `deploy/.env.stage.example` — 复制后填密钥；`FEATURE_PK`/`FEATURE_COHOST` 保持 `0`。
 
+## Stage 拓扑排练（P2 · M2.1）
+
+叠层 compose + 本地 env（密钥可自动铸造）：
+
+```bash
+# 无 ESP 时本地 OTP 排练（诚实标签：≠ 真邮件）
+STAGE_LOCAL_ALLOW_DEV_OTP=1 ./scripts/stage-up.sh
+
+# 有 OTP_HTTP_URL 时默认 ALLOW_DEV_OTP=0
+./scripts/stage-up.sh
+```
+
+| 工件 | 路径 |
+|---|---|
+| compose 叠层 | `deploy/docker-compose.stage.yml` |
+| 本地 env 例 | `deploy/.env.stage.local.example` → `deploy/.env.stage.local`（gitignore） |
+| 远端 env 例 | `deploy/.env.stage.example` |
+| metrics scrape | `deploy/prometheus/scrape-anylive.example.yml` |
+| 备份 / 恢复演练 | `scripts/backup-pg.sh` · `scripts/restore-pg-drill.sh` |
+| 状态表 | `docs/product/p2-status.md` |
+
+`deploy-test.sh` 仍是 **dogfood 测试栈**（mock pay / dev OTP）。Stage-up 默认关 mock。
+
 ### 停止
 
 ```bash
