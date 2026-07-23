@@ -1010,6 +1010,7 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
 
 <template>
   <main class="page">
+    <!-- Sticky topbar: brand · LIVE · auth -->
     <header class="top topbar">
       <div class="brand">
         <h1>
@@ -1020,7 +1021,6 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
             LIVE
           </span>
         </h1>
-        <p class="muted api-line">Watch · {{ apiBase }}</p>
       </div>
       <div class="auth-chip">
         <template v-if="authed">
@@ -1036,6 +1036,7 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
       </div>
     </header>
 
+    <!-- Overlays: login / privacy (not main watch chrome) -->
     <section v-if="loginOpen && !authed" class="panel login" data-testid="login-panel">
       <h2>Login</h2>
       <p class="muted">Email OTP — optional. Watch works without login.</p>
@@ -1110,37 +1111,44 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
       />
     </section>
 
-    <div class="util-strip row">
-      <input v-model="roomId" placeholder="Room UUID" />
-      <button type="button" class="btn primary" :disabled="loading" @click="loadRoom">Load</button>
-      <button type="button" class="ghost" :disabled="!roomId.trim()" @click="shareRoom">Share</button>
-    </div>
-    <section class="panel search" data-testid="search-panel">
-      <div class="row">
-        <input
-          v-model="searchQ"
-          placeholder="Search rooms / users"
-          @keyup.enter="runSearch"
-        />
-        <button type="button" class="btn primary" :disabled="searchBusy" @click="runSearch">Search</button>
+    <!-- Dev/deep-link helpers — compact collapsible, not main focus -->
+    <details class="util-details">
+      <summary class="util-summary muted">Room · Search · Tools</summary>
+      <div class="util-strip row">
+        <input v-model="roomId" placeholder="Room UUID" />
+        <button type="button" class="btn primary" :disabled="loading" @click="loadRoom">Load</button>
+        <button type="button" class="ghost" :disabled="!roomId.trim()" @click="shareRoom">Share</button>
       </div>
-      <p v-if="searchHint" class="hint">{{ searchHint }}</p>
-      <ul v-if="searchResult" class="msg-list">
-        <li v-for="r in searchResult.rooms" :key="'room-' + r.id">
-          <button type="button" class="link" @click="pickSearchRoom(r.id)">
-            {{ r.title || r.id }} ({{ r.status }})
-          </button>
-        </li>
-        <li v-for="u in searchResult.users" :key="'user-' + u.id" class="muted">
-          user · {{ u.displayName || u.id }}
-        </li>
-      </ul>
-    </section>
-    <p v-if="shareHint" class="hint">{{ shareHint }}</p>
+      <section class="panel search" data-testid="search-panel">
+        <div class="row">
+          <input
+            v-model="searchQ"
+            placeholder="Search rooms / users"
+            @keyup.enter="runSearch"
+          />
+          <button type="button" class="btn primary" :disabled="searchBusy" @click="runSearch">Search</button>
+        </div>
+        <p v-if="searchHint" class="hint">{{ searchHint }}</p>
+        <ul v-if="searchResult" class="msg-list">
+          <li v-for="r in searchResult.rooms" :key="'room-' + r.id">
+            <button type="button" class="link" @click="pickSearchRoom(r.id)">
+              {{ r.title || r.id }} ({{ r.status }})
+            </button>
+          </li>
+          <li v-for="u in searchResult.users" :key="'user-' + u.id" class="muted">
+            user · {{ u.displayName || u.id }}
+          </li>
+        </ul>
+      </section>
+      <p v-if="shareHint" class="hint">{{ shareHint }}</p>
+      <p class="muted api-line mono">API · {{ apiBase }}</p>
+    </details>
+
     <p v-if="authHint && authed" class="hint">{{ authHint }}</p>
     <p v-if="error" class="err">{{ error }}</p>
 
-    <section v-if="featurePk && pk" class="panel pk" data-testid="pk-banner">
+    <!-- Feature-gated PK — de-emphasized, unmounted when flag false -->
+    <section v-if="featurePk && pk" class="panel pk pk-deemph" data-testid="pk-banner">
       <h2>PK {{ pk.status }}</h2>
       <p class="pk-score">
         {{ pk.scoreA }} – {{ pk.scoreB }}
@@ -1148,69 +1156,112 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
       </p>
     </section>
 
-    <section v-if="authed && creator" class="panel creator" data-testid="creator-panel">
-      <div class="panel-head">
-        <h2>Creator</h2>
-        <button type="button" class="ghost" @click="refreshCreator">Refresh</button>
-      </div>
-      <p class="muted">
-        followers {{ creator.followerCount }} · following {{ creator.followingCount }} · live
-        {{ creator.liveRooms }}/{{ creator.totalRooms }} · gift coins
-        {{ creator.giftCoinsReceived }}
-      </p>
-      <p v-if="creatorHint" class="hint">{{ creatorHint }}</p>
-    </section>
+    <!-- RoomWatch layout: player → meta → channel → chat → gifts -->
+    <div class="watch-layout">
+      <div class="primary-col">
+        <!-- Player stage (16:9) or end/offline overlays -->
+        <div class="player-stage">
+          <section v-if="roomTerminal" class="ended" role="status" data-testid="room-ended">
+            <p class="ended-title">Stream ended</p>
+            <p class="ended-sub">This room was force-closed</p>
+            <p v-if="status" class="muted">status: {{ status }}</p>
+          </section>
 
-    <div class="watch-grid">
-      <div class="stage-col">
-        <section v-if="roomTerminal" class="ended" role="status" data-testid="room-ended">
-          <p class="ended-title">直播已结束</p>
-          <p class="ended-sub">Room ended (force-closed)</p>
-          <p v-if="status" class="muted">status: {{ status }}</p>
-        </section>
+          <section
+            v-else-if="roomOffline && status === 'idle'"
+            class="ended offline"
+            role="status"
+            data-testid="room-offline"
+          >
+            <p class="ended-title">Host offline</p>
+            <p class="ended-sub">Host stopped — room idle (may go live again)</p>
+            <p class="muted">status: idle</p>
+          </section>
 
-        <section
-          v-else-if="roomOffline && status === 'idle'"
-          class="ended offline"
-          role="status"
-          data-testid="room-offline"
-        >
-          <p class="ended-title">暂时离线</p>
-          <p class="ended-sub">Host stopped — room idle (may go live again)</p>
-          <p class="muted">status: idle</p>
-        </section>
-
-        <p v-else-if="status" class="muted status-line">status: {{ status }}</p>
-
-        <section v-if="canWatch" class="stage">
-          <div class="player">
-            <video ref="videoEl" controls playsinline class="player-video" />
-            <div id="room-stats" class="room-stats">
-              <span class="stat-pill">{{ onlineCount }} online</span>
-              <button
-                type="button"
-                class="like-btn"
-                :disabled="!authed || likeBusy || roomOffline"
-                @click="likeRoom"
-              >
-                ♥ {{ likeCount }}
-              </button>
-              <span v-if="wsStatus" class="muted ws-pill">ws: {{ wsStatus }}</span>
+          <section v-else-if="canWatch" class="stage">
+            <div class="player">
+              <video ref="videoEl" controls playsinline class="player-video" />
               <span v-if="giftOverlay" class="gift-overlay">🎁 {{ giftOverlay }}</span>
             </div>
+          </section>
+
+          <div v-else class="player player-placeholder">
+            <p class="muted">{{ status ? `status: ${status}` : 'Load a room to watch' }}</p>
           </div>
-          <details class="hls-details">
-            <summary class="mono dim">HLS URL</summary>
-            <p class="mono dim">{{ hlsUrl }}</p>
+        </div>
+
+        <!-- Meta row: title · LIVE · online · like -->
+        <div v-if="roomId.trim() && status" class="meta-row">
+          <div class="meta-title">
+            <span v-if="canWatch" class="live-chip live-chip-solid" role="status">
+              <span class="live-dot" aria-hidden="true" />
+              LIVE
+            </span>
+            <h2 class="room-title">Live room</h2>
+          </div>
+          <div id="room-stats" class="room-stats meta-stats">
+            <span class="stat-pill">{{ onlineCount }} watching</span>
+            <button
+              type="button"
+              class="like-btn"
+              :disabled="!authed || likeBusy || roomOffline"
+              @click="likeRoom"
+            >
+              ♥ {{ likeCount }}
+            </button>
+            <span v-if="wsStatus" class="muted ws-pill">ws: {{ wsStatus }}</span>
+          </div>
+        </div>
+
+        <!-- Channel row: host chip · more (creator) -->
+        <div v-if="roomId.trim() && status" class="channel-row">
+          <span class="channel-chip">
+            <span class="channel-avatar" aria-hidden="true" />
+            <span class="channel-meta">
+              <span class="channel-name">{{ ownerId ? ownerId.slice(0, 8) : 'Host' }}</span>
+              <span class="muted channel-id mono">{{ roomId.slice(0, 8) }}…</span>
+            </span>
+          </span>
+          <details v-if="authed && creator" class="channel-more">
+            <summary class="ghost channel-more-btn">⋯</summary>
+            <section class="panel creator" data-testid="creator-panel">
+              <div class="panel-head">
+                <h2>Creator</h2>
+                <button type="button" class="ghost" @click="refreshCreator">Refresh</button>
+              </div>
+              <p class="muted">
+                followers {{ creator.followerCount }} · following {{ creator.followingCount }} · live
+                {{ creator.liveRooms }}/{{ creator.totalRooms }} · gift coins
+                {{ creator.giftCoinsReceived }}
+              </p>
+              <p v-if="creatorHint" class="hint">{{ creatorHint }}</p>
+            </section>
           </details>
-        </section>
+          <button
+            v-else
+            type="button"
+            class="ghost"
+            :disabled="!roomId.trim()"
+            @click="shareRoom"
+          >
+            Share
+          </button>
+        </div>
+
+        <details v-if="canWatch && hlsUrl" class="hls-details">
+          <summary class="mono dim">HLS URL</summary>
+          <p class="mono dim">{{ hlsUrl }}</p>
+        </details>
       </div>
 
       <div class="side-col">
-        <!-- Chat: list is public while not permanently closed; send requires live + login -->
-        <section v-if="roomId.trim() && status && !roomTerminal" class="panel chat">
+        <!-- Chat panel -->
+        <section
+          v-if="roomId.trim() && status && !roomTerminal"
+          class="panel chat chat-panel"
+        >
           <div class="panel-head">
-            <h2>Chat</h2>
+            <h2>Live chat</h2>
             <button type="button" class="ghost" @click="refreshMessages">Refresh</button>
           </div>
           <ul class="msg-list">
@@ -1232,11 +1283,14 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
           <p v-if="chatHint" class="hint">{{ chatHint }}</p>
         </section>
 
-        <!-- Gifts + wallet: only when live + can watch -->
-        <section v-if="roomId.trim() && status && canWatch" class="panel gifts">
+        <!-- Gift dock: sticky bottom on mobile, horizontal pills -->
+        <section
+          v-if="roomId.trim() && status && canWatch"
+          class="panel gifts gift-dock"
+        >
           <div class="panel-head">
             <h2>Gifts</h2>
-            <span v-if="authed" class="chip balance-chip">balance: {{ balance }}</span>
+            <span v-if="authed" class="chip balance-chip">{{ balance }} coins</span>
           </div>
           <div v-if="authed" class="row topup">
             <input v-model.number="topupAmount" type="number" min="1" placeholder="Topup amount" />
@@ -1289,12 +1343,12 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
 .page {
   max-width: var(--page-max);
   margin: 0 auto;
-  padding: 0 1rem 3rem;
+  padding: 0 1rem 3.5rem;
   color: var(--text);
   background: transparent;
 }
 
-/* --- Topbar --- */
+/* --- Topbar (compact sticky) --- */
 .top,
 .topbar {
   position: sticky;
@@ -1305,9 +1359,9 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
   gap: var(--gap);
   align-items: center;
   min-height: var(--topbar-h);
-  margin: 0 -1rem 0.75rem;
-  padding: 0.65rem 1rem;
-  background: rgba(10, 10, 16, 0.72);
+  margin: 0 -1rem 0.5rem;
+  padding: 0.5rem 1rem;
+  background: rgba(15, 15, 15, 0.92);
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
   border-bottom: 1px solid var(--border);
@@ -1333,19 +1387,34 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
   flex-shrink: 0;
 }
 
+/* LIVE: red bg + white text (never magenta) */
 .live-chip {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  margin-left: 0.25rem;
+  margin-left: 0.15rem;
   padding: 0.12rem 0.55rem;
   border-radius: var(--radius-pill);
-  background: rgba(255, 51, 85, 0.16);
-  border: 1px solid rgba(255, 51, 85, 0.45);
+  background: rgba(255, 0, 51, 0.14);
+  border: 1px solid rgba(255, 0, 51, 0.45);
   color: var(--live);
   font-size: var(--fs-xs);
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.live-chip-solid {
+  margin-left: 0;
+  background: var(--live);
+  border-color: var(--live);
+  color: #fff;
+}
+
+.live-chip-solid .live-dot {
+  background: #fff;
+  box-shadow: none;
+  animation: none;
 }
 
 .live-dot {
@@ -1353,24 +1422,24 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
   height: 6px;
   border-radius: 50%;
   background: var(--live);
-  box-shadow: 0 0 0 0 rgba(255, 51, 85, 0.55);
+  box-shadow: 0 0 0 0 rgba(255, 0, 51, 0.55);
   animation: live-pulse 1.4s ease-out infinite;
 }
 
 @keyframes live-pulse {
   0% {
-    box-shadow: 0 0 0 0 rgba(255, 51, 85, 0.55);
+    box-shadow: 0 0 0 0 rgba(255, 0, 51, 0.55);
   }
   70% {
-    box-shadow: 0 0 0 6px rgba(255, 51, 85, 0);
+    box-shadow: 0 0 0 6px rgba(255, 0, 51, 0);
   }
   100% {
-    box-shadow: 0 0 0 0 rgba(255, 51, 85, 0);
+    box-shadow: 0 0 0 0 rgba(255, 0, 51, 0);
   }
 }
 
 .api-line {
-  margin: 0.15rem 0 0;
+  margin: 0.35rem 0 0;
   font-size: var(--fs-xs);
 }
 
@@ -1388,6 +1457,32 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
   background: var(--accent-soft);
 }
 
+/* --- Util strip (collapsible) --- */
+.util-details {
+  margin: 0 0 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  padding: 0 0.75rem 0.25rem;
+}
+
+.util-summary {
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  padding: 0.55rem 0;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.util-summary::-webkit-details-marker {
+  display: none;
+}
+
+.util-strip {
+  margin: 0.25rem 0 0.5rem;
+}
+
 /* --- Rows / form controls --- */
 .row {
   display: flex;
@@ -1395,10 +1490,6 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
   margin: 0.75rem 0;
   flex-wrap: wrap;
   align-items: center;
-}
-
-.util-strip {
-  margin: 0.5rem 0 0.75rem;
 }
 
 input {
@@ -1435,7 +1526,7 @@ button:disabled {
 
 button.btn.primary,
 button.primary {
-  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  background: var(--accent);
   border: 0;
   font-weight: 600;
   color: #fff;
@@ -1445,6 +1536,7 @@ button.primary {
 button.btn.primary:hover:not(:disabled),
 button.primary:hover:not(:disabled) {
   box-shadow: var(--shadow-glow);
+  filter: brightness(1.06);
 }
 
 button.ghost {
@@ -1468,7 +1560,7 @@ button.link {
 
 button.danger {
   background: var(--danger-bg);
-  border-color: rgba(248, 113, 113, 0.4);
+  border-color: rgba(255, 77, 79, 0.4);
   color: var(--danger);
 }
 
@@ -1508,17 +1600,17 @@ button.danger {
 
 .balance-chip {
   color: var(--coin);
+  border-color: rgba(251, 191, 36, 0.35);
+  background: rgba(251, 191, 36, 0.1);
 }
 
-/* --- Glass panels --- */
+/* --- Panels --- */
 .panel {
-  margin: 0.85rem 0;
+  margin: 0.75rem 0;
   padding: 1rem;
-  border: var(--glass-border);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: var(--bg-panel);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
+  background: var(--bg-elevated);
   box-shadow: var(--shadow-sm);
 }
 
@@ -1541,20 +1633,25 @@ button.danger {
   gap: 0.5rem;
 }
 
-/* --- Watch grid --- */
-.watch-grid {
+/* --- RoomWatch layout (mobile-first stack) --- */
+.watch-layout {
   display: flex;
   flex-direction: column;
   gap: var(--gap);
-  margin-top: 0.5rem;
+  margin-top: 0.25rem;
 }
 
-.stage-col,
+.primary-col,
 .side-col {
   min-width: 0;
 }
 
-/* --- Stage / player --- */
+/* Player stage */
+.player-stage {
+  position: relative;
+  width: 100%;
+}
+
 .stage {
   position: relative;
 }
@@ -1569,6 +1666,13 @@ button.danger {
   max-width: var(--stage-max);
 }
 
+.player-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--border-strong);
+}
+
 .player-video {
   width: 100%;
   height: 100%;
@@ -1578,31 +1682,49 @@ button.danger {
   background: var(--bg-stage);
 }
 
-.room-stats {
-  position: absolute;
-  left: 10px;
-  bottom: 10px;
+/* Meta row under player */
+.meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem 1rem;
+  padding: 0.35rem 0 0.15rem;
+  max-width: var(--stage-max);
+}
+
+.meta-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.room-title {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 650;
+  color: var(--text);
+  line-height: 1.3;
+}
+
+.room-stats,
+.meta-stats {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
-  padding: 6px 10px;
-  border-radius: var(--radius-sm);
-  background: var(--bg-panel);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  border: 1px solid var(--border);
   font-size: var(--fs-sm);
-  z-index: 2;
 }
 
 .stat-pill,
 .ws-pill {
   font-size: var(--fs-xs);
+  color: var(--text-muted);
 }
 
 .like-btn {
-  padding: 0.2rem 0.55rem;
+  padding: 0.25rem 0.65rem;
   border-radius: var(--radius-pill);
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.06);
@@ -1614,10 +1736,82 @@ button.danger {
   color: var(--accent-hot);
 }
 
+/* Channel row */
+.channel-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.35rem 0 0.25rem;
+  max-width: var(--stage-max);
+}
+
+.channel-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.channel-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent-soft), var(--bg-elevated));
+  border: 1px solid var(--border-accent);
+  flex-shrink: 0;
+}
+
+.channel-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.channel-name {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.channel-id {
+  font-size: var(--fs-xs);
+}
+
+.channel-more {
+  position: relative;
+}
+
+.channel-more-btn {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  min-width: 2.25rem;
+  text-align: center;
+  font-size: 1.15rem;
+  line-height: 1;
+  padding: 0.35rem 0.55rem;
+}
+
+.channel-more-btn::-webkit-details-marker {
+  display: none;
+}
+
+.channel-more[open] > .creator {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 12;
+  min-width: min(280px, 80vw);
+  margin: 0;
+  box-shadow: var(--shadow-md);
+}
+
 .gift-overlay {
   position: absolute;
-  top: -2.6rem;
-  right: 0;
+  top: 12px;
+  right: 12px;
+  z-index: 3;
   padding: 0.35rem 0.7rem;
   border-radius: var(--radius-pill);
   background: rgba(255, 61, 154, 0.18);
@@ -1648,7 +1842,7 @@ button.danger {
 }
 
 .hls-details {
-  margin-top: 0.45rem;
+  margin-top: 0.25rem;
   max-width: var(--stage-max);
 }
 
@@ -1656,18 +1850,14 @@ button.danger {
   cursor: pointer;
   user-select: none;
   list-style: none;
+  font-size: var(--fs-xs);
 }
 
 .hls-details summary::-webkit-details-marker {
   display: none;
 }
 
-.status-line {
-  margin: 0.5rem 0;
-  font-size: var(--fs-sm);
-}
-
-/* --- Chat bubbles --- */
+/* --- Chat --- */
 .msg-list {
   list-style: none;
   margin: 0 0 0.75rem;
@@ -1703,11 +1893,27 @@ button.danger {
   margin-bottom: 0;
 }
 
-/* --- Gifts --- */
+/* --- Gift dock --- */
+.gift-dock {
+  /* mobile sticky dock so gifts stay reachable */
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  margin-bottom: 0;
+  border-color: var(--border-strong);
+  background: rgba(33, 33, 33, 0.96);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+}
+
 .gift-bar {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0.5rem;
+  overflow-x: auto;
+  padding-bottom: 0.15rem;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
 }
 
 .gift-btn {
@@ -1715,6 +1921,7 @@ button.danger {
   flex-direction: column;
   align-items: center;
   min-width: 4.5rem;
+  flex-shrink: 0;
   padding: 0.55rem 0.75rem;
   border-radius: var(--radius-md);
   background: linear-gradient(180deg, rgba(200, 80, 255, 0.12), transparent);
@@ -1743,17 +1950,18 @@ button.danger {
   justify-content: center;
 }
 
-/* --- Ended / offline --- */
+/* --- Ended / offline (centered in stage area) --- */
 .ended {
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  min-height: min(48vw, 280px);
-  margin: 0.5rem 0;
+  aspect-ratio: 16 / 9;
+  min-height: min(48vw, 220px);
+  margin: 0;
   padding: 2rem 1.25rem;
   text-align: center;
-  background: var(--bg-panel-solid);
+  background: var(--bg-stage);
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
   box-shadow: var(--shadow-sm);
@@ -1762,7 +1970,7 @@ button.danger {
 
 .ended.offline {
   border-color: rgba(251, 191, 36, 0.25);
-  background: linear-gradient(180deg, rgba(251, 191, 36, 0.06), var(--bg-panel-solid));
+  background: linear-gradient(180deg, rgba(251, 191, 36, 0.06), var(--bg-stage));
 }
 
 .ended-title {
@@ -1778,10 +1986,15 @@ button.danger {
   font-size: var(--fs-sm);
 }
 
-/* --- PK / creator / checks / export --- */
+/* --- PK de-emphasized / creator / checks / export --- */
 .pk {
-  border-color: rgba(251, 191, 36, 0.28);
-  background: linear-gradient(180deg, rgba(251, 191, 36, 0.08), var(--bg-panel));
+  border-color: rgba(251, 191, 36, 0.22);
+  background: linear-gradient(180deg, rgba(251, 191, 36, 0.05), var(--bg-elevated));
+}
+
+.pk-deemph {
+  opacity: 0.85;
+  font-size: var(--fs-sm);
 }
 
 .pk-score {
@@ -1830,23 +2043,24 @@ button.danger {
   resize: vertical;
 }
 
-/* --- Desktop ≥900px --- */
+/* --- Desktop ≥900px: player + side chat --- */
 @media (min-width: 900px) {
-  .watch-grid {
+  .watch-layout {
     display: grid;
     grid-template-columns: minmax(0, 1fr) var(--chat-w);
-    grid-template-rows: auto 1fr;
     gap: var(--gap-lg);
     align-items: start;
   }
 
-  .stage-col {
+  .primary-col {
     grid-column: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
   }
 
   .side-col {
     grid-column: 2;
-    grid-row: 1 / span 2;
     display: flex;
     flex-direction: column;
     gap: var(--gap);
@@ -1855,7 +2069,7 @@ button.danger {
     max-height: calc(100svh - var(--topbar-h) - 24px);
   }
 
-  .side-col .chat {
+  .side-col .chat-panel {
     flex: 1;
     min-height: 0;
     display: flex;
@@ -1869,16 +2083,23 @@ button.danger {
     min-height: 280px;
   }
 
-  .side-col .gifts {
+  .side-col .gift-dock {
     margin: 0;
     flex-shrink: 0;
+    position: static;
   }
 
   .ended {
     min-height: min(42vw, 360px);
+    max-width: none;
   }
 
   .player {
+    max-width: none;
+  }
+
+  .meta-row,
+  .channel-row {
     max-width: none;
   }
 }

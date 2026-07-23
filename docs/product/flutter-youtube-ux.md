@@ -4,7 +4,7 @@
 > **端：** `apps/mobile`（Flutter）  
 > **参考：** YouTube App / YouTube Live 的信息架构与交互范式（**非**像素级抄袭、**非**使用 YouTube 商标资源）  
 > **约束：** 对齐 [mvp-scope](./mvp-scope.md) P1 必须能力；连麦/PK/短视频 **整期不做**  
-> **对照：** [p1-parallel-tracks](./p1-parallel-tracks.md) FL 任务 · [p1-status](./p1-status.md)  
+> **对照：** [p1-parallel-tracks](./p1-parallel-tracks.md) FL 任务 · [p1-status](./p1-status.md) · [h5-youtube-ux](./h5-youtube-ux.md) H5 RoomWatch 镜像  
 > **状态：** draft · 2026-07-23  
 > **读者：** 产品 / Flutter / 设计 / TL
 

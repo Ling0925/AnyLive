@@ -1,37 +1,38 @@
-/* AnyLive H5 — always-dark live-watch shell (magenta → violet brand) */
+/* AnyLive H5 — always-dark YouTube-like live-watch shell
+   Shared tokens with Flutter AnyColors (docs/product/h5-youtube-ux.md) */
 :root {
-  /* Surfaces */
-  --bg: #0a0a10;
-  --bg-elevated: #12121a;
-  --bg-panel: rgba(22, 18, 32, 0.72); /* glass base */
-  --bg-panel-solid: #161220;
+  /* Surfaces — match Flutter AnyColors */
+  --bg: #0f0f0f;
+  --bg-elevated: #212121;
+  --bg-panel: rgba(33, 33, 33, 0.92);
+  --bg-panel-solid: #212121;
   --bg-stage: #000000;
-  --bg-input: rgba(12, 10, 18, 0.9);
+  --bg-input: #121212;
 
   /* Borders */
   --border: rgba(255, 255, 255, 0.08);
   --border-strong: rgba(255, 255, 255, 0.14);
-  --border-accent: rgba(192, 80, 255, 0.45);
+  --border-accent: rgba(200, 80, 255, 0.45);
 
   /* Text */
-  --text: #f2eef8;
-  --text-muted: #9b93ab;
-  --text-dim: #6b6478;
-  --text-inverse: #0a0a10;
+  --text: #f1f1f1;
+  --text-muted: #aaaaaa;
+  --text-dim: #717171;
+  --text-inverse: #0f0f0f;
 
-  /* Brand / accent (AnyLive magenta-violet) */
-  --accent: #c850ff; /* primary CTA / live chrome */
-  --accent-2: #8b5cf6; /* secondary gradient stop */
-  --accent-hot: #ff3d9a; /* gift/like pulse */
-  --accent-soft: rgba(200, 80, 255, 0.14);
+  /* Brand / accent — magenta CTA only; LIVE uses --live */
+  --accent: #c850ff;
+  --accent-2: #8b5cf6;
+  --accent-hot: #ff3d9a;
+  --accent-soft: rgba(200, 80, 255, 0.15);
   --accent-glow: rgba(200, 80, 255, 0.35);
 
   /* Semantic */
-  --live: #ff3355;
-  --success: #34d399;
+  --live: #ff0033;
+  --success: #3ddc97;
   --warning: #fbbf24;
-  --danger: #f87171;
-  --danger-bg: rgba(248, 113, 113, 0.12);
+  --danger: #ff4d4f;
+  --danger-bg: rgba(255, 77, 79, 0.12);
   --coin: #fbbf24;
   --chat-name: #c4b5fd;
 
@@ -50,8 +51,8 @@
   --glass-border: 1px solid var(--border);
 
   /* Layout */
-  --topbar-h: 56px;
-  --chat-w: 340px; /* desktop side column */
+  --topbar-h: 52px;
+  --chat-w: 340px;
   --page-max: 1200px;
   --stage-max: 960px;
   --gap: 12px;
@@ -60,10 +61,10 @@
   /* Type */
   --font: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
-  --fs-xs: 0.75rem;
-  --fs-sm: 0.85rem;
-  --fs-md: 0.95rem;
-  --fs-lg: 1.15rem;
+  --fs-xs: 0.75rem; /* 12 */
+  --fs-sm: 0.875rem; /* 14 */
+  --fs-md: 1rem; /* 16 */
+  --fs-lg: 1.125rem; /* 18 */
   --fs-xl: 1.4rem;
 
   font: 15px/1.45 var(--font);
@@ -92,9 +93,9 @@ body,
 
 body {
   min-height: 100svh;
+  /* Pure YouTube-dark base; soft brand glow only (does not fight #0F0F0F) */
   background:
-    radial-gradient(900px 480px at 15% -10%, rgba(200, 80, 255, 0.18), transparent 55%),
-    radial-gradient(700px 400px at 100% 0%, rgba(139, 92, 246, 0.12), transparent 50%),
+    radial-gradient(720px 360px at 12% -8%, rgba(200, 80, 255, 0.1), transparent 55%),
     var(--bg);
   font-family: var(--font);
   color: var(--text);
@@ -121,7 +122,7 @@ a {
 }
 
 a:hover {
-  color: #ddd6fe;
+  color: #e0b3ff;
 }
 
 h1 {
