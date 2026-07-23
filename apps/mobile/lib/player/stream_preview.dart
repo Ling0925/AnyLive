@@ -158,28 +158,59 @@ class _StreamPreviewState extends State<StreamPreview> {
     final theme = Theme.of(context);
 
     if (_terminal) {
+      final msg = playerPlaceholderMessage(widget.status, widget.hlsUrl);
+      final sub = playerPlaceholderSubline(widget.status);
       return Material(
         color: theme.colorScheme.errorContainer,
-        child: const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Text('Room ended'),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                msg,
+                key: const Key('stream-ended'),
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              if (sub != null) ...[
+                const SizedBox(height: 4),
+                Text(sub, style: theme.textTheme.bodySmall),
+              ],
+            ],
+          ),
         ),
       );
     }
 
     if (!shouldShowPlayer(widget.status, widget.hlsUrl)) {
       final msg = playerPlaceholderMessage(widget.status, widget.hlsUrl);
+      final sub = playerPlaceholderSubline(widget.status);
       final offline = isRoomOfflineStatus(widget.status);
       return Material(
         color: offline
             ? theme.colorScheme.surfaceContainerHighest
             : Colors.transparent,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Text(
-            msg,
-            key: Key(offline ? 'stream-offline' : 'stream-placeholder'),
-            style: theme.textTheme.bodyMedium,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                msg,
+                key: Key(offline ? 'stream-offline' : 'stream-placeholder'),
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              if (sub != null) ...[
+                const SizedBox(height: 4),
+                Text(sub, style: theme.textTheme.bodySmall),
+              ],
+            ],
           ),
         ),
       );

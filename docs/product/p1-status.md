@@ -39,10 +39,12 @@
 | Flutter 房间 / 礼物 / 资料 / Feed / 关注 / 举报 / 结束态 | 完成 | Discover + 房间控制面；**idle=暂时离线 / closed=永久结束**；owner 可 Start/Stop live |
 | Flutter 开播 OBS 对话框 + 复制 HLS | 完成 | go-live 对话框；房间页复制流地址 |
 | Flutter media_kit 站内 HLS 预览 | 完成 | `StreamPreview` 真嵌 media_kit（`ANYLIVE_EMBEDDED_PLAYER`）；进房后 idle→live 轮询补拉 HLS；`flutter test` 默认关 native |
+| Flutter 结束态文案对齐 H5 | 完成 | idle → **Host offline**；closed/ended → **Stream ended**（`hls_player_logic`） |
 | Flutter 会话持久化（SharedPreferences） | 完成 | `SessionStore` + 启动恢复 + Logout 清会话 |
 | Flutter 资料导出 / 删除账号 UI | 完成 | Profile 页 export/delete；复制 payload |
 | Flutter/H5 聊天历史轮询 | 完成 | 3s HTTP 历史轮询；H5 可选 Centrifugo JSON WS（`VITE_CENTRIFUGO_WS`） |
 | H5 HLS 观看 + 分享深链 + 结束态 | 完成 | hls.js + share；**terminal vs offline**；idle 保持 status poll 可回 live |
+| H5 Home 发现 + RoomWatch 分视图 | 完成 | 冷开 Home 卡片网格；`?room=` / 点选进 Watch；← Home 清状态；无 Vue Router |
 | H5 可选登录 + 聊天 + 礼物 + 模拟充值 | 完成 | localStorage 会话；8s 状态轮询；terminal 关聊天；非 live 禁发/禁礼 |
 | H5 Pay mock 币包 ref 修复 | 完成 | `payProducts`/`payBusy`/`payHint` 已声明 |
 | OpenAPI pay/* + /metrics | 完成 | channels/products/orders/sandbox/webhooks + Prometheus 文本 |

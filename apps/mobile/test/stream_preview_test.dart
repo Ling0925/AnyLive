@@ -17,7 +17,9 @@ void main() {
         ),
       ),
     );
-    expect(find.text('Room ended'), findsOneWidget);
+    expect(find.text('Stream ended'), findsOneWidget);
+    expect(find.text('This room was force-closed'), findsOneWidget);
+    expect(find.byKey(const Key('stream-ended')), findsOneWidget);
   });
 
   testWidgets('stream preview idle is offline not permanent end', (tester) async {
@@ -32,8 +34,9 @@ void main() {
         ),
       ),
     );
-    expect(find.text('Room ended'), findsNothing);
-    expect(find.text('Stream offline'), findsOneWidget);
+    expect(find.text('Stream ended'), findsNothing);
+    expect(find.text('Host offline'), findsOneWidget);
+    expect(find.text('Host stopped — may go live again'), findsOneWidget);
     expect(find.byKey(const Key('stream-offline')), findsOneWidget);
   });
 

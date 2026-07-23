@@ -25,19 +25,27 @@ void main() {
 
   group('playerPlaceholderMessage', () {
     test('terminal statuses', () {
-      expect(playerPlaceholderMessage('closed', null), 'Room ended');
-      expect(playerPlaceholderMessage('ended', 'x'), 'Room ended');
+      expect(playerPlaceholderMessage('closed', null), 'Stream ended');
+      expect(playerPlaceholderMessage('ended', 'x'), 'Stream ended');
+      expect(
+        playerPlaceholderSubline('closed'),
+        'This room was force-closed',
+      );
     });
 
     test('idle is offline (host stop), not permanent end', () {
-      expect(playerPlaceholderMessage('idle', null), 'Stream offline');
+      expect(playerPlaceholderMessage('idle', null), 'Host offline');
+      expect(
+        playerPlaceholderSubline('idle'),
+        'Host stopped — may go live again',
+      );
       expect(isRoomTerminalStatus('idle'), isFalse);
       expect(isRoomOfflineStatus('idle'), isTrue);
       expect(isRoomTerminalStatus('closed'), isTrue);
     });
 
     test('offline non-ended', () {
-      expect(playerPlaceholderMessage('scheduled', null), 'Stream offline');
+      expect(playerPlaceholderMessage('scheduled', null), 'Host offline');
     });
 
     test('live without url', () {

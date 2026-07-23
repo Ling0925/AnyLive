@@ -382,7 +382,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(StreamPreview), findsOneWidget);
-    expect(find.text('Room ended'), findsOneWidget);
+    expect(find.text('Stream ended'), findsOneWidget);
+    expect(find.text('This room was force-closed'), findsOneWidget);
     expect(find.text('http://cdn/live/r1.m3u8'), findsNothing);
     expect(find.byKey(const Key('stream-preview-play-icon')), findsNothing);
     expect(find.byKey(const Key('copy-stream-url')), findsNothing);

@@ -18,14 +18,22 @@ bool isRoomOfflineStatus(String status) =>
     status == 'idle' || isRoomTerminalStatus(status);
 
 /// Human-readable placeholder when the player is not shown or not embedded.
+/// Copy aligned with H5 RoomWatch (`Host offline` / `Stream ended`).
 String playerPlaceholderMessage(String status, String? hlsUrl) {
-  if (isRoomTerminalStatus(status)) return 'Room ended';
+  if (isRoomTerminalStatus(status)) return 'Stream ended';
   // Host stop returns idle — not a permanent end; room can go live again.
-  if (status == 'idle') return 'Stream offline';
-  if (status != 'live') return 'Stream offline';
+  if (status == 'idle') return 'Host offline';
+  if (status != 'live') return 'Host offline';
   final url = hlsUrl?.trim() ?? '';
   if (url.isEmpty) return 'Live — play URL unavailable';
   return 'Open stream URL in external player';
+}
+
+/// Secondary line under [playerPlaceholderMessage] for stage chrome.
+String? playerPlaceholderSubline(String status) {
+  if (isRoomTerminalStatus(status)) return 'This room was force-closed';
+  if (status == 'idle') return 'Host stopped — may go live again';
+  return null;
 }
 
 /// Heuristic: URL looks like an HLS playlist (m3u8 or path segment).
