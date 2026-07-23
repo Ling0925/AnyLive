@@ -2,6 +2,8 @@
 
 Vue 3 + TypeScript + Vite。本地 dogfood / 测试栈运营台：OTP 登录、开播 OBS 凭证、房间/举报/礼物/处置/审计、钱包对账。
 
+UI 为 Claude 风格暖色运营台；**中英双语**（默认中文，侧栏/登录页可切换，`localStorage` 键 `anylive_admin_locale_v1`）。登录页为双栏炫光 OTP 流。
+
 ## 快速开始
 
 ### Compose 测试栈（推荐）
@@ -79,7 +81,11 @@ pnpm preview
 
 ```
 src/
-  App.vue          # 登录壳 + 运营面板
-  lib/admin.ts     # 路径 / RBAC / 展示 helper
+  App.vue              # 登录壳 + 运营面板（i18n 模板）
+  style.css            # Claude 暖色设计 token
+  i18n/
+    messages.ts        # zh / en 文案
+    index.ts           # t() / useI18n / locale 持久化
+  lib/admin.ts         # 路径 / RBAC / 展示 helper
   lib/admin.spec.ts
 ```

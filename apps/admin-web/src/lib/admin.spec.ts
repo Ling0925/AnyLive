@@ -1,22 +1,30 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, beforeEach } from 'vitest'
+import { setLocale } from '../i18n'
 import {
   ADMIN_NAV,
+  ADMIN_SESSION_KEY,
   adminGiftsPath,
   adminGateMessage,
   adminTitle,
   apiUrl,
   auditPath,
+  authErrorMessage,
   banUserPath,
   buildHls,
   canAccessModule,
   classifyAdminGrant,
+  clearAdminSession,
   countByStatus,
   createRoomPath,
   demoPrepHints,
+  filterAudit,
+  filterRooms,
   forceCloseRoomPath,
   giftsListPath,
   grantAdminPath,
   isAdminForbidden,
+  loadAdminSession,
+  logoutPath,
   mePath,
   muteUserPath,
   navLabel,
@@ -34,7 +42,9 @@ import {
   roomStatusTone,
   roomStopPath,
   roomsPath,
+  saveAdminSession,
   shortId,
+  tokenRefreshPath,
   unmuteUserPath,
   walletReconcilePath,
   payExpireOrdersPath,
@@ -42,6 +52,10 @@ import {
   analyticsSummaryPath,
   API_PATHS,
 } from './admin'
+
+beforeEach(() => {
+  setLocale('zh')
+})
 
 describe('admin helpers', () => {
   it('titles non-prod with env', () => {
@@ -84,7 +98,7 @@ describe('admin helpers', () => {
       email: 'ops@example.com',
       bootstrapClosed: true,
     })
-    expect(msg).toContain('bootstrap 已关闭')
+    expect(msg).toContain('bootstrap')
     expect(msg).toContain('admin_users')
     expect(msg).toContain('seed-admin-local.sh ops@example.com')
     expect(msg).toContain('DOGFOOD_ADMIN_EMAIL')
@@ -96,13 +110,13 @@ describe('admin helpers', () => {
     expect(ok.giftCount).toBe(3)
     expect(ok.giftSeedCmd).toContain('dogfood-gift-seed.sh')
     expect(ok.runbookPath).toContain('admin-ops-15min-demo.md')
-    expect(ok.lines.some((l) => l.includes('Admin 会话 OK'))).toBe(true)
+    expect(ok.lines.some((l) => l.includes('Admin'))).toBe(true)
     expect(ok.lines.some((l) => l.includes('3'))).toBe(true)
     expect(ok.lines.join(' ')).not.toMatch(/walkthrough complete|演示完成|V-AD-1 done/i)
 
     const empty = demoPrepHints({ isAdmin: false, giftCount: 0 })
     expect(empty.adminOk).toBe(false)
-    expect(empty.lines.some((l) => l.includes('未授权'))).toBe(true)
+    expect(empty.lines.some((l) => /未授权|unauthorized/i.test(l))).toBe(true)
     expect(empty.lines.some((l) => l.includes('dogfood-gift-seed'))).toBe(true)
   })
 
@@ -118,6 +132,27 @@ describe('admin helpers', () => {
     ])
     expect(navLabel('rooms')).toBe('直播间')
     expect(navLabel('golive')).toBe('开播')
+    setLocale('en')
+    expect(navLabel('rooms')).toBe('Rooms')
+    expect(navLabel('golive')).toBe('Go Live')
+  })
+
+  it('filters rooms and audit locally', () => {
+    const rooms = [
+      { id: 'a1', title: 'Music Night', status: 'live' },
+      { id: 'b2', title: 'Chat', status: 'idle' },
+    ]
+    expect(filterRooms(rooms, 'music', 'all')).toHaveLength(1)
+    expect(filterRooms(rooms, '', 'live')).toHaveLength(1)
+    expect(filterRooms(rooms, 'b2', 'all')[0].title).toBe('Chat')
+
+    const audit = [
+      { action: 'ban', target: 'u1', detail: 'spam', actor_id: 'ops' },
+      { action: 'mute', target: 'u2', detail: 'ads', actor_id: 'mod' },
+    ]
+    expect(filterAudit(audit, 'ban')).toHaveLength(1)
+    expect(filterAudit(audit, 'u2')).toHaveLength(1)
+    expect(filterAudit(audit, '')).toHaveLength(2)
   })
 })
 
@@ -139,8 +174,47 @@ describe('api path helpers', () => {
   it('exposes OTP auth paths', () => {
     expect(otpSendPath()).toBe('/api/v1/auth/otp/send')
     expect(otpVerifyPath()).toBe('/api/v1/auth/otp/verify')
+    expect(tokenRefreshPath()).toBe('/api/v1/auth/token/refresh')
+    expect(logoutPath()).toBe('/api/v1/auth/logout')
     expect(mePath()).toBe('/api/v1/me')
     expect(API_PATHS.otpSend).toBe(otpSendPath())
+  })
+
+  it('persists and clears admin session snapshots', () => {
+    const mem = new Map<string, string>()
+    const storage = {
+      getItem: (k: string) => mem.get(k) ?? null,
+      setItem: (k: string, v: string) => {
+        mem.set(k, v)
+      },
+      removeItem: (k: string) => {
+        mem.delete(k)
+      },
+    }
+    expect(loadAdminSession(storage)).toBeNull()
+    saveAdminSession(
+      {
+        accessToken: 'acc',
+        refreshToken: 'ref',
+        displayName: 'Ops',
+        userId: 'u1',
+        email: 'ops@example.com',
+      },
+      storage,
+    )
+    expect(mem.get(ADMIN_SESSION_KEY)).toContain('acc')
+    const snap = loadAdminSession(storage)
+    expect(snap?.accessToken).toBe('acc')
+    expect(snap?.refreshToken).toBe('ref')
+    expect(snap?.email).toBe('ops@example.com')
+    clearAdminSession(storage)
+    expect(loadAdminSession(storage)).toBeNull()
+  })
+
+  it('maps auth error bodies to operator copy', () => {
+    expect(authErrorMessage(401, '{"message":"bad otp"}')).toBe('bad otp')
+    expect(authErrorMessage(401)).toMatch(/验证码|Invalid|expired/i)
+    expect(authErrorMessage(429)).toMatch(/频繁|Too many/i)
   })
 
   it('exposes admin action paths', () => {

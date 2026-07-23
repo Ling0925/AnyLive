@@ -1,5 +1,8 @@
-export function adminTitle(env: string): string {
-  return env === 'prod' ? 'AnyLive Admin' : `AnyLive Admin (${env})`
+import { t, getLocale, type Locale } from '../i18n'
+
+export function adminTitle(env: string, locale: Locale = getLocale()): string {
+  if (env === 'prod') return t('app.titleProd', undefined, locale)
+  return t('app.titleLocal', undefined, locale)
 }
 
 export function canAccessModule(role: string, module: string): boolean {
@@ -35,8 +38,8 @@ export function classifyAdminGrant(status: number, bodyText = ''): AdminGrantOut
   if (status >= 200 && status < 300) return 'granted'
   if (status === 409) return 'conflict'
   if (status === 403) {
-    const t = bodyText.toLowerCase()
-    if (t.includes('admin only') || t.includes('forbidden')) return 'bootstrap_closed'
+    const text = bodyText.toLowerCase()
+    if (text.includes('admin only') || text.includes('forbidden')) return 'bootstrap_closed'
     return 'bootstrap_closed'
   }
   return 'error'
@@ -52,26 +55,27 @@ export function isAdminForbidden(status: number): boolean {
  * Bootstrap only works while admin_users is empty.
  * When bootstrap_closed (grant 403 after OTP), keep the same actionable paths.
  */
-export function adminGateMessage(opts?: {
-  apiBase?: string
-  email?: string
-  /** When true, prefix notes that first-boot grant was rejected (admin_users non-empty). */
-  bootstrapClosed?: boolean
-}): string {
+export function adminGateMessage(
+  opts?: {
+    apiBase?: string
+    email?: string
+    /** When true, prefix notes that first-boot grant was rejected (admin_users non-empty). */
+    bootstrapClosed?: boolean
+  },
+  locale: Locale = getLocale(),
+): string {
   const base = opts?.apiBase?.trim() || 'http://localhost:8088'
   const email = opts?.email?.trim()
   const emailHint = email
-    ? `当前账号 ${email} 不是管理员。`
-    : '当前账号不是管理员。'
+    ? t('gate.notAdmin', { email }, locale)
+    : t('gate.notAdminGeneric', undefined, locale)
   const closedHint = opts?.bootstrapClosed
-    ? '自助 bootstrap 已关闭（admin_users 非空，POST /admin/grant 返回 403）。'
-    : '自助 bootstrap 仅在 admin_users 为空时可用。'
+    ? t('gate.bootstrapClosed', undefined, locale)
+    : t('gate.bootstrapOpen', undefined, locale)
   const seedEmail = email || '<email>'
   return (
     `${emailHint}${closedHint}` +
-    `本地可：① 用已有管理员邮箱登录（dogfood 种子 / DOGFOOD_ADMIN_EMAIL）；` +
-    `② 运行 ./scripts/seed-admin-local.sh ${seedEmail}；` +
-    `③ docker exec 向 admin_users 插入 user_id。API ${base}`
+    t('gate.paths', { email: seedEmail, base }, locale)
   )
 }
 
@@ -87,28 +91,31 @@ export type DemoPrepHints = {
   lines: string[]
 }
 
-export function demoPrepHints(opts: {
-  isAdmin: boolean | null
-  giftCount: number
-}): DemoPrepHints {
+export function demoPrepHints(
+  opts: {
+    isAdmin: boolean | null
+    giftCount: number
+  },
+  locale: Locale = getLocale(),
+): DemoPrepHints {
   const giftSeedCmd = './scripts/dogfood-gift-seed.sh'
   const runbookPath = 'docs/runbooks/admin-ops-15min-demo.md'
   const adminOk = opts.isAdmin === true
   const giftCount = Math.max(0, Number(opts.giftCount) || 0)
   const lines: string[] = []
   if (adminOk) {
-    lines.push('Admin 会话 OK')
+    lines.push(t('prep.adminOk', undefined, locale))
   } else if (opts.isAdmin === false) {
-    lines.push('Admin 未授权 — 见顶部 gate / seed-admin-local.sh')
+    lines.push(t('prep.adminDenied', undefined, locale))
   } else {
-    lines.push('Admin 权限检测中…')
+    lines.push(t('prep.adminChecking', undefined, locale))
   }
   lines.push(
     giftCount > 0
-      ? `礼物目录 ${giftCount} 项（可再跑 seed 刷新固定 Rose/Heart/Rocket）`
-      : `礼物目录为空 — 运行 ${giftSeedCmd}（需 DOGFOOD_ADMIN_EMAIL 或已 seed admin）`,
+      ? t('prep.giftsOk', { n: giftCount }, locale)
+      : t('prep.giftsEmpty', { cmd: giftSeedCmd }, locale),
   )
-  lines.push(`15min 走查：${runbookPath}（仅人工签字关闭 V-AD-1）`)
+  lines.push(t('prep.walkthrough', { path: runbookPath }, locale))
   return { adminOk, giftCount, giftSeedCmd, runbookPath, lines }
 }
 
@@ -124,23 +131,122 @@ export type AdminNavKey =
 
 export type AdminNavItem = {
   key: AdminNavKey
-  label: string
-  /** Optional short description for dashboard cards. */
-  blurb?: string
+  /** i18n key under nav.* */
+  labelKey: string
+  /** i18n key under navBlurb.* */
+  blurbKey: string
 }
 
 export const ADMIN_NAV: AdminNavItem[] = [
-  { key: 'dashboard', label: '总览', blurb: '直播与运营概览' },
-  { key: 'golive', label: '开播', blurb: '网页开播 / OBS 推流凭证' },
-  { key: 'rooms', label: '直播间', blurb: '房间列表 / 预览 / 强关' },
-  { key: 'reports', label: '举报队列', blurb: '用户举报处理' },
-  { key: 'gifts', label: '礼物配置', blurb: '礼物目录管理' },
-  { key: 'moderation', label: '处置中心', blurb: '封禁 / 禁言' },
-  { key: 'audit', label: '审计日志', blurb: '运营写操作记录' },
+  { key: 'dashboard', labelKey: 'nav.dashboard', blurbKey: 'navBlurb.dashboard' },
+  { key: 'golive', labelKey: 'nav.golive', blurbKey: 'navBlurb.golive' },
+  { key: 'rooms', labelKey: 'nav.rooms', blurbKey: 'navBlurb.rooms' },
+  { key: 'reports', labelKey: 'nav.reports', blurbKey: 'navBlurb.reports' },
+  { key: 'gifts', labelKey: 'nav.gifts', blurbKey: 'navBlurb.gifts' },
+  { key: 'moderation', labelKey: 'nav.moderation', blurbKey: 'navBlurb.moderation' },
+  { key: 'audit', labelKey: 'nav.audit', blurbKey: 'navBlurb.audit' },
 ]
 
-export function navLabel(key: AdminNavKey): string {
-  return ADMIN_NAV.find((n) => n.key === key)?.label ?? key
+export function navLabel(key: AdminNavKey, locale: Locale = getLocale()): string {
+  return t(`nav.${key}`, undefined, locale)
+}
+
+export function navBlurb(key: AdminNavKey, locale: Locale = getLocale()): string {
+  return t(`navBlurb.${key}`, undefined, locale)
+}
+
+/** localStorage key for admin session persistence (access + refresh). */
+export const ADMIN_SESSION_KEY = 'anylive_admin_session_v1'
+
+export type AdminSessionSnapshot = {
+  accessToken: string
+  refreshToken: string
+  displayName: string
+  userId: string
+  email: string
+}
+
+/** Read persisted admin session from localStorage (browser only). */
+export function loadAdminSession(
+  storage: Pick<Storage, 'getItem'> | null | undefined = typeof localStorage !== 'undefined'
+    ? localStorage
+    : null,
+): AdminSessionSnapshot | null {
+  if (!storage) return null
+  try {
+    const raw = storage.getItem(ADMIN_SESSION_KEY)
+    if (!raw) return null
+    const o = JSON.parse(raw) as Partial<AdminSessionSnapshot>
+    const accessToken = typeof o.accessToken === 'string' ? o.accessToken.trim() : ''
+    if (!accessToken) return null
+    return {
+      accessToken,
+      refreshToken: typeof o.refreshToken === 'string' ? o.refreshToken : '',
+      displayName: typeof o.displayName === 'string' ? o.displayName : '',
+      userId: typeof o.userId === 'string' ? o.userId : '',
+      email: typeof o.email === 'string' ? o.email : '',
+    }
+  } catch {
+    return null
+  }
+}
+
+/** Persist admin session; no-op when access is empty. */
+export function saveAdminSession(
+  snap: AdminSessionSnapshot,
+  storage: Pick<Storage, 'setItem'> | null | undefined = typeof localStorage !== 'undefined'
+    ? localStorage
+    : null,
+): void {
+  if (!storage) return
+  const access = (snap.accessToken || '').trim()
+  if (!access) return
+  storage.setItem(
+    ADMIN_SESSION_KEY,
+    JSON.stringify({
+      accessToken: access,
+      refreshToken: snap.refreshToken || '',
+      displayName: snap.displayName || '',
+      userId: snap.userId || '',
+      email: snap.email || '',
+    }),
+  )
+}
+
+/** Clear persisted admin session. */
+export function clearAdminSession(
+  storage: Pick<Storage, 'removeItem'> | null | undefined = typeof localStorage !== 'undefined'
+    ? localStorage
+    : null,
+): void {
+  if (!storage) return
+  try {
+    storage.removeItem(ADMIN_SESSION_KEY)
+  } catch {
+    // ignore quota / private mode
+  }
+}
+
+/** Human-readable OTP / auth API errors for the login screen. */
+export function authErrorMessage(
+  status: number,
+  bodyText = '',
+  locale: Locale = getLocale(),
+): string {
+  const text = (bodyText || '').trim()
+  try {
+    const j = JSON.parse(text) as { message?: string; code?: string }
+    if (j.message && j.message.trim()) return j.message.trim()
+    if (j.code && j.code.trim()) return `${j.code} (HTTP ${status})`
+  } catch {
+    // fall through
+  }
+  if (status === 401) return t('auth.badOtp', undefined, locale)
+  if (status === 404) return t('auth.needSendFirst', undefined, locale)
+  if (status === 429) return t('auth.rateLimit', undefined, locale)
+  if (status === 400) return t('auth.badRequest', undefined, locale)
+  if (text && text.length < 160) return text
+  return t('auth.httpFail', { status }, locale)
 }
 
 /** Normalize API base URL (strip trailing slash). */
@@ -158,6 +264,8 @@ export function apiUrl(base: string, path: string): string {
 export const API_PATHS = {
   otpSend: '/api/v1/auth/otp/send',
   otpVerify: '/api/v1/auth/otp/verify',
+  tokenRefresh: '/api/v1/auth/token/refresh',
+  logout: '/api/v1/auth/logout',
   me: '/api/v1/me',
   rooms: '/api/v1/rooms',
   publicGifts: '/api/v1/gifts',
@@ -194,6 +302,14 @@ export function otpVerifyPath(): string {
 
 export function mePath(): string {
   return API_PATHS.me
+}
+
+export function tokenRefreshPath(): string {
+  return API_PATHS.tokenRefresh
+}
+
+export function logoutPath(): string {
+  return API_PATHS.logout
 }
 
 export function banUserPath(): string {
@@ -370,4 +486,53 @@ export function openReportCount(
 ): number {
   // Backend list is newest-first; unresolved items typically have status open or omit resolved.
   return reports.filter((r) => !r.status || r.status === 'open').length
+}
+
+/** Local filter for room table. */
+export function filterRooms<T extends { title: string; id: string; status: string }>(
+  rooms: T[],
+  query: string,
+  statusFilter: string,
+): T[] {
+  const q = query.trim().toLowerCase()
+  return rooms.filter((r) => {
+    if (statusFilter && statusFilter !== 'all' && r.status !== statusFilter) return false
+    if (!q) return true
+    return r.title.toLowerCase().includes(q) || r.id.toLowerCase().includes(q)
+  })
+}
+
+/** Local filter for audit table. */
+export function filterAudit<
+  T extends { action: string; target: string; detail: string; actor_id: string },
+>(items: T[], query: string): T[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return items
+  return items.filter(
+    (a) =>
+      a.action.toLowerCase().includes(q) ||
+      a.target.toLowerCase().includes(q) ||
+      a.detail.toLowerCase().includes(q) ||
+      a.actor_id.toLowerCase().includes(q),
+  )
+}
+
+/** Format ISO / opaque timestamps for tables. */
+export function formatTs(raw: string, locale: Locale = getLocale()): string {
+  if (!raw) return '—'
+  const d = new Date(raw)
+  if (Number.isNaN(d.getTime())) return raw
+  try {
+    return new Intl.DateTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-US', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).format(d)
+  } catch {
+    return raw
+  }
 }
