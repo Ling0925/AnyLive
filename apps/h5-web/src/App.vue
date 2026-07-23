@@ -67,6 +67,11 @@ const TOKEN_KEY = 'anylive_h5_token'
 const SESSION_KEY = 'anylive_h5_session'
 
 const apiBase = import.meta.env.VITE_API_BASE ?? 'http://localhost:8088'
+
+/** SPA surface without Vue Router: Home discover vs RoomWatch. */
+type AppView = 'home' | 'watch'
+const view = ref<AppView>('home')
+
 const roomId = ref('')
 const status = ref('')
 const roomTitle = ref('')
@@ -78,7 +83,7 @@ const shareHint = ref('')
 const videoEl = ref<HTMLVideoElement | null>(null)
 let detach: (() => void) | null = null
 
-/** Public hot rooms — shown when no room is loaded so watch chrome is discoverable. */
+/** Public hot rooms for Home discover grid. */
 const hotRooms = ref<FeedRoom[]>([])
 const hotLoading = ref(false)
 const hotError = ref('')
@@ -141,6 +146,8 @@ const roomOffline = computed(() => isRoomOffline(status.value))
 /** Permanent end only (force-close). Host stop is idle → offline, not terminal. */
 const roomTerminal = computed(() => isRoomTerminal(status.value))
 const authed = computed(() => isLoggedIn(accessToken.value))
+const isHome = computed(() => view.value === 'home')
+const isWatch = computed(() => view.value === 'watch')
 /** Display title for meta row. */
 const displayTitle = computed(() => {
   const t = roomTitle.value.trim()
@@ -148,6 +155,57 @@ const displayTitle = computed(() => {
   const id = roomId.value.trim()
   return id ? `Room ${id.slice(0, 8)}` : 'Live room'
 })
+
+function syncRoomQuery(id: string) {
+  try {
+    const url = new URL(window.location.href)
+    const next = id.trim()
+    if (next) url.searchParams.set('room', next)
+    else url.searchParams.delete('room')
+    const path = `${url.pathname}${url.search}${url.hash}`
+    window.history.replaceState({}, '', path)
+  } catch {
+    // non-browser / odd href
+  }
+}
+
+/** Leave RoomWatch and show Home discover. */
+function goHome() {
+  stopStatusPoll()
+  stopChatPoll()
+  stopPresencePoll()
+  stopCentrifugo()
+  teardownPlayer()
+  roomId.value = ''
+  status.value = ''
+  roomTitle.value = ''
+  ownerId.value = ''
+  hlsUrl.value = ''
+  error.value = ''
+  loading.value = false
+  messages.value = []
+  gifts.value = []
+  giftOverlay.value = ''
+  onlineCount.value = 0
+  likeCount.value = 0
+  chatBody.value = ''
+  chatHint.value = ''
+  giftHint.value = ''
+  pk.value = null
+  shareHint.value = ''
+  view.value = 'home'
+  syncRoomQuery('')
+  void loadHotFeed()
+}
+
+function enterWatch(id: string) {
+  const next = id.trim()
+  if (!next) return
+  roomId.value = next
+  view.value = 'watch'
+  syncRoomQuery(next)
+  void loadRoom()
+}
 
 function teardownPlayer() {
   detach?.()
@@ -389,8 +447,9 @@ onMounted(() => {
   void loadHotFeed()
   const fromQuery = readRoomFromQuery(window.location.search)
   if (fromQuery) {
-    roomId.value = fromQuery
-    void loadRoom()
+    enterWatch(fromQuery)
+  } else {
+    view.value = 'home'
   }
 })
 
@@ -414,8 +473,7 @@ async function loadHotFeed() {
 }
 
 function openHotRoom(id: string) {
-  roomId.value = id
-  void loadRoom()
+  enterWatch(id)
 }
 
 /** Soft-hide PK banner when FEATURE_PK is off (default for P1 dogfood). */
@@ -593,8 +651,16 @@ async function runSearch() {
 }
 
 function pickSearchRoom(id: string) {
-  roomId.value = id
-  void loadRoom()
+  enterWatch(id)
+}
+
+function loadRoomFromInput() {
+  const id = roomId.value.trim()
+  if (!id) {
+    error.value = 'Enter a room id'
+    return
+  }
+  enterWatch(id)
 }
 
 async function loadRoom() {
@@ -1056,18 +1122,37 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
 </script>
 
 <template>
-  <main class="page">
-    <!-- Sticky topbar: brand · LIVE · auth -->
+  <main class="page" :class="{ 'page-home': isHome, 'page-watch': isWatch }">
+    <!-- Sticky topbar: brand · nav · LIVE · auth -->
     <header class="top topbar">
       <div class="brand">
-        <h1>
+        <button
+          type="button"
+          class="brand-btn"
+          data-testid="nav-home"
+          :aria-current="isHome ? 'page' : undefined"
+          @click="goHome"
+        >
           <span class="logo-mark" aria-hidden="true" />
-          AnyLive
-          <span v-if="canWatch" class="live-chip" role="status">
-            <span class="live-dot" aria-hidden="true" />
-            LIVE
-          </span>
-        </h1>
+          <span class="brand-name">AnyLive</span>
+        </button>
+        <nav class="top-nav" aria-label="Primary">
+          <button
+            type="button"
+            class="nav-link"
+            :class="{ active: isHome }"
+            data-testid="nav-home-tab"
+            @click="goHome"
+          >
+            Home
+          </button>
+          <span v-if="isWatch" class="nav-sep" aria-hidden="true">/</span>
+          <span v-if="isWatch" class="nav-watch-label muted">Watch</span>
+        </nav>
+        <span v-if="isWatch && canWatch" class="live-chip" role="status">
+          <span class="live-dot" aria-hidden="true" />
+          LIVE
+        </span>
       </div>
       <div class="auth-chip">
         <template v-if="authed">
@@ -1158,282 +1243,306 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
       />
     </section>
 
-    <!-- Discover + room tools — open when no room so the page is never empty chrome -->
-    <details class="util-details" :open="!hasRoom">
-      <summary class="util-summary muted">
-        {{ hasRoom ? 'Room · Search · Tools' : 'Pick a live room · Search · Tools' }}
-      </summary>
-      <div class="util-strip row">
-        <input v-model="roomId" placeholder="Room UUID" data-testid="room-id-input" />
-        <button
-          type="button"
-          class="btn primary"
-          data-testid="load-room"
-          :disabled="loading"
-          @click="loadRoom"
-        >
-          Load
-        </button>
-        <button type="button" class="ghost" :disabled="!roomId.trim()" @click="shareRoom">Share</button>
-        <button type="button" class="ghost" :disabled="hotLoading" @click="loadHotFeed">Refresh hot</button>
+    <!-- ===== HOME: discover (not a room) ===== -->
+    <section v-if="isHome" class="home-view" data-testid="home-view">
+      <div class="home-hero">
+        <h1 class="home-title">Live now</h1>
+        <p class="muted home-sub">Pick a stream to watch. Login is optional for chat and gifts.</p>
       </div>
 
-      <section class="panel hot-feed" data-testid="hot-feed">
-        <div class="panel-head">
-          <h2>Live now</h2>
-          <span v-if="hotLoading" class="muted">Loading…</span>
-        </div>
-        <p v-if="hotError" class="err">{{ hotError }}</p>
-        <ul v-if="hotRooms.length" class="hot-list">
-          <li v-for="r in hotRooms" :key="r.id">
-            <button type="button" class="hot-card" @click="openHotRoom(r.id)">
-              <span class="hot-card-title">{{ r.title || r.id.slice(0, 8) }}</span>
-              <span class="hot-card-meta">
-                <span
-                  class="live-chip live-chip-solid"
-                  :class="{ dim: r.status !== 'live' }"
-                >{{ r.status === 'live' ? 'LIVE' : r.status || '—' }}</span>
-                <span class="muted mono">{{ r.id.slice(0, 8) }}…</span>
-              </span>
-            </button>
-          </li>
-        </ul>
-        <p v-else-if="!hotLoading" class="muted">No hot rooms — paste a room UUID above</p>
-      </section>
+      <div class="home-search row">
+        <input
+          v-model="searchQ"
+          placeholder="Search rooms / users"
+          data-testid="home-search"
+          @keyup.enter="runSearch"
+        />
+        <button type="button" class="btn primary" :disabled="searchBusy" @click="runSearch">Search</button>
+        <button type="button" class="ghost" :disabled="hotLoading" @click="loadHotFeed">Refresh</button>
+      </div>
+      <p v-if="searchHint" class="hint">{{ searchHint }}</p>
+      <ul v-if="searchResult" class="msg-list home-search-hits" data-testid="search-panel">
+        <li v-for="r in searchResult.rooms" :key="'room-' + r.id">
+          <button type="button" class="link" @click="pickSearchRoom(r.id)">
+            {{ r.title || r.id }} ({{ r.status }})
+          </button>
+        </li>
+        <li v-for="u in searchResult.users" :key="'user-' + u.id" class="muted">
+          user · {{ u.displayName || u.id }}
+        </li>
+      </ul>
 
-      <section class="panel search" data-testid="search-panel">
-        <div class="row">
-          <input
-            v-model="searchQ"
-            placeholder="Search rooms / users"
-            @keyup.enter="runSearch"
-          />
-          <button type="button" class="btn primary" :disabled="searchBusy" @click="runSearch">Search</button>
+      <p v-if="hotError" class="err">{{ hotError }}</p>
+      <div v-if="hotLoading && !hotRooms.length" class="home-skeleton" aria-busy="true">
+        <div class="home-skel-card skeleton-block" />
+        <div class="home-skel-card skeleton-block" />
+        <div class="home-skel-card skeleton-block" />
+      </div>
+      <ul v-else-if="hotRooms.length" class="home-grid" data-testid="hot-feed">
+        <li v-for="r in hotRooms" :key="r.id">
+          <button type="button" class="home-card" @click="openHotRoom(r.id)">
+            <div class="home-card-thumb" aria-hidden="true">
+              <span
+                class="live-chip live-chip-solid"
+                :class="{ dim: r.status !== 'live' }"
+              >{{ r.status === 'live' ? 'LIVE' : (r.status || '—') }}</span>
+            </div>
+            <div class="home-card-body">
+              <span class="home-card-title">{{ r.title || `Room ${r.id.slice(0, 8)}` }}</span>
+              <span class="muted mono home-card-id">{{ r.id.slice(0, 8) }}…</span>
+            </div>
+          </button>
+        </li>
+      </ul>
+      <p v-else-if="!hotLoading" class="muted home-empty">No live rooms right now. Try search or paste a UUID below.</p>
+
+      <details class="util-details home-tools">
+        <summary class="util-summary muted">Paste room UUID · Tools</summary>
+        <div class="util-strip row">
+          <input v-model="roomId" placeholder="Room UUID" data-testid="room-id-input" />
+          <button
+            type="button"
+            class="btn primary"
+            data-testid="load-room"
+            :disabled="loading"
+            @click="loadRoomFromInput"
+          >
+            Open
+          </button>
         </div>
-        <p v-if="searchHint" class="hint">{{ searchHint }}</p>
-        <ul v-if="searchResult" class="msg-list">
-          <li v-for="r in searchResult.rooms" :key="'room-' + r.id">
-            <button type="button" class="link" @click="pickSearchRoom(r.id)">
-              {{ r.title || r.id }} ({{ r.status }})
-            </button>
-          </li>
-          <li v-for="u in searchResult.users" :key="'user-' + u.id" class="muted">
-            user · {{ u.displayName || u.id }}
-          </li>
-        </ul>
-      </section>
-      <p class="muted api-line mono">API · {{ apiBase }}</p>
-    </details>
+        <p class="muted api-line mono">API · {{ apiBase }}</p>
+      </details>
+    </section>
 
     <div v-if="shareHint" class="share-toast" role="status">{{ shareHint }}</div>
-
     <p v-if="authHint && authed" class="hint">{{ authHint }}</p>
     <p v-if="error" class="err">{{ error }}</p>
 
-    <!-- Feature-gated PK — de-emphasized, unmounted when flag false -->
-    <section v-if="featurePk && pk" class="panel pk pk-deemph" data-testid="pk-banner">
-      <h2>PK {{ pk.status }}</h2>
-      <p class="pk-score">
-        {{ pk.scoreA }} – {{ pk.scoreB }}
-        <span v-if="pk.winnerRoomId" class="muted"> · win {{ pk.winnerRoomId }}</span>
-      </p>
-    </section>
-
-    <!-- RoomWatch layout: player → meta → channel → chat → gifts -->
-    <div class="watch-layout">
-      <div class="primary-col">
-        <!-- Player stage (16:9) or end/offline overlays -->
-        <div class="player-stage">
-          <section v-if="roomTerminal" class="ended" role="status" data-testid="room-ended">
-            <p class="ended-title">Stream ended</p>
-            <p class="ended-sub">This room was force-closed</p>
-            <p v-if="status" class="muted">status: {{ status }}</p>
-          </section>
-
-          <section
-            v-else-if="roomOffline && status === 'idle'"
-            class="ended offline"
-            role="status"
-            data-testid="room-offline"
-          >
-            <p class="ended-title">Host offline</p>
-            <p class="ended-sub">Host stopped — room idle (may go live again)</p>
-            <p class="muted">status: idle</p>
-          </section>
-
-          <section v-else-if="canWatch" class="stage">
-            <div class="player">
-              <video ref="videoEl" controls playsinline class="player-video" />
-              <span v-if="giftOverlay" class="gift-overlay">🎁 {{ giftOverlay }}</span>
-            </div>
-          </section>
-
-          <div v-else-if="loading" class="player-skeleton" aria-busy="true">
-            Loading room…
-          </div>
-
-          <div v-else class="player player-placeholder">
-            <p class="muted">
-              {{
-                hasRoom
-                  ? `status: ${status}${hlsUrl ? '' : ' · waiting for stream'}`
-                  : 'Pick a live room above to watch'
-              }}
-            </p>
-          </div>
-        </div>
-
-        <!-- Meta row: title · LIVE · online · like (always when room loaded) -->
-        <div v-if="hasRoom" class="meta-row" data-testid="meta-row">
-          <div class="meta-title">
-            <span v-if="canWatch" class="live-chip live-chip-solid" role="status">
-              <span class="live-dot" aria-hidden="true" />
-              LIVE
-            </span>
-            <span v-else-if="status" class="status-chip muted">{{ status }}</span>
-            <h2 class="room-title">{{ displayTitle }}</h2>
-          </div>
-          <div id="room-stats" class="room-stats meta-stats">
-            <span class="stat-pill">{{ onlineCount }} watching</span>
-            <button
-              type="button"
-              class="like-btn"
-              :disabled="!authed || likeBusy || roomOffline || !canWatch"
-              @click="likeRoom"
-            >
-              ♥ {{ likeCount }}
+    <!-- ===== WATCH: single room RoomWatch ===== -->
+    <template v-if="isWatch">
+      <div class="watch-toolbar">
+        <button type="button" class="ghost back-home" data-testid="back-home" @click="goHome">
+          ← Home
+        </button>
+        <details class="util-details watch-tools">
+          <summary class="util-summary muted">Room tools</summary>
+          <div class="util-strip row">
+            <input v-model="roomId" placeholder="Room UUID" />
+            <button type="button" class="btn primary" :disabled="loading" @click="loadRoomFromInput">
+              Load
             </button>
-            <span v-if="wsStatus" class="muted ws-pill">ws: {{ wsStatus }}</span>
+            <button type="button" class="ghost" :disabled="!roomId.trim()" @click="shareRoom">Share</button>
           </div>
-        </div>
-
-        <!-- Channel row: host chip · more (creator) -->
-        <div v-if="hasRoom" class="channel-row" data-testid="channel-row">
-          <span class="channel-chip">
-            <span class="channel-avatar" aria-hidden="true" />
-            <span class="channel-meta">
-              <span class="channel-name">{{ ownerId ? ownerId.slice(0, 8) : 'Host' }}</span>
-              <span class="muted channel-id mono">{{ roomId.slice(0, 8) }}…</span>
-            </span>
-          </span>
-          <details v-if="authed && creator" class="channel-more">
-            <summary class="ghost channel-more-btn">⋯</summary>
-            <section class="panel creator" data-testid="creator-panel">
-              <div class="panel-head">
-                <h2>Creator</h2>
-                <button type="button" class="ghost" @click="refreshCreator">Refresh</button>
-              </div>
-              <p class="muted">
-                followers {{ creator.followerCount }} · following {{ creator.followingCount }} · live
-                {{ creator.liveRooms }}/{{ creator.totalRooms }} · gift coins
-                {{ creator.giftCoinsReceived }}
-              </p>
-              <p v-if="creatorHint" class="hint">{{ creatorHint }}</p>
-            </section>
-          </details>
-          <button
-            v-else
-            type="button"
-            class="ghost"
-            :disabled="!roomId.trim()"
-            @click="shareRoom"
-          >
-            Share
-          </button>
-        </div>
-
-        <details v-if="canWatch && hlsUrl" class="hls-details">
-          <summary class="mono dim">HLS URL</summary>
-          <p class="mono dim">{{ hlsUrl }}</p>
         </details>
       </div>
 
-      <div class="side-col">
-        <!-- Chat panel — show whenever room is known (not only while HLS is up) -->
-        <section
-          v-if="hasRoom && !roomTerminal"
-          class="panel chat chat-panel"
-          data-testid="chat-panel"
-        >
-          <div class="panel-head">
-            <h2>Live chat</h2>
-            <button type="button" class="ghost" @click="refreshMessages">Refresh</button>
-          </div>
-          <ul class="msg-list">
-            <li v-for="m in messages" :key="m.id">
-              <strong>{{ m.senderName || m.senderId.slice(0, 6) }}</strong>
-              <span>{{ m.body }}</span>
-            </li>
-            <li v-if="!messages.length" class="muted empty-msg">No messages yet</li>
-          </ul>
-          <div v-if="authed && canWatch" class="row composer">
-            <input v-model="chatBody" placeholder="Say something…" @keyup.enter="sendChat" />
-            <button type="button" class="btn primary" :disabled="chatBusy" @click="sendChat">Send</button>
-          </div>
-          <p v-else-if="authed && roomOffline" class="muted">Room offline — chat send disabled</p>
-          <p v-else-if="authed && !canWatch" class="muted">Waiting for live stream — chat send disabled</p>
-          <p v-else class="muted">
-            <button type="button" class="link" @click="loginOpen = true">Login</button>
-            to send chat
-          </p>
-          <p v-if="chatHint" class="hint">{{ chatHint }}</p>
-        </section>
+      <!-- Feature-gated PK — de-emphasized, unmounted when flag false -->
+      <section v-if="featurePk && pk" class="panel pk pk-deemph" data-testid="pk-banner">
+        <h2>PK {{ pk.status }}</h2>
+        <p class="pk-score">
+          {{ pk.scoreA }} – {{ pk.scoreB }}
+          <span v-if="pk.winnerRoomId" class="muted"> · win {{ pk.winnerRoomId }}</span>
+        </p>
+      </section>
 
-        <!-- Gift dock — catalog visible for any loaded room; send still requires live + auth -->
-        <section
-          v-if="hasRoom && !roomTerminal"
-          class="panel gifts gift-dock"
-          data-testid="gift-dock"
-        >
-          <div class="panel-head">
-            <h2>Gifts</h2>
-            <span v-if="authed" class="chip balance-chip">{{ balance }} coins</span>
+      <!-- RoomWatch layout: player → meta → channel → chat → gifts -->
+      <div class="watch-layout" data-testid="watch-view">
+        <div class="primary-col">
+          <!-- Player stage (16:9) or end/offline overlays -->
+          <div class="player-stage">
+            <section v-if="roomTerminal" class="ended" role="status" data-testid="room-ended">
+              <p class="ended-title">Stream ended</p>
+              <p class="ended-sub">This room was force-closed</p>
+              <p v-if="status" class="muted">status: {{ status }}</p>
+              <button type="button" class="btn primary" @click="goHome">Back to Home</button>
+            </section>
+
+            <section
+              v-else-if="roomOffline && status === 'idle'"
+              class="ended offline"
+              role="status"
+              data-testid="room-offline"
+            >
+              <p class="ended-title">Host offline</p>
+              <p class="ended-sub">Host stopped — room idle (may go live again)</p>
+              <p class="muted">status: idle</p>
+              <button type="button" class="ghost" @click="goHome">Back to Home</button>
+            </section>
+
+            <section v-else-if="canWatch" class="stage">
+              <div class="player">
+                <video ref="videoEl" controls playsinline class="player-video" />
+                <span v-if="giftOverlay" class="gift-overlay">🎁 {{ giftOverlay }}</span>
+              </div>
+            </section>
+
+            <div v-else-if="loading" class="player-skeleton" aria-busy="true">
+              Loading room…
+            </div>
+
+            <div v-else class="player player-placeholder">
+              <p class="muted">
+                {{
+                  hasRoom
+                    ? `status: ${status}${hlsUrl ? '' : ' · waiting for stream'}`
+                    : 'Loading room…'
+                }}
+              </p>
+            </div>
           </div>
-          <div v-if="authed" class="row topup">
-            <input v-model.number="topupAmount" type="number" min="1" placeholder="Topup amount" />
-            <button type="button" :disabled="giftBusy" @click="doTopup">Top up (legacy mock)</button>
-            <button type="button" class="ghost" :disabled="giftBusy" @click="refreshBalance">Refresh</button>
+
+          <!-- Meta row: title · LIVE · online · like (always when room loaded) -->
+          <div v-if="hasRoom" class="meta-row" data-testid="meta-row">
+            <div class="meta-title">
+              <span v-if="canWatch" class="live-chip live-chip-solid" role="status">
+                <span class="live-dot" aria-hidden="true" />
+                LIVE
+              </span>
+              <span v-else-if="status" class="status-chip muted">{{ status }}</span>
+              <h2 class="room-title">{{ displayTitle }}</h2>
+            </div>
+            <div id="room-stats" class="room-stats meta-stats">
+              <span class="stat-pill">{{ onlineCount }} watching</span>
+              <button
+                type="button"
+                class="like-btn"
+                :disabled="!authed || likeBusy || roomOffline || !canWatch"
+                @click="likeRoom"
+              >
+                ♥ {{ likeCount }}
+              </button>
+              <span v-if="wsStatus" class="muted ws-pill">ws: {{ wsStatus }}</span>
+            </div>
           </div>
-          <div v-if="authed && payProducts.length" class="pay-packs">
-            <p class="muted">Coin packs (pay mock)</p>
+
+          <!-- Channel row: host chip · more (creator) -->
+          <div v-if="hasRoom" class="channel-row" data-testid="channel-row">
+            <span class="channel-chip">
+              <span class="channel-avatar" aria-hidden="true" />
+              <span class="channel-meta">
+                <span class="channel-name">{{ ownerId ? ownerId.slice(0, 8) : 'Host' }}</span>
+                <span class="muted channel-id mono">{{ roomId.slice(0, 8) }}…</span>
+              </span>
+            </span>
+            <details v-if="authed && creator" class="channel-more">
+              <summary class="ghost channel-more-btn">⋯</summary>
+              <section class="panel creator" data-testid="creator-panel">
+                <div class="panel-head">
+                  <h2>Creator</h2>
+                  <button type="button" class="ghost" @click="refreshCreator">Refresh</button>
+                </div>
+                <p class="muted">
+                  followers {{ creator.followerCount }} · following {{ creator.followingCount }} · live
+                  {{ creator.liveRooms }}/{{ creator.totalRooms }} · gift coins
+                  {{ creator.giftCoinsReceived }}
+                </p>
+                <p v-if="creatorHint" class="hint">{{ creatorHint }}</p>
+              </section>
+            </details>
+            <button
+              v-else
+              type="button"
+              class="ghost"
+              :disabled="!roomId.trim()"
+              @click="shareRoom"
+            >
+              Share
+            </button>
+          </div>
+
+          <details v-if="canWatch && hlsUrl" class="hls-details">
+            <summary class="mono dim">HLS URL</summary>
+            <p class="mono dim">{{ hlsUrl }}</p>
+          </details>
+        </div>
+
+        <div class="side-col">
+          <!-- Chat panel — show whenever room is known (not only while HLS is up) -->
+          <section
+            v-if="hasRoom && !roomTerminal"
+            class="panel chat chat-panel"
+            data-testid="chat-panel"
+          >
+            <div class="panel-head">
+              <h2>Live chat</h2>
+              <button type="button" class="ghost" @click="refreshMessages">Refresh</button>
+            </div>
+            <ul class="msg-list">
+              <li v-for="m in messages" :key="m.id">
+                <strong>{{ m.senderName || m.senderId.slice(0, 6) }}</strong>
+                <span>{{ m.body }}</span>
+              </li>
+              <li v-if="!messages.length" class="muted empty-msg">No messages yet</li>
+            </ul>
+            <div v-if="authed && canWatch" class="row composer">
+              <input v-model="chatBody" placeholder="Say something…" @keyup.enter="sendChat" />
+              <button type="button" class="btn primary" :disabled="chatBusy" @click="sendChat">Send</button>
+            </div>
+            <p v-else-if="authed && roomOffline" class="muted">Room offline — chat send disabled</p>
+            <p v-else-if="authed && !canWatch" class="muted">Waiting for live stream — chat send disabled</p>
+            <p v-else class="muted">
+              <button type="button" class="link" @click="loginOpen = true">Login</button>
+              to send chat
+            </p>
+            <p v-if="chatHint" class="hint">{{ chatHint }}</p>
+          </section>
+
+          <!-- Gift dock — catalog visible for any loaded room; send still requires live + auth -->
+          <section
+            v-if="hasRoom && !roomTerminal"
+            class="panel gifts gift-dock"
+            data-testid="gift-dock"
+          >
+            <div class="panel-head">
+              <h2>Gifts</h2>
+              <span v-if="authed" class="chip balance-chip">{{ balance }} coins</span>
+            </div>
+            <div v-if="authed" class="row topup">
+              <input v-model.number="topupAmount" type="number" min="1" placeholder="Topup amount" />
+              <button type="button" :disabled="giftBusy" @click="doTopup">Top up (legacy mock)</button>
+              <button type="button" class="ghost" :disabled="giftBusy" @click="refreshBalance">Refresh</button>
+            </div>
+            <div v-if="authed && payProducts.length" class="pay-packs">
+              <p class="muted">Coin packs (pay mock)</p>
+              <div class="gift-bar">
+                <button
+                  v-for="p in payProducts"
+                  :key="p.id"
+                  type="button"
+                  class="gift-btn"
+                  :disabled="payBusy"
+                  @click="buyCoins(p)"
+                >
+                  {{ p.title }}
+                  <span class="price">{{ p.amount }} {{ p.currency }}</span>
+                </button>
+              </div>
+              <p v-if="payHint" class="hint">{{ payHint }}</p>
+            </div>
             <div class="gift-bar">
               <button
-                v-for="p in payProducts"
-                :key="p.id"
+                v-for="g in gifts"
+                :key="g.id"
                 type="button"
                 class="gift-btn"
-                :disabled="payBusy"
-                @click="buyCoins(p)"
+                :disabled="giftBusy || !authed || !canWatch"
+                @click="sendGift(g)"
               >
-                {{ p.title }}
-                <span class="price">{{ p.amount }} {{ p.currency }}</span>
+                {{ g.name }}
+                <span class="price">{{ g.price }}</span>
               </button>
+              <p v-if="!gifts.length" class="muted">No gifts in catalog</p>
             </div>
-            <p v-if="payHint" class="hint">{{ payHint }}</p>
-          </div>
-          <div class="gift-bar">
-            <button
-              v-for="g in gifts"
-              :key="g.id"
-              type="button"
-              class="gift-btn"
-              :disabled="giftBusy || !authed || !canWatch"
-              @click="sendGift(g)"
-            >
-              {{ g.name }}
-              <span class="price">{{ g.price }}</span>
-            </button>
-            <p v-if="!gifts.length" class="muted">No gifts in catalog</p>
-          </div>
-          <p v-if="!authed" class="muted">
-            <button type="button" class="link" @click="loginOpen = true">Login</button>
-            to send gifts &amp; top up
-          </p>
-          <p v-else-if="!canWatch" class="muted">Gifts send when the room is live</p>
-          <p v-if="giftHint" class="hint">{{ giftHint }}</p>
-        </section>
+            <p v-if="!authed" class="muted">
+              <button type="button" class="link" @click="loginOpen = true">Login</button>
+              to send gifts &amp; top up
+            </p>
+            <p v-else-if="!canWatch" class="muted">Gifts send when the room is live</p>
+            <p v-if="giftHint" class="hint">{{ giftHint }}</p>
+          </section>
+        </div>
       </div>
-    </div>
+    </template>
   </main>
 </template>
 
@@ -1465,7 +1574,8 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
   border-bottom: 1px solid var(--border);
 }
 
-.brand h1 {
+.brand h1,
+.brand {
   display: flex;
   align-items: center;
   gap: 0.45rem;
@@ -1473,6 +1583,64 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
   font-size: 1rem;
   font-weight: 650;
   letter-spacing: 0.01em;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.brand-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 650;
+}
+
+.brand-btn:hover .brand-name {
+  color: #e0b3ff;
+}
+
+.brand-name {
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.top-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-left: 0.35rem;
+}
+
+.nav-link {
+  padding: 0.25rem 0.55rem;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.nav-link.active,
+.nav-link:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.nav-sep {
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.nav-watch-label {
+  font-size: var(--fs-sm);
+  font-weight: 500;
 }
 
 .logo-mark {
@@ -1483,6 +1651,138 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
   box-shadow: 0 0 12px var(--accent-glow);
   flex-shrink: 0;
+}
+
+/* --- Home discover --- */
+.home-view {
+  margin-top: 0.25rem;
+}
+
+.home-hero {
+  margin: 0.5rem 0 1rem;
+}
+
+.home-title {
+  margin: 0 0 0.25rem;
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.home-sub {
+  margin: 0;
+  font-size: var(--fs-sm);
+}
+
+.home-search {
+  margin: 0 0 0.75rem;
+}
+
+.home-search-hits {
+  margin-bottom: 1rem;
+  max-height: 160px;
+}
+
+.home-grid {
+  list-style: none;
+  margin: 0 0 1.25rem;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.85rem;
+}
+
+.home-card {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--bg-elevated);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.12s ease;
+}
+
+.home-card:hover {
+  border-color: var(--border-accent);
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+}
+
+.home-card-thumb {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background:
+    linear-gradient(135deg, rgba(200, 80, 255, 0.18), transparent 55%),
+    linear-gradient(180deg, #1a1a1a, #0a0a0a);
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 0.55rem;
+}
+
+.home-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.65rem 0.75rem 0.75rem;
+}
+
+.home-card-title {
+  font-weight: 650;
+  font-size: var(--fs-sm);
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.home-card-id {
+  font-size: var(--fs-xs);
+}
+
+.home-skeleton {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.85rem;
+  margin-bottom: 1.25rem;
+}
+
+.home-skel-card {
+  aspect-ratio: 16 / 10;
+  border-radius: var(--radius-md);
+}
+
+.home-empty {
+  padding: 1.5rem 0.5rem;
+  text-align: center;
+}
+
+.home-tools {
+  margin-top: 0.5rem;
+}
+
+.watch-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin: 0 0 0.5rem;
+}
+
+.back-home {
+  flex-shrink: 0;
+}
+
+.watch-tools {
+  flex: 1;
+  min-width: min(100%, 240px);
+  margin: 0;
 }
 
 /* LIVE: red bg + white text (never magenta) */

@@ -1,26 +1,23 @@
-# H5 Watch UX — YouTube Live alignment (RoomWatch mirror)
+# H5 Watch UX — YouTube Live alignment (Home + RoomWatch)
 
 > **Product:** AnyLive (overseas show-live)  
 > **Surface:** `apps/h5-web` (Vue 3 + Vite, **single-page**, no router)  
 > **Companion:** [flutter-youtube-ux.md](./flutter-youtube-ux.md)  
-> **Status:** UX-1 visual/IA · 2026-07-23  
-> **Scope:** Dark watch chrome + shared tokens only — **no new APIs**, no Shorts, no new PK UI
+> **Status:** Home + RoomWatch · 2026-07-23  
+> **Scope:** Dark discover + watch chrome + shared tokens — **no Vue Router**, no new APIs, no Shorts, no new PK UI
 
 ---
 
 ## 1. Goal
 
-Mirror Flutter **RoomWatch** information architecture in H5 so mobile APK and web share one product feel:
+Two surfaces in one SPA (view switch, not a router):
 
-| Priority | Element |
-|---|---|
-| 1 | 16:9 player stage (black) above the fold |
-| 2 | Meta (LIVE · title · watching · like) |
-| 3 | Channel row (host chip · more / share) |
-| 4 | Live chat |
-| 5 | Gift dock (horizontal pills + balance) |
+| View | When | Purpose |
+|---|---|---|
+| **Home** | cold open, no `?room=`, or after “← Home” | Discover: hot feed cards + search |
+| **Watch** | `?room=<uuid>` deep link, or card / UUID open | RoomWatch: player + meta + chat + gifts |
 
-Guest watch stays optional (login is not forced). Login / privacy / search / room UUID tools stay as overlays or collapsible helpers — not primary chrome.
+Guest watch stays optional (login is not forced). Login / privacy stay overlays.
 
 ---
 
@@ -58,20 +55,31 @@ Source of truth in code: `apps/h5-web/src/style.css` `:root`.
 ## 3. Layout wireframe (single `main.page`)
 
 ```
-header.topbar          brand · LIVE chip (canWatch) · auth
-[details util]         room UUID load · share · search (collapsed by default)
+header.topbar          brand(→Home) · Home nav · LIVE(watch) · auth
 [login / privacy]      overlays when toggled
+
+── view = home ──
+.home-view
+  hero “Live now”
+  search row
+  .home-grid           LiveCards (16:9 thumb + title + LIVE)
+  details tools        paste UUID
+
+── view = watch ──
+.watch-toolbar         ← Home · room tools
 .watch-layout
   .primary-col
     .player-stage      video | room-ended | room-offline | placeholder
     .meta-row          LIVE · title · watching · like  (#room-stats)
     .channel-row       host chip · ⋯ creator | Share
   .side-col            (stacks under primary on <900px)
-    .chat-panel        msg list + composer
-    .gift-dock         sticky bottom (mobile) · horizontal .gift-bar
+    .chat-panel
+    .gift-dock
 ```
 
-Desktop `≥900px`: CSS grid `1fr | 340px` with sticky side column.
+Desktop `≥900px` (watch only): CSS grid `1fr | 340px` with sticky side column.
+
+Deep link: `?room=<uuid>` → enter watch + `history.replaceState` keeps URL in sync; Home clears `room` query.
 
 ---
 
@@ -80,28 +88,35 @@ Desktop `≥900px`: CSS grid `1fr | 340px` with sticky side column.
 **`data-testid` (do not rename)**  
 `login-panel`, `verify-otp`, `age-confirmed`, `privacy-accepted`, `privacy-panel`, `export-data`, `delete-account`, `export-json`, `search-panel`, `pk-banner`, `creator-panel`, `room-ended`, `room-offline`.
 
+**Added (Home / nav)**  
+`home-view`, `watch-view`, `hot-feed`, `nav-home`, `back-home`, `room-id-input`, `load-room`.
+
 **Must not**
 
 - Vue Router / multi-page SPA  
 - New backend APIs  
 - Shorts UI / new PK controls  
 - Force-login for guest watch  
+- Auto-open a room as the “home” landing  
 
 ---
 
-## 5. Acceptance (H5 UX-1)
+## 5. Acceptance
 
-- [x] Open room UUID → player stage dominates above fold  
+### UX-1 RoomWatch
+
+- [x] Open room UUID / card → player stage dominates above fold  
 - [x] Meta + channel visible without scrolling past chat first  
 - [x] Chat + gifts usable without leaving page  
 - [x] Offline / ended testids still queryable  
 - [x] Shared surfaces `#0F0F0F` / `#212121` / stage black; LIVE red; CTA magenta  
 - [x] English primary UI strings for end/offline  
 
-### UX-2 / empty-shell fix (solo · 2026-07-23)
+### Home + empty-shell fix (solo · 2026-07-23)
 
-- [x] Cold open without `?room=` shows **Live now** hot feed (not player-only void)  
-- [x] Room tools `<details>` auto-open when no room; collapses after load  
+- [x] Cold open **is Home** (hot grid), not a room / player shell  
+- [x] Card click / search / UUID → Watch; `?room=` deep link still works  
+- [x] Top brand + **← Home** leave watch and clear room state / query  
 - [x] Meta / channel / chat / gift dock bind to `hasRoom` (not only `canWatch`)  
 - [x] Gift catalog + chat history load for known rooms even if HLS not ready  
 - [x] Room title from API in meta row  
@@ -113,7 +128,7 @@ Desktop `≥900px`: CSS grid `1fr | 340px` with sticky side column.
 | Path | Role |
 |---|---|
 | `apps/h5-web/src/style.css` | Shared token `:root` |
-| `apps/h5-web/src/App.vue` | RoomWatch template + scoped layout |
+| `apps/h5-web/src/App.vue` | Home + RoomWatch views (no router) |
 | `apps/h5-web/src/lib/chatApi.ts` | Paths/parsers incl. `feedHotPath` |
 | `apps/h5-web/index.html` | `theme-color` `#0F0F0F`, title |
 | `docs/product/flutter-youtube-ux.md` | Flutter counterpart |
