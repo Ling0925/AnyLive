@@ -72,7 +72,10 @@ const apiBase = import.meta.env.VITE_API_BASE ?? 'http://localhost:8088'
 type AppView = 'home' | 'watch'
 const view = ref<AppView>('home')
 
+/** Live room identity (do not bind util inputs to this — use draftRoomId). */
 const roomId = ref('')
+/** Draft for room-id tool inputs so typing does not mutate watch identity. */
+const draftRoomId = ref('')
 const status = ref('')
 const roomTitle = ref('')
 const ownerId = ref('')
@@ -82,6 +85,8 @@ const loading = ref(false)
 const shareHint = ref('')
 const videoEl = ref<HTMLVideoElement | null>(null)
 let detach: (() => void) | null = null
+/** Bumps on each enterWatch/loadRoom so stale fetches cannot clobber the UI. */
+let loadSeq = 0
 
 /** Public hot rooms for Home discover grid. */
 const hotRooms = ref<FeedRoom[]>([])
@@ -169,14 +174,13 @@ function syncRoomQuery(id: string) {
   }
 }
 
-/** Leave RoomWatch and show Home discover. */
-function goHome() {
+/** Tear down polls/player/chat state without changing the SPA surface. */
+function resetWatchRuntime() {
   stopStatusPoll()
   stopChatPoll()
   stopPresencePoll()
   stopCentrifugo()
   teardownPlayer()
-  roomId.value = ''
   status.value = ''
   roomTitle.value = ''
   ownerId.value = ''
@@ -193,17 +197,37 @@ function goHome() {
   giftHint.value = ''
   pk.value = null
   shareHint.value = ''
+}
+
+function setDocumentTitle(title: string) {
+  try {
+    document.title = title
+  } catch {
+    // non-browser
+  }
+}
+
+/** Leave RoomWatch and show Home discover. */
+function goHome() {
+  loadSeq += 1
+  resetWatchRuntime()
+  roomId.value = ''
+  draftRoomId.value = ''
   view.value = 'home'
   syncRoomQuery('')
+  setDocumentTitle('AnyLive')
   void loadHotFeed()
 }
 
 function enterWatch(id: string) {
   const next = id.trim()
   if (!next) return
+  resetWatchRuntime()
   roomId.value = next
+  draftRoomId.value = next
   view.value = 'watch'
   syncRoomQuery(next)
+  setDocumentTitle(`Room ${next.slice(0, 8)} · AnyLive`)
   void loadRoom()
 }
 
@@ -411,18 +435,8 @@ async function pollRoomStatus() {
           stopChatPoll()
         }
       } else if (!wasLive && isLiveStatus(next)) {
-        // Idle → live: re-fetch play URL.
-        try {
-          const playRes = await fetch(`${apiBase}/api/v1/rooms/${id}/media/play`)
-          if (playRes.ok) {
-            const play = await playRes.json()
-            hlsUrl.value = play.hls ?? ''
-          }
-        } catch {
-          // play may lag until OBS
-        }
-        startPresencePoll()
-        void refreshGifts()
+        // Idle → live: re-fetch play URL + reconnect realtime (shared path).
+        await onBecameLive(id)
       }
     } else if (typeof room.title === 'string' && room.title && room.title !== roomTitle.value) {
       roomTitle.value = room.title
@@ -655,7 +669,7 @@ function pickSearchRoom(id: string) {
 }
 
 function loadRoomFromInput() {
-  const id = roomId.value.trim()
+  const id = draftRoomId.value.trim() || roomId.value.trim()
   if (!id) {
     error.value = 'Enter a room id'
     return
@@ -663,31 +677,60 @@ function loadRoomFromInput() {
   enterWatch(id)
 }
 
+/** Idle→live (or first live attach): HLS + optional Centrifugo + presence. */
+async function onBecameLive(id: string, seq?: number) {
+  try {
+    const playRes = await fetch(`${apiBase}/api/v1/rooms/${id}/media/play`)
+    if (seq != null && seq !== loadSeq) return
+    if (playRes.ok) {
+      const play = await playRes.json()
+      if (seq != null && seq !== loadSeq) return
+      hlsUrl.value = play.hls ?? buildPlayUrl('http://localhost:8080/live', id)
+    }
+  } catch {
+    // play may lag until OBS
+  }
+  if (seq != null && seq !== loadSeq) return
+  if (authed.value) {
+    void tryConnectCentrifugo()
+    startPresencePoll()
+  }
+  void refreshGifts()
+}
+
 async function loadRoom() {
+  const seq = ++loadSeq
+  const id = roomId.value.trim()
   error.value = ''
   shareHint.value = ''
   hlsUrl.value = ''
+  // Keep roomId; clear derived fields so failed reloads do not keep stale chrome.
   status.value = ''
   roomTitle.value = ''
   ownerId.value = ''
   messages.value = []
   gifts.value = []
+  giftOverlay.value = ''
   loading.value = true
   try {
-    const id = roomId.value.trim()
     if (!id) {
       error.value = 'Enter a room id'
       return
     }
     const roomRes = await fetch(`${apiBase}/api/v1/rooms/${id}`)
+    if (seq !== loadSeq) return
     if (!roomRes.ok) {
       error.value = `room ${roomRes.status}`
       return
     }
     const room = await roomRes.json()
+    if (seq !== loadSeq) return
     status.value = typeof room.status === 'string' ? room.status : ''
     roomTitle.value = typeof room.title === 'string' ? room.title : ''
     ownerId.value = typeof room.owner_id === 'string' ? room.owner_id : ''
+    if (roomTitle.value) {
+      setDocumentTitle(`${roomTitle.value} · AnyLive`)
+    }
     // Always poll status so idle→live and closed are visible without full reload.
     startStatusPoll()
 
@@ -711,21 +754,11 @@ async function loadRoom() {
       return
     }
 
-    const playRes = await fetch(`${apiBase}/api/v1/rooms/${id}/media/play`)
-    if (!playRes.ok) {
-      error.value = `play ${playRes.status}`
-      return
-    }
-    const play = await playRes.json()
-    hlsUrl.value = play.hls ?? buildPlayUrl('http://localhost:8080/live', id)
-    if (authed.value) {
-      void tryConnectCentrifugo()
-      startPresencePoll()
-    }
+    await onBecameLive(id, seq)
   } catch (e) {
-    error.value = String(e)
+    if (seq === loadSeq) error.value = String(e)
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 
@@ -1299,7 +1332,7 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
       <details class="util-details home-tools">
         <summary class="util-summary muted">Paste room UUID · Tools</summary>
         <div class="util-strip row">
-          <input v-model="roomId" placeholder="Room UUID" data-testid="room-id-input" />
+          <input v-model="draftRoomId" placeholder="Room UUID" data-testid="room-id-input" />
           <button
             type="button"
             class="btn primary"
@@ -1327,11 +1360,10 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
         <details class="util-details watch-tools">
           <summary class="util-summary muted">Room tools</summary>
           <div class="util-strip row">
-            <input v-model="roomId" placeholder="Room UUID" />
+            <input v-model="draftRoomId" placeholder="Room UUID" data-testid="watch-room-id-input" />
             <button type="button" class="btn primary" :disabled="loading" @click="loadRoomFromInput">
               Load
             </button>
-            <button type="button" class="ghost" :disabled="!roomId.trim()" @click="shareRoom">Share</button>
           </div>
         </details>
       </div>
@@ -1380,12 +1412,23 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
               Loading room…
             </div>
 
+            <div
+              v-else-if="error && !hasRoom"
+              class="player player-placeholder"
+              data-testid="room-load-error"
+              role="alert"
+            >
+              <p class="ended-title">Could not load room</p>
+              <p class="muted">{{ error }}</p>
+              <button type="button" class="ghost" @click="goHome">Back to Home</button>
+            </div>
+
             <div v-else class="player player-placeholder">
               <p class="muted">
                 {{
                   hasRoom
                     ? `status: ${status}${hlsUrl ? '' : ' · waiting for stream'}`
-                    : 'Loading room…'
+                    : 'Pick a room from Home or paste a room id'
                 }}
               </p>
             </div>
@@ -1415,7 +1458,7 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
             </div>
           </div>
 
-          <!-- Channel row: host chip · more (creator) -->
+          <!-- Channel row: host chip · Share always · creator under ⋯ -->
           <div v-if="hasRoom" class="channel-row" data-testid="channel-row">
             <span class="channel-chip">
               <span class="channel-avatar" aria-hidden="true" />
@@ -1424,30 +1467,32 @@ async function trackEvent(name: string, props?: Record<string, unknown>) {
                 <span class="muted channel-id mono">{{ roomId.slice(0, 8) }}…</span>
               </span>
             </span>
-            <details v-if="authed && creator" class="channel-more">
-              <summary class="ghost channel-more-btn">⋯</summary>
-              <section class="panel creator" data-testid="creator-panel">
-                <div class="panel-head">
-                  <h2>Creator</h2>
-                  <button type="button" class="ghost" @click="refreshCreator">Refresh</button>
-                </div>
-                <p class="muted">
-                  followers {{ creator.followerCount }} · following {{ creator.followingCount }} · live
-                  {{ creator.liveRooms }}/{{ creator.totalRooms }} · gift coins
-                  {{ creator.giftCoinsReceived }}
-                </p>
-                <p v-if="creatorHint" class="hint">{{ creatorHint }}</p>
-              </section>
-            </details>
-            <button
-              v-else
-              type="button"
-              class="ghost"
-              :disabled="!roomId.trim()"
-              @click="shareRoom"
-            >
-              Share
-            </button>
+            <div class="channel-actions">
+              <button
+                type="button"
+                class="ghost"
+                data-testid="share-room"
+                :disabled="!roomId.trim()"
+                @click="shareRoom"
+              >
+                Share
+              </button>
+              <details v-if="authed && creator" class="channel-more">
+                <summary class="ghost channel-more-btn">⋯</summary>
+                <section class="panel creator" data-testid="creator-panel">
+                  <div class="panel-head">
+                    <h2>Creator</h2>
+                    <button type="button" class="ghost" @click="refreshCreator">Refresh</button>
+                  </div>
+                  <p class="muted">
+                    followers {{ creator.followerCount }} · following {{ creator.followingCount }} · live
+                    {{ creator.liveRooms }}/{{ creator.totalRooms }} · gift coins
+                    {{ creator.giftCoinsReceived }}
+                  </p>
+                  <p v-if="creatorHint" class="hint">{{ creatorHint }}</p>
+                </section>
+              </details>
+            </div>
           </div>
 
           <details v-if="canWatch && hlsUrl" class="hls-details">
@@ -2229,6 +2274,13 @@ button.danger {
 
 .channel-id {
   font-size: var(--fs-xs);
+}
+
+.channel-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
 }
 
 .channel-more {
