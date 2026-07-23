@@ -87,6 +87,9 @@ class _RoomPageState extends State<RoomPage> {
   Timer? _statusPoll;
   Timer? _chatPoll;
   Timer? _presencePoll;
+  Timer? _chromeHide;
+  /// Player chrome (title strip) — tap stage to toggle.
+  bool _playerChromeVisible = true;
   int _onlineCount = 0;
   int _likeCount = 0;
   String? _giftOverlay;
@@ -334,9 +337,80 @@ class _RoomPageState extends State<RoomPage> {
     _statusPoll?.cancel();
     _chatPoll?.cancel();
     _presencePoll?.cancel();
+    _chromeHide?.cancel();
     _wsStop?.call();
     _chatController.dispose();
     super.dispose();
+  }
+
+  void _togglePlayerChrome() {
+    setState(() => _playerChromeVisible = !_playerChromeVisible);
+    _chromeHide?.cancel();
+    if (_playerChromeVisible && _room.isLive) {
+      _chromeHide = Timer(const Duration(seconds: 3), () {
+        if (mounted) setState(() => _playerChromeVisible = false);
+      });
+    }
+  }
+
+  Future<void> _shareRoom() async {
+    final base = widget.config.normalizedApiBaseUrl;
+    // H5 deep link on same host family when possible; fall back to room id.
+    final host = Uri.tryParse(base)?.host ?? 'localhost';
+    final scheme = Uri.tryParse(base)?.scheme ?? 'http';
+    // Prefer known local H5 preview port for dogfood; path is ?room=
+    final shareUrl = '$scheme://$host:5173/?room=${_room.id}';
+    await Clipboard.setData(ClipboardData(text: shareUrl));
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AnyColors.bgElevated,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'Share live',
+                  style: TextStyle(
+                    color: AnyColors.textPrimary,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  shareUrl,
+                  style: const TextStyle(
+                    color: AnyColors.textSecondary,
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                FilledButton.icon(
+                  key: const Key('room-share-copy'),
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: shareUrl));
+                    Navigator.of(ctx).pop();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Link copied')),
+                    );
+                  },
+                  icon: const Icon(Icons.link),
+                  label: const Text('Copy link'),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _load() async {
@@ -498,14 +572,12 @@ class _RoomPageState extends State<RoomPage> {
         _balance = balance;
         _giftOverlay = gift.name;
       });
+      HapticFeedback.lightImpact();
       Future<void>.delayed(const Duration(milliseconds: 1800), () {
         if (mounted && _giftOverlay == gift.name) {
           setState(() => _giftOverlay = null);
         }
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Sent ${gift.name}')),
-      );
       unawaited(_events.track(
         'gift.tap',
         props: {'room_id': _room.id, 'gift_id': gift.id},
@@ -833,6 +905,10 @@ class _RoomPageState extends State<RoomPage> {
         child: Text('Like ($_likeCount)'),
       ),
       const PopupMenuItem(
+        value: 'share',
+        child: Text('Share'),
+      ),
+      const PopupMenuItem(
         value: 'report',
         child: Text('Report'),
       ),
@@ -932,6 +1008,8 @@ class _RoomPageState extends State<RoomPage> {
     switch (value) {
       case 'like':
         _likeRoom();
+      case 'share':
+        _shareRoom();
       case 'report':
         _reportRoom();
       case 'refresh':
@@ -1016,13 +1094,15 @@ class _RoomPageState extends State<RoomPage> {
                       child: ListView(
                         padding: EdgeInsets.zero,
                         children: [
-                          // 1) PlayerStage (black)
+                          // 1) PlayerStage (black) — tap toggles chrome
                           _PlayerStage(
                             room: _room,
                             hlsUrl: _room.isLive ? _hlsUrl : null,
                             roomOffline: _roomOffline,
                             roomTerminal: _roomTerminal,
                             giftOverlay: _giftOverlay,
+                            chromeVisible: _playerChromeVisible,
+                            onToggleChrome: _togglePlayerChrome,
                           ),
                           // 2) Meta row: LIVE + online + title + likes
                           _MetaRow(
@@ -1258,6 +1338,8 @@ class _PlayerStage extends StatelessWidget {
     required this.hlsUrl,
     required this.roomOffline,
     required this.roomTerminal,
+    required this.chromeVisible,
+    required this.onToggleChrome,
     this.giftOverlay,
   });
 
@@ -1265,6 +1347,8 @@ class _PlayerStage extends StatelessWidget {
   final String? hlsUrl;
   final bool roomOffline;
   final bool roomTerminal;
+  final bool chromeVisible;
+  final VoidCallback onToggleChrome;
   final String? giftOverlay;
 
   @override
@@ -1280,51 +1364,118 @@ class _PlayerStage extends StatelessWidget {
 
     return ColoredBox(
       color: AnyColors.bgPlayer,
-      child: Stack(
-        children: [
-          StreamPreview(
-            status: room.status,
-            hlsUrl: hlsUrl,
-          ),
-          Positioned(
-            left: 0,
-            top: 0,
-            child: Opacity(
-              opacity: 0,
-              child: Text(room.status, key: Key(statusKey)),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onToggleChrome,
+        child: Stack(
+          children: [
+            StreamPreview(
+              status: room.status,
+              hlsUrl: hlsUrl,
             ),
-          ),
-          if (giftOverlay != null)
-            Positioned.fill(
+            Positioned(
+              left: 0,
+              top: 0,
+              child: Opacity(
+                opacity: 0,
+                child: Text(room.status, key: Key(statusKey)),
+              ),
+            ),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
               child: IgnorePointer(
-                child: Center(
-                  child: AnimatedOpacity(
-                    opacity: 1,
-                    duration: const Duration(milliseconds: 200),
-                    child: Container(
-                      key: const Key('gift-overlay'),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                        vertical: 12,
+                child: AnimatedOpacity(
+                  opacity: chromeVisible ? 1 : 0,
+                  duration: const Duration(milliseconds: 200),
+                  child: Container(
+                    padding: const EdgeInsets.fromLTRB(12, 28, 12, 10),
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Color(0x00000000),
+                          Color(0x99000000),
+                        ],
                       ),
-                      decoration: BoxDecoration(
-                        color: AnyColors.accent.withValues(alpha: 0.9),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Text(
-                        giftOverlay!,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
+                    ),
+                    child: Row(
+                      children: [
+                        if (room.isLive && !roomOffline)
+                          const LiveBadge(compact: true)
+                        else
+                          Text(
+                            roomTerminal ? 'ENDED' : room.status.toUpperCase(),
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            room.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            if (giftOverlay != null)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: Center(
+                    child: TweenAnimationBuilder<double>(
+                      key: ValueKey(giftOverlay),
+                      tween: Tween(begin: 0.85, end: 1.0),
+                      duration: const Duration(milliseconds: 280),
+                      curve: Curves.easeOutBack,
+                      builder: (context, scale, child) {
+                        return Transform.scale(scale: scale, child: child);
+                      },
+                      child: Container(
+                        key: const Key('gift-overlay'),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 12,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AnyColors.accent.withValues(alpha: 0.92),
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Color(0x66C850FF),
+                              blurRadius: 18,
+                            ),
+                          ],
+                        ),
+                        child: Text(
+                          giftOverlay!,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
                     ),
                   ),
                 ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1495,24 +1646,28 @@ class _ChannelRow extends StatelessWidget {
               ],
             ),
           ),
-          if (following)
-            OutlinedButton(
-              onPressed: busy ? null : onToggle,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AnyColors.textSecondary,
-                side: const BorderSide(color: Color(0x33FFFFFF)),
-                visualDensity: VisualDensity.compact,
-              ),
-              child: const Text('Unfollow'),
-            )
-          else
-            FilledButton(
-              onPressed: busy || ownerId.isEmpty ? null : onToggle,
-              style: FilledButton.styleFrom(
-                visualDensity: VisualDensity.compact,
-              ),
-              child: const Text('Follow'),
-            ),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 200),
+            child: following
+                ? OutlinedButton(
+                    key: const ValueKey('unfollow'),
+                    onPressed: busy ? null : onToggle,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AnyColors.textSecondary,
+                      side: const BorderSide(color: Color(0x33FFFFFF)),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    child: const Text('Unfollow'),
+                  )
+                : FilledButton(
+                    key: const ValueKey('follow'),
+                    onPressed: busy || ownerId.isEmpty ? null : onToggle,
+                    style: FilledButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    child: const Text('Follow'),
+                  ),
+          ),
         ],
       ),
     );

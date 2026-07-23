@@ -455,13 +455,13 @@ P1 以验证漏斗为主，不做复杂分析后台。
 5. 结束态 / 禁言 / 举报入口  
 6. Go Live OBS 信息页  
 
-### Phase UX-2（体验加分）
+### Phase UX-2（体验加分）— 2026-07-23 落地（solo）
 
-1. 骨架屏、下拉刷新、空态插画  
-2. 搜索页  
-3. 礼物轻动效、关注动画  
-4. 分享 sheet  
-5. Player 手势（显示/隐藏控制条）  
+1. ~~骨架屏、下拉刷新、空态插画~~ → `FeedSkeleton` + 空态圆标；RefreshIndicator 保留  
+2. 搜索页（完整独立页后置）→ Home 顶栏 **圆角搜索** 已加强  
+3. ~~礼物轻动效、关注动画~~ → gift scale + haptic；Follow `AnimatedSwitcher`  
+4. ~~分享 sheet~~ → 房间 ⋯ → Share 底栏复制 H5 `?room=` 链  
+5. ~~Player 手势~~ → 点舞台切换底部 chrome（3s 自动隐）  
 
 ### Phase UX-3（后置）
 

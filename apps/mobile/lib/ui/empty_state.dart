@@ -33,14 +33,25 @@ class EmptyState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 48, color: AnyColors.textSecondary),
-            const SizedBox(height: 16),
+            Container(
+              width: 88,
+              height: 88,
+              decoration: BoxDecoration(
+                color: AnyColors.bgElevated,
+                shape: BoxShape.circle,
+                border: Border.all(color: AnyColors.border),
+              ),
+              alignment: Alignment.center,
+              child: Icon(icon, size: 40, color: AnyColors.textSecondary),
+            ),
+            const SizedBox(height: 18),
             Text(
               message,
               textAlign: TextAlign.center,
               style: const TextStyle(
                 color: AnyColors.textSecondary,
                 fontSize: 15,
+                height: 1.35,
               ),
             ),
             if (label != null && action != null) ...[

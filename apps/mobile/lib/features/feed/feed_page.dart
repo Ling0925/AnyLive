@@ -8,6 +8,7 @@ import '../../api/rooms_repository.dart';
 import '../../api/social_repository.dart';
 import '../../config/app_config.dart';
 import '../../ui/empty_state.dart';
+import '../../ui/feed_skeleton.dart';
 import '../../ui/live_card.dart';
 import '../rooms/room_page.dart';
 
@@ -214,17 +215,26 @@ class _FeedPageState extends State<FeedPage>
     VoidCallback? onEmptyCta,
   }) {
     if (loading) {
-      return const Center(child: CircularProgressIndicator());
+      return RefreshIndicator(
+        onRefresh: () async => onRetry(),
+        child: const FeedSkeleton(count: 4),
+      );
     }
     if (error != null) {
       return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(error),
-            const SizedBox(height: 8),
-            TextButton(onPressed: onRetry, child: const Text('Retry')),
-          ],
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.wifi_off_rounded,
+                  size: 40, color: Color(0xFFAAAAAA)),
+              const SizedBox(height: 12),
+              Text(error, textAlign: TextAlign.center),
+              const SizedBox(height: 12),
+              FilledButton(onPressed: onRetry, child: const Text('Retry')),
+            ],
+          ),
         ),
       );
     }
@@ -301,9 +311,16 @@ class _FeedPageState extends State<FeedPage>
         decoration: InputDecoration(
           hintText: 'Search rooms or users',
           isDense: true,
-          border: const OutlineInputBorder(),
+          filled: true,
+          fillColor: const Color(0xFF121212),
+          prefixIcon: const Icon(Icons.search, size: 20),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(24),
+            borderSide: BorderSide.none,
+          ),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           suffixIcon: IconButton(
-            icon: const Icon(Icons.search),
+            icon: const Icon(Icons.arrow_forward_rounded, size: 20),
             onPressed: () => _runSearch(_searchController.text),
           ),
         ),
