@@ -1206,7 +1206,7 @@ onMounted(() => {
       <div class="login-orb o2" />
       <div class="login-grid" />
     </div>
-    <div class="login-shell" style="max-width: 360px; grid-template-columns: 1fr">
+    <div class="login-shell" style="max-width: min(360px, 100%); grid-template-columns: minmax(0, 1fr)">
       <div class="login-restoring login-card">
         <div class="login-spinner" />
         <p class="lead">{{ t('login.restoring') }}</p>
@@ -1414,8 +1414,11 @@ onMounted(() => {
           <div class="avatar">{{ avatarLetter }}</div>
           <div>
             <div style="font-weight: 600">{{ displayName || 'operator' }}</div>
-            <div class="dim mono" style="font-size: 0.72rem; display: flex; gap: 0.4rem; align-items: center">
-              <span>{{ shortId(userId, 10) }}</span>
+            <div
+              class="dim mono"
+              style="font-size: 0.72rem; display: flex; gap: 0.35rem; align-items: center; min-width: 0; flex-wrap: wrap"
+            >
+              <span style="overflow: hidden; text-overflow: ellipsis">{{ shortId(userId, 10) }}</span>
               <span
                 class="role-pill"
                 :class="{ admin: isAdmin === true }"
@@ -1464,10 +1467,10 @@ onMounted(() => {
               <h2>{{ t('dashboard.demoPrep') }}</h2>
             </div>
             <p class="panel-desc">{{ t('dashboard.demoPrepDesc') }}</p>
-            <ul class="muted" style="margin: 0.25rem 0 0.5rem; padding-left: 1.2rem; font-size: 0.88rem">
+            <ul class="muted" style="margin: 0.25rem 0 0.5rem; padding-left: 1.2rem; font-size: 0.88rem; overflow-wrap: anywhere">
               <li v-for="(line, i) in prepHints.lines" :key="i">{{ line }}</li>
             </ul>
-            <div class="row" style="gap: 0.5rem; flex-wrap: wrap; align-items: center">
+            <div class="row" style="gap: 0.5rem; flex-wrap: wrap; align-items: center; min-width: 0">
               <code class="mono" data-testid="demo-prep-gift-seed">{{ prepHints.giftSeedCmd }}</code>
               <button
                 type="button"
@@ -1536,7 +1539,7 @@ onMounted(() => {
             <pre
               v-if="metricsText"
               class="mono"
-              style="max-height: 180px; overflow: auto; font-size: 11px; margin-top: 0.5rem"
+              style="max-height: 180px; max-width: 100%; overflow: auto; font-size: 11px; margin-top: 0.5rem; white-space: pre-wrap; word-break: break-all"
             >{{ metricsText.slice(0, 4000) }}</pre>
           </section>
 
@@ -1863,7 +1866,7 @@ onMounted(() => {
                 data-testid="rooms-search"
               />
             </label>
-            <label class="field" style="max-width: 160px">
+            <label class="field" style="max-width: min(160px, 100%)">
               <span>{{ t('common.filter') }}</span>
               <select v-model="roomStatusFilter" data-testid="rooms-status-filter">
                 <option value="all">{{ t('rooms.filterAll') }}</option>
@@ -1971,7 +1974,7 @@ onMounted(() => {
             </button>
           </div>
           <p class="panel-desc">{{ t('reports.desc') }}</p>
-          <label class="field" style="max-width: 420px">
+          <label class="field" style="max-width: min(420px, 100%)">
             <span>{{ t('reports.note') }}</span>
             <input
               v-model="actionReason"
@@ -2090,7 +2093,7 @@ onMounted(() => {
                 data-testid="gift-name"
               />
             </label>
-            <label class="field" style="max-width: 160px">
+            <label class="field" style="max-width: min(160px, 100%)">
               <span>{{ t('gifts.price') }}</span>
               <input
                 v-model="giftPrice"
@@ -2101,7 +2104,7 @@ onMounted(() => {
                 data-testid="gift-price"
               />
             </label>
-            <label v-if="giftEditId" class="field" style="max-width: 140px">
+            <label v-if="giftEditId" class="field" style="max-width: min(140px, 100%)">
               <span>{{ t('gifts.status') }}</span>
               <select v-model="giftEditActive" data-testid="gift-active">
                 <option :value="true">{{ t('gifts.active') }}</option>
@@ -2206,7 +2209,7 @@ onMounted(() => {
           <p class="panel-desc">{{ t('moderation.desc') }}</p>
           <p class="danger-note">{{ t('moderation.dangerHint') }}</p>
 
-          <label class="field" style="max-width: 480px">
+          <label class="field" style="max-width: min(480px, 100%)">
             <span>{{ t('moderation.reason') }}</span>
             <input
               v-model="actionReason"
