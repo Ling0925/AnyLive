@@ -42,7 +42,23 @@ export function buildShareUrl(href: string, roomId: string): string {
   }
 }
 
-/** True when the room is no longer watchable (idle or closed). */
+/**
+ * Permanent end (force-close / closed). Host stop returns `idle` — not permanent.
+ * Prefer [isRoomOffline] for “not watchable” (includes temporary host stop).
+ */
+export function isRoomTerminal(status: string): boolean {
+  return status === 'closed' || status === 'ended'
+}
+
+/** Not watchable: idle (host stop) or terminal closed/ended. */
+export function isRoomOffline(status: string): boolean {
+  return status === 'idle' || isRoomTerminal(status)
+}
+
+/**
+ * @deprecated Prefer [isRoomOffline] for “not watchable” and [isRoomTerminal] for permanent end.
+ * Kept for call-site compatibility; matches offline (idle + closed).
+ */
 export function isRoomEnded(status: string): boolean {
-  return status === 'closed' || status === 'idle'
+  return isRoomOffline(status)
 }

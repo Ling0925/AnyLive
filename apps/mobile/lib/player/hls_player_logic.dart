@@ -9,10 +9,19 @@ bool shouldShowPlayer(String status, String? hlsUrl) {
   return url.isNotEmpty;
 }
 
+/// Terminal room statuses (force-close / permanent end). Host stop is `idle`, not terminal.
+bool isRoomTerminalStatus(String status) =>
+    status == 'closed' || status == 'ended';
+
+/// Not watchable (includes temporary host stop → idle).
+bool isRoomOfflineStatus(String status) =>
+    status == 'idle' || isRoomTerminalStatus(status);
+
 /// Human-readable placeholder when the player is not shown or not embedded.
 String playerPlaceholderMessage(String status, String? hlsUrl) {
-  final ended = status == 'closed' || status == 'idle' || status == 'ended';
-  if (ended) return 'Room ended';
+  if (isRoomTerminalStatus(status)) return 'Room ended';
+  // Host stop returns idle — not a permanent end; room can go live again.
+  if (status == 'idle') return 'Stream offline';
   if (status != 'live') return 'Stream offline';
   final url = hlsUrl?.trim() ?? '';
   if (url.isEmpty) return 'Live — play URL unavailable';

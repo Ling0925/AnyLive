@@ -24,10 +24,16 @@ void main() {
   });
 
   group('playerPlaceholderMessage', () {
-    test('ended statuses', () {
+    test('terminal statuses', () {
       expect(playerPlaceholderMessage('closed', null), 'Room ended');
-      expect(playerPlaceholderMessage('idle', null), 'Room ended');
       expect(playerPlaceholderMessage('ended', 'x'), 'Room ended');
+    });
+
+    test('idle is offline (host stop), not permanent end', () {
+      expect(playerPlaceholderMessage('idle', null), 'Stream offline');
+      expect(isRoomTerminalStatus('idle'), isFalse);
+      expect(isRoomOfflineStatus('idle'), isTrue);
+      expect(isRoomTerminalStatus('closed'), isTrue);
     });
 
     test('offline non-ended', () {

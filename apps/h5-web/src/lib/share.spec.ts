@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { buildShareUrl, isRoomEnded, readRoomFromQuery } from './share'
+import {
+  buildShareUrl,
+  isRoomEnded,
+  isRoomOffline,
+  isRoomTerminal,
+  readRoomFromQuery,
+} from './share'
 
 describe('readRoomFromQuery', () => {
   it('reads room from ?room=', () => {
@@ -43,11 +49,20 @@ describe('buildShareUrl', () => {
   })
 })
 
-describe('isRoomEnded', () => {
-  it('treats closed and idle as ended', () => {
+describe('isRoomEnded / offline / terminal', () => {
+  it('treats closed and idle as offline (isRoomEnded alias)', () => {
     expect(isRoomEnded('closed')).toBe(true)
     expect(isRoomEnded('idle')).toBe(true)
     expect(isRoomEnded('live')).toBe(false)
     expect(isRoomEnded('')).toBe(false)
+  })
+
+  it('distinguishes terminal closed vs temporary idle', () => {
+    expect(isRoomTerminal('closed')).toBe(true)
+    expect(isRoomTerminal('ended')).toBe(true)
+    expect(isRoomTerminal('idle')).toBe(false)
+    expect(isRoomOffline('idle')).toBe(true)
+    expect(isRoomOffline('closed')).toBe(true)
+    expect(isRoomOffline('live')).toBe(false)
   })
 })
