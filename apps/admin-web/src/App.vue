@@ -38,7 +38,6 @@ const {
   fillBanFromLookup,
   fillMuteFromLookup,
   filteredAudit,
-  filteredRooms,
   forceCloseRoom,
   formatTs,
   giftBusy,
@@ -92,6 +91,7 @@ const {
   otpSent,
   pageBlurb,
   pageTitle,
+  pagedRooms,
   password,
   passwordLogin,
   prepHints,
@@ -112,6 +112,8 @@ const {
   resolveReport,
   revokeUserSessions,
   roomIdInput,
+  roomListMeta,
+  roomPageSize,
   roomQuery,
   roomStatusFilter,
   roomStatusTone,
@@ -125,6 +127,7 @@ const {
   sessionRestoring,
   sessionRoleLabel,
   setLocale,
+  setRoomPage,
   setTheme,
   setUserStatus,
   shortId,
@@ -931,7 +934,7 @@ void previewVideoEl
                 data-testid="rooms-search"
               />
             </label>
-            <label class="field" style="max-width: min(160px, 100%)">
+            <label class="field field-sm">
               <span>{{ t('common.filter') }}</span>
               <select v-model="roomStatusFilter" data-testid="rooms-status-filter">
                 <option value="all">{{ t('rooms.filterAll') }}</option>
@@ -940,65 +943,88 @@ void previewVideoEl
                 <option value="closed">{{ t('status.closed') }}</option>
               </select>
             </label>
+            <label class="field field-sm">
+              <span>{{ t('common.pageSize') }}</span>
+              <select v-model.number="roomPageSize" data-testid="rooms-page-size">
+                <option :value="10">10</option>
+                <option :value="20">20</option>
+                <option :value="50">50</option>
+              </select>
+            </label>
           </div>
 
-          <div class="table-wrap" v-if="filteredRooms.length" data-testid="rooms-table">
-            <table class="data">
+          <div class="list-meta" v-if="roomListMeta.total" data-testid="rooms-meta">
+            <span>{{ t('rooms.resultCount', { n: roomListMeta.total }) }}</span>
+            <span class="dim">{{
+              t('common.showing', {
+                from: roomListMeta.from,
+                to: roomListMeta.to,
+                total: roomListMeta.total,
+              })
+            }}</span>
+          </div>
+
+          <div class="table-wrap is-dense" v-if="pagedRooms.length" data-testid="rooms-table">
+            <table class="data data-rooms">
               <thead>
                 <tr>
-                  <th>{{ t('rooms.colTitle') }}</th>
-                  <th>{{ t('rooms.colStatus') }}</th>
-                  <th>{{ t('rooms.colOwner') }}</th>
-                  <th>{{ t('rooms.colId') }}</th>
-                  <th>{{ t('common.actions') }}</th>
+                  <th class="col-title">{{ t('rooms.colTitle') }}</th>
+                  <th class="col-status">{{ t('rooms.colStatus') }}</th>
+                  <th class="col-owner">{{ t('rooms.colOwner') }}</th>
+                  <th class="col-id">{{ t('rooms.colId') }}</th>
+                  <th class="col-actions">{{ t('common.actions') }}</th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="r in filteredRooms" :key="r.id" :data-testid="`room-row-${r.id}`">
-                  <td>{{ r.title }}</td>
-                  <td>
+                <tr v-for="r in pagedRooms" :key="r.id" :data-testid="`room-row-${r.id}`">
+                  <td class="col-title" :title="r.title">{{ r.title }}</td>
+                  <td class="col-status">
                     <span class="badge" :class="roomStatusTone(r.status)">{{
                       statusLabel(r.status)
                     }}</span>
                   </td>
-                  <td class="mono">{{ shortId(r.owner_id || '') }}</td>
-                  <td class="mono" :title="r.id">{{ shortId(r.id) }}</td>
+                  <td class="col-owner mono" :title="r.owner_id || ''">{{
+                    shortId(r.owner_id || '')
+                  }}</td>
+                  <td class="col-id mono" :title="r.id">{{ shortId(r.id) }}</td>
                   <td class="actions">
-                    <button
-                      type="button"
-                      class="btn sm"
-                      data-testid="room-preview"
-                      :disabled="previewBusy"
-                      @click="previewRoom(r)"
-                    >
-                      {{ t('rooms.preview') }}
-                    </button>
-                    <button
-                      type="button"
-                      class="btn sm primary"
-                      data-testid="room-publish-info"
-                      :disabled="goLiveBusy || !isAuthed || r.status === 'closed'"
-                      @click="loadPublishForRoom(r.id)"
-                    >
-                      {{ t('rooms.publishInfo') }}
-                    </button>
-                    <button
-                      type="button"
-                      class="btn sm"
-                      data-testid="room-fill-force-close"
-                      @click="useRoomId(r.id)"
-                    >
-                      {{ t('rooms.fillForceClose') }}
-                    </button>
-                    <button
-                      type="button"
-                      class="btn sm danger"
-                      data-testid="room-force-close"
-                      :disabled="actionBusy || r.status === 'closed'"
-                      @click="forceCloseRoom(r.id)"
-                    >
-                      {{ t('rooms.forceClose') }}
-                    </button>
+                    <div class="row-actions">
+                      <button
+                        type="button"
+                        class="btn sm"
+                        data-testid="room-preview"
+                        :disabled="previewBusy"
+                        @click="previewRoom(r)"
+                      >
+                        {{ t('rooms.preview') }}
+                      </button>
+                      <button
+                        type="button"
+                        class="btn sm primary"
+                        data-testid="room-publish-info"
+                        :disabled="goLiveBusy || !isAuthed || r.status === 'closed'"
+                        @click="loadPublishForRoom(r.id)"
+                      >
+                        {{ t('rooms.publishInfo') }}
+                      </button>
+                      <button
+                        type="button"
+                        class="btn sm"
+                        data-testid="room-fill-force-close"
+                        @click="useRoomId(r.id)"
+                      >
+                        {{ t('rooms.fillForceClose') }}
+                      </button>
+                      <button
+                        type="button"
+                        class="btn sm danger"
+                        data-testid="room-force-close"
+                        :disabled="actionBusy || r.status === 'closed'"
+                        @click="forceCloseRoom(r.id)"
+                      >
+                        {{ t('rooms.forceClose') }}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               </tbody>
@@ -1007,6 +1033,34 @@ void previewVideoEl
           <div v-else class="empty" data-testid="rooms-empty">
             <div class="empty-icon">◎</div>
             {{ t('rooms.empty') }}
+          </div>
+
+          <div
+            v-if="roomListMeta.total > 0"
+            class="pager"
+            data-testid="rooms-pager"
+          >
+            <button
+              type="button"
+              class="btn sm"
+              data-testid="rooms-page-prev"
+              :disabled="roomListMeta.page <= 1"
+              @click="setRoomPage(roomListMeta.page - 1)"
+            >
+              {{ t('common.prev') }}
+            </button>
+            <span class="pager-label">{{
+              t('common.page', { page: roomListMeta.page, pages: roomListMeta.pages })
+            }}</span>
+            <button
+              type="button"
+              class="btn sm"
+              data-testid="rooms-page-next"
+              :disabled="roomListMeta.page >= roomListMeta.pages"
+              @click="setRoomPage(roomListMeta.page + 1)"
+            >
+              {{ t('common.next') }}
+            </button>
           </div>
 
           <div v-if="previewRoomId" class="preview" data-testid="room-preview-panel">

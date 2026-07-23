@@ -171,6 +171,9 @@ const audit = ref<
 
 const roomQuery = ref('')
 const roomStatusFilter = ref('all')
+/** Client-side page for rooms table (API returns full list). */
+const roomPage = ref(1)
+const roomPageSize = ref(20)
 const auditQuery = ref('')
 
 const error = ref('')
@@ -265,6 +268,41 @@ const bootstrapClosed = ref(false)
 const filteredRooms = computed(() =>
   filterRooms(rooms.value, roomQuery.value, roomStatusFilter.value),
 )
+const roomTotalPages = computed(() =>
+  Math.max(1, Math.ceil(filteredRooms.value.length / roomPageSize.value)),
+)
+const pagedRooms = computed(() => {
+  const size = roomPageSize.value
+  const page = Math.min(Math.max(1, roomPage.value), roomTotalPages.value)
+  const start = (page - 1) * size
+  return filteredRooms.value.slice(start, start + size)
+})
+const roomListMeta = computed(() => {
+  const total = filteredRooms.value.length
+  const pages = roomTotalPages.value
+  const page = Math.min(Math.max(1, roomPage.value), pages)
+  const size = roomPageSize.value
+  return {
+    total,
+    page,
+    pages,
+    size,
+    from: total === 0 ? 0 : (page - 1) * size + 1,
+    to: Math.min(page * size, total),
+  }
+})
+
+watch([roomQuery, roomStatusFilter, roomPageSize], () => {
+  roomPage.value = 1
+})
+watch(roomTotalPages, (pages) => {
+  if (roomPage.value > pages) roomPage.value = pages
+})
+
+function setRoomPage(next: number) {
+  roomPage.value = Math.min(Math.max(1, next), roomTotalPages.value)
+}
+
 const filteredAudit = computed(() => filterAudit(audit.value, auditQuery.value))
 
 const adminGateHint = computed(() =>
@@ -1717,6 +1755,12 @@ onMounted(() => {
     audit,
     roomQuery,
     roomStatusFilter,
+    roomPage,
+    roomPageSize,
+    roomTotalPages,
+    pagedRooms,
+    roomListMeta,
+    setRoomPage,
     auditQuery,
     error,
     notice,

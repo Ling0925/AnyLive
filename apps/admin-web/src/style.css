@@ -833,6 +833,96 @@ table.data td.actions {
   max-width: none;
 }
 
+.row-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+  max-width: 100%;
+}
+
+.table-wrap.is-dense {
+  max-height: min(62vh, 720px);
+}
+
+table.data-rooms {
+  min-width: 880px;
+  table-layout: fixed;
+}
+
+table.data-rooms th,
+table.data-rooms td {
+  max-width: none;
+}
+
+table.data-rooms .col-title {
+  width: 22%;
+}
+
+table.data-rooms .col-status {
+  width: 7.5rem;
+}
+
+table.data-rooms .col-owner {
+  width: 8.5rem;
+}
+
+table.data-rooms .col-id {
+  width: 8.5rem;
+}
+
+table.data-rooms .col-actions {
+  width: 42%;
+}
+
+table.data-rooms td.col-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+table.data-rooms td.actions {
+  white-space: normal;
+}
+
+table.data-rooms .row-actions .btn {
+  flex: 0 0 auto;
+}
+
+.field-sm {
+  flex: 0 1 140px;
+  max-width: 160px;
+}
+
+.list-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  margin: 0.15rem 0 0.55rem;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.55rem;
+  margin-top: 0.75rem;
+}
+
+.pager-label {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 7rem;
+  text-align: center;
+}
+
+
 table.data td.mono,
 table.data .mono {
   white-space: nowrap;
