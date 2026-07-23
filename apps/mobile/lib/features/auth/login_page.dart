@@ -25,12 +25,12 @@ class LoginPage extends StatefulWidget {
   /// Injectable for tests; when null a real [AuthRepository] is created.
   final AuthRepository? authRepository;
 
-  /// Builds a [ProfileRepository] after OTP verify (token already on [ApiClient]).
+  /// Builds a [ProfileRepository] after login (token already on [ApiClient]).
   final ProfileRepository Function(ApiClient client)? profileRepositoryFactory;
 
   final SessionStore? sessionStore;
 
-  /// When set, called after successful verify instead of pushReplacement alone.
+  /// When set, called after successful login instead of pushReplacement alone.
   final void Function(AuthSession session)? onLoggedIn;
 
   @override
@@ -38,6 +38,8 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
+  final _identifier = TextEditingController();
+  final _password = TextEditingController();
   final _email = TextEditingController();
   final _code = TextEditingController(text: '123456');
   late final ApiClient _api;
@@ -45,8 +47,10 @@ class _LoginPageState extends State<LoginPage> {
   String? _error;
   bool _busy = false;
   bool _otpSent = false;
+  bool _showDevOtp = false;
   bool _ageConfirmed = false;
   bool _privacyAccepted = false;
+  bool _obscurePassword = true;
 
   @override
   void initState() {
@@ -57,9 +61,86 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   void dispose() {
+    _identifier.dispose();
+    _password.dispose();
     _email.dispose();
     _code.dispose();
     super.dispose();
+  }
+
+  Future<void> _completeLogin(AuthSession session, {required String method}) async {
+    if (_ageConfirmed || _privacyAccepted) {
+      try {
+        final profileClient = ApiClient(
+          baseUrl: widget.config.normalizedApiBaseUrl,
+          accessToken: session.accessToken,
+        );
+        final profile = widget.profileRepositoryFactory != null
+            ? widget.profileRepositoryFactory!(profileClient)
+            : ProfileRepository(client: profileClient);
+        await profile.patchMe(
+          ageConfirmed: _ageConfirmed ? true : null,
+          privacyAccepted: _privacyAccepted ? true : null,
+        );
+      } catch (_) {}
+    }
+
+    try {
+      await widget.sessionStore?.save(session);
+    } catch (_) {}
+
+    try {
+      final eventsClient = ApiClient(
+        baseUrl: widget.config.normalizedApiBaseUrl,
+        accessToken: session.accessToken,
+      );
+      unawaited(
+        EventsRepository(client: eventsClient).track(
+          'auth.login',
+          props: {'method': method},
+        ),
+      );
+    } catch (_) {}
+
+    if (!mounted) return;
+    if (widget.onLoggedIn != null) {
+      widget.onLoggedIn!(session);
+      Navigator.of(context).pop();
+    } else {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => HomePage(
+            config: widget.config,
+            sessionLabel: session.displayName.isEmpty
+                ? (session.email ?? session.username ?? session.userId)
+                : session.displayName,
+            accessToken: session.accessToken,
+            sessionStore: widget.sessionStore,
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _passwordLogin() async {
+    if (!_ageConfirmed) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final session = await _auth.passwordLogin(
+        identifier: _identifier.text.trim(),
+        password: _password.text,
+      );
+      await _completeLogin(session, method: 'password');
+    } on AuthException catch (e) {
+      setState(() => _error = e.toString());
+    } catch (e) {
+      setState(() => _error = e.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _sendOtp() async {
@@ -79,7 +160,7 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  Future<void> _verify() async {
+  Future<void> _verifyOtp() async {
     if (!_ageConfirmed) return;
     setState(() {
       _busy = true;
@@ -90,59 +171,7 @@ class _LoginPageState extends State<LoginPage> {
         email: _email.text.trim(),
         code: _code.text.trim(),
       );
-
-      if (_ageConfirmed || _privacyAccepted) {
-        try {
-          final profileClient = ApiClient(
-            baseUrl: widget.config.normalizedApiBaseUrl,
-            accessToken: session.accessToken,
-          );
-          final profile = widget.profileRepositoryFactory != null
-              ? widget.profileRepositoryFactory!(profileClient)
-              : ProfileRepository(client: profileClient);
-          await profile.patchMe(
-            ageConfirmed: _ageConfirmed ? true : null,
-            privacyAccepted: _privacyAccepted ? true : null,
-          );
-        } catch (_) {}
-      }
-
-      try {
-        await widget.sessionStore?.save(session);
-      } catch (_) {}
-
-      // Best-effort analytics (must not block login).
-      try {
-        final eventsClient = ApiClient(
-          baseUrl: widget.config.normalizedApiBaseUrl,
-          accessToken: session.accessToken,
-        );
-        unawaited(
-          EventsRepository(client: eventsClient).track(
-            'auth.login',
-            props: {'method': 'otp'},
-          ),
-        );
-      } catch (_) {}
-
-      if (!mounted) return;
-      if (widget.onLoggedIn != null) {
-        widget.onLoggedIn!(session);
-        Navigator.of(context).pop();
-      } else {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (_) => HomePage(
-              config: widget.config,
-              sessionLabel: session.displayName.isEmpty
-                  ? session.email ?? session.userId
-                  : session.displayName,
-              accessToken: session.accessToken,
-              sessionStore: widget.sessionStore,
-            ),
-          ),
-        );
-      }
+      await _completeLogin(session, method: 'otp');
     } on AuthException catch (e) {
       setState(() => _error = e.toString());
     } catch (e) {
@@ -154,35 +183,50 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
-    final canVerify = _otpSent && _ageConfirmed && !_busy;
-    final canSend = !_otpSent && !_busy;
+    final canPasswordLogin = !_busy &&
+        _ageConfirmed &&
+        _identifier.text.trim().isNotEmpty &&
+        _password.text.isNotEmpty;
+    final canVerifyOtp = _otpSent && _ageConfirmed && !_busy;
+    final canSendOtp = !_otpSent && !_busy;
 
     return Scaffold(
       appBar: AppBar(title: const Text('AnyLive Login')),
       body: Padding(
         padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+        child: ListView(
           children: [
             TextField(
-              controller: _email,
+              controller: _identifier,
               keyboardType: TextInputType.emailAddress,
+              autocorrect: false,
+              onChanged: (_) => setState(() {}),
               decoration: const InputDecoration(
-                labelText: 'Email',
+                labelText: 'Email or username',
                 border: OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 12),
-            if (_otpSent) ...[
-              TextField(
-                controller: _code,
-                decoration: const InputDecoration(
-                  labelText: 'OTP (dev: 123456)',
-                  border: OutlineInputBorder(),
+            TextField(
+              controller: _password,
+              obscureText: _obscurePassword,
+              onChanged: (_) => setState(() {}),
+              onSubmitted: (_) {
+                if (canPasswordLogin) _passwordLogin();
+              },
+              decoration: InputDecoration(
+                labelText: 'Password',
+                border: const OutlineInputBorder(),
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _obscurePassword ? Icons.visibility : Icons.visibility_off,
+                  ),
+                  onPressed: () =>
+                      setState(() => _obscurePassword = !_obscurePassword),
                 ),
               ),
-              const SizedBox(height: 12),
-            ],
+            ),
+            const SizedBox(height: 12),
             CheckboxListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('I confirm I am 18 or older'),
@@ -208,16 +252,48 @@ class _LoginPageState extends State<LoginPage> {
               ),
             const SizedBox(height: 12),
             FilledButton(
-              onPressed: _otpSent
-                  ? (canVerify ? _verify : null)
-                  : (canSend ? _sendOtp : null),
-              child: Text(
-                _busy
-                    ? 'Please wait…'
-                    : (_otpSent ? 'Verify & continue' : 'Send OTP'),
-              ),
+              onPressed: canPasswordLogin ? _passwordLogin : null,
+              child: Text(_busy && !_showDevOtp ? 'Please wait…' : 'Sign in'),
             ),
-            const Spacer(),
+            const SizedBox(height: 16),
+            ExpansionTile(
+              title: const Text('Dev OTP (local only)'),
+              initiallyExpanded: _showDevOtp,
+              onExpansionChanged: (v) => setState(() => _showDevOtp = v),
+              children: [
+                TextField(
+                  controller: _email,
+                  keyboardType: TextInputType.emailAddress,
+                  decoration: const InputDecoration(
+                    labelText: 'Email',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                if (_otpSent) ...[
+                  TextField(
+                    controller: _code,
+                    decoration: const InputDecoration(
+                      labelText: 'OTP (dev: 123456)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                FilledButton.tonal(
+                  onPressed: _otpSent
+                      ? (canVerifyOtp ? _verifyOtp : null)
+                      : (canSendOtp ? _sendOtp : null),
+                  child: Text(
+                    _busy && _showDevOtp
+                        ? 'Please wait…'
+                        : (_otpSent ? 'Verify & continue' : 'Send OTP'),
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
+            const SizedBox(height: 24),
             Text(
               'Privacy Policy',
               style: Theme.of(context).textTheme.labelLarge,

@@ -13,7 +13,7 @@ pub use interactive::{
     DEFAULT_PK_DURATION_SECS,
 };
 pub use room::{Room, RoomStatus};
-pub use user::User;
+pub use user::{User, UserStatus};
 
 /// Newtype helpers for strong IDs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

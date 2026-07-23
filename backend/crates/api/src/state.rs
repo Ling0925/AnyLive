@@ -4,11 +4,12 @@ use std::sync::Arc;
 
 use anylive_auth::{
     otp_notifier_from_env, AuthService, JwtConfig, JwtService, NoopOtpNotifier, OtpConfig,
-    OtpService, SharedOtpNotifier,
+    OtpService, PasswordPolicy, SharedOtpNotifier,
 };
 use anylive_db::{
-    postgres_enabled, AnyChat, AnyDeletedUsers, AnyModeration, AnyOtpStore, AnyProfileExtras,
-    AnyRefreshStore, AnyReports, AnySocial, AnyPayStore, AnyUserStore, AnyWallet, PgPool,
+    postgres_enabled, AnyChat, AnyCredentialStore, AnyDeletedUsers, AnyModeration, AnyOtpStore,
+    AnyProfileExtras, AnyRefreshStore, AnyReports, AnySocial, AnyPayStore, AnyUserStore, AnyWallet,
+    PgPool,
 };
 use anylive_media::SrsMediaProvider;
 use anylive_pay::{PayChannelRegistry, PayStore};
@@ -23,8 +24,9 @@ use crate::guards::{
 use crate::rate_limit::IpRateLimiter;
 use crate::rooms::AnyRoomStore;
 
-/// Auth service with pluggable user + OTP + refresh stores (memory default, Postgres when enabled).
-pub type AppAuthService = AuthService<AnyUserStore, AnyOtpStore, AnyRefreshStore>;
+/// Auth service with pluggable user + OTP + refresh + credential stores.
+pub type AppAuthService =
+    AuthService<AnyUserStore, AnyOtpStore, AnyRefreshStore, AnyCredentialStore>;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -173,6 +175,7 @@ impl AppState {
             AnyUserStore::memory(),
             otp,
             AnyRefreshStore::memory(),
+            AnyCredentialStore::memory(),
             jwt,
             Arc::new(NoopOtpNotifier) as SharedOtpNotifier,
         );
@@ -345,7 +348,14 @@ impl AppState {
         };
 
         let otp = OtpService::new(otp_store, otp_cfg);
-        let auth = AuthService::with_notifier(users, otp, refresh, jwt, notifier);
+        let credentials = if db.is_some() {
+            // Re-read: postgres dual store when pool present (from_env sets db above).
+            AnyCredentialStore::postgres(db.clone().expect("db pool"))
+        } else {
+            AnyCredentialStore::memory()
+        };
+        let auth = AuthService::with_notifier(users, otp, refresh, credentials, jwt, notifier)
+            .with_password_policy(PasswordPolicy::from_env());
         let allow_mock_topup = mock_topup_allowed();
         if allow_mock_topup {
             tracing::warn!("ALLOW_MOCK_TOPUP=1: mock wallet topup is enabled");

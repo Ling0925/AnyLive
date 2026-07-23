@@ -5,7 +5,7 @@
 //! Other flags remain open for local/dev unless overridden.
 //!
 //! Env:
-//! - `FEATURE_PUBLIC_REGISTER=0` — force invite-only style registration (pairs with INVITE_ONLY)
+//! - `FEATURE_PUBLIC_REGISTER=1` — allow OTP/OAuth self-register (default **off** for Wave A password+admin provision)
 //! - `FEATURE_REAL_PAY=0` — refuse non-mock pay channel order creation
 //! - `FEATURE_PK=1` — enable PK start (default **off**)
 //! - `FEATURE_COHOST=1` — enable co-host invites (default **off**)
@@ -24,9 +24,9 @@ pub struct FeatureFlags {
 
 impl Default for FeatureFlags {
     fn default() -> Self {
-        // Match from_env() P1-safe defaults: PK/cohost off; rest open for local.
+        // Match from_env() P1-safe defaults: public register / PK / cohost off.
         Self {
-            public_register: true,
+            public_register: false,
             real_pay: true,
             pk: false,
             cohost: false,
@@ -48,7 +48,8 @@ impl FeatureFlags {
 
     pub fn from_env() -> Self {
         Self {
-            public_register: env_flag("FEATURE_PUBLIC_REGISTER", true),
+            // Wave A: admin-provisioned accounts are the default; OTP self-register is opt-in.
+            public_register: env_flag("FEATURE_PUBLIC_REGISTER", false),
             real_pay: env_flag("FEATURE_REAL_PAY", true),
             // P3 surfaces: default OFF until explicitly enabled (plan 06 §8.1).
             pk: env_flag("FEATURE_PK", false),
@@ -132,7 +133,7 @@ mod tests {
         let f = FeatureFlags::default();
         assert!(!f.pk);
         assert!(!f.cohost);
-        assert!(f.public_register);
+        assert!(!f.public_register);
         assert!(f.client_events);
     }
 }

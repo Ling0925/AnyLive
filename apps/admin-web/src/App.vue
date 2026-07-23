@@ -11,6 +11,11 @@ import {
   auditPath,
   authErrorMessage,
   banUserPath,
+  unbanUserPath,
+  adminUsersPath,
+  adminResetPasswordPath,
+  adminRevokeSessionsPath,
+  passwordLoginPath,
   buildHls,
   classifyAdminGrant,
   clearAdminSession,
@@ -69,9 +74,11 @@ const isAdmin = ref<boolean | null>(null)
 const sessionRestoring = ref(true)
 
 const email = ref('')
+const password = ref('')
 const otpCode = ref('')
 const loginBusy = ref(false)
 const otpSent = ref(false)
+const useOtpLogin = ref(false)
 const resendCooldown = ref(0)
 let resendTimer: ReturnType<typeof setInterval> | null = null
 
@@ -156,6 +163,30 @@ const analyticsByName = ref<Array<{ name: string; count: number }>>([])
 const analyticsRecent = ref<
   Array<{ id: string; user_id: string; name: string; occurred_at: string }>
 >([])
+
+// --- users admin ---
+type AdminUserRow = {
+  id: string
+  display_name: string
+  email?: string | null
+  username?: string | null
+  status: string
+  created_at: string
+  banned: boolean
+  muted: boolean
+  admin_role?: string | null
+  must_change_password: boolean
+}
+const usersList = ref<AdminUserRow[]>([])
+const usersTotal = ref(0)
+const usersQuery = ref('')
+const usersBusy = ref(false)
+const createDisplayName = ref('')
+const createUsername = ref('')
+const createEmail = ref('')
+const createPassword = ref('')
+const createBusy = ref(false)
+const tempPasswordNotice = ref('')
 
 const isAuthed = computed(() => Boolean(accessToken.value))
 const liveCount = computed(() => countByStatus(rooms.value, 'live'))
@@ -331,6 +362,9 @@ function go(key: AdminNavKey) {
   nav.value = key
   notice.value = ''
   error.value = ''
+  if (key === 'users' && accessToken.value) {
+    void loadUsers()
+  }
 }
 
 async function previewRoom(room: { id: string; status: string }) {
@@ -431,10 +465,11 @@ async function refreshLists() {
   try {
     const tasks: Promise<void>[] = [loadRooms(), loadGifts()]
     if (isAuthed.value) {
-      tasks.push(loadReports(), loadAudit())
+      tasks.push(loadReports(), loadAudit(), loadUsers())
     } else {
       reports.value = []
       audit.value = []
+      usersList.value = []
     }
     await Promise.all(tasks)
     if (isAdmin.value === true) {
@@ -590,6 +625,57 @@ async function sendOtp() {
   }
 }
 
+async function applySessionFromAuth(data: {
+  access_token?: string
+  refresh_token?: string
+  user?: { display_name?: string; email?: string; id?: string; username?: string }
+}) {
+  accessToken.value = data.access_token ?? null
+  refreshToken.value = data.refresh_token ?? ''
+  displayName.value =
+    data.user?.display_name ?? data.user?.username ?? data.user?.email ?? email.value
+  userId.value = data.user?.id ?? ''
+  isAdmin.value = null
+  persistSession()
+  notice.value = t('flash.loginOk')
+  nav.value = 'dashboard'
+  if (userId.value) {
+    await tryBootstrapAdmin(userId.value)
+  }
+  await refreshLists()
+}
+
+async function passwordLogin() {
+  notice.value = ''
+  error.value = ''
+  const id = email.value.trim()
+  if (!id || !password.value) {
+    error.value = t('flash.needEmail')
+    return
+  }
+  loginBusy.value = true
+  try {
+    const res = await apiFetch(apiUrl(apiBase, passwordLoginPath()), {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        identifier: id,
+        password: password.value,
+      }),
+    })
+    if (!res.ok) {
+      const bodyText = await res.text().catch(() => '')
+      throw new Error(authErrorMessage(res.status, bodyText, locale.value))
+    }
+    const data = await res.json()
+    await applySessionFromAuth(data)
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    loginBusy.value = false
+  }
+}
+
 async function verifyOtp() {
   notice.value = ''
   error.value = ''
@@ -608,19 +694,7 @@ async function verifyOtp() {
       throw new Error(authErrorMessage(res.status, bodyText, locale.value))
     }
     const data = await res.json()
-    accessToken.value = data.access_token ?? null
-    refreshToken.value = data.refresh_token ?? ''
-    displayName.value = data.user?.display_name ?? data.user?.email ?? email.value
-    userId.value = data.user?.id ?? ''
-    isAdmin.value = null
-    persistSession()
-    notice.value = t('flash.loginOk')
-    nav.value = 'dashboard'
-    // Bootstrap first admin if needed; surface closed-bootstrap so ops can seed.
-    if (userId.value) {
-      await tryBootstrapAdmin(userId.value)
-    }
-    await refreshLists()
+    await applySessionFromAuth(data)
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -988,6 +1062,164 @@ async function banUser() {
     notice.value = t('moderation.banned', { id: shortId(id) })
     userIdInput.value = ''
     await loadAudit()
+    await loadUsers()
+  } catch (e) {
+    error.value = String(e)
+  } finally {
+    actionBusy.value = false
+  }
+}
+
+async function loadUsers() {
+  if (!accessToken.value) return
+  usersBusy.value = true
+  try {
+    const q = usersQuery.value.trim()
+    const path = q
+      ? `${adminUsersPath()}?q=${encodeURIComponent(q)}&limit=50`
+      : `${adminUsersPath()}?limit=50`
+    const res = await apiFetch(apiUrl(apiBase, path), { headers: authHeaders() })
+    if (!res.ok) {
+      if (isAdminForbidden(res.status)) {
+        isAdmin.value = false
+      }
+      throw new Error(`users ${res.status}`)
+    }
+    const data = await res.json()
+    usersList.value = Array.isArray(data.items) ? data.items : []
+    usersTotal.value = Number(data.total ?? usersList.value.length)
+  } catch (e) {
+    error.value = String(e)
+  } finally {
+    usersBusy.value = false
+  }
+}
+
+async function createUser() {
+  if (!accessToken.value) {
+    error.value = t('flash.needLogin')
+    return
+  }
+  if (!createDisplayName.value.trim()) {
+    error.value = t('users.displayName')
+    return
+  }
+  createBusy.value = true
+  notice.value = ''
+  error.value = ''
+  tempPasswordNotice.value = ''
+  try {
+    const body: Record<string, unknown> = {
+      display_name: createDisplayName.value.trim(),
+    }
+    if (createUsername.value.trim()) body.username = createUsername.value.trim()
+    if (createEmail.value.trim()) body.email = createEmail.value.trim()
+    if (createPassword.value) body.password = createPassword.value
+    const res = await apiFetch(apiUrl(apiBase, adminUsersPath()), {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify(body),
+    })
+    if (res.status !== 201) {
+      const text = await res.text().catch(() => '')
+      throw new Error(`create ${res.status} ${text}`)
+    }
+    const data = await res.json()
+    notice.value = t('users.created')
+    if (data.temporary_password) {
+      tempPasswordNotice.value = `${t('users.tempPassword')}: ${data.temporary_password}`
+    }
+    createDisplayName.value = ''
+    createUsername.value = ''
+    createEmail.value = ''
+    createPassword.value = ''
+    await loadUsers()
+  } catch (e) {
+    error.value = String(e)
+  } finally {
+    createBusy.value = false
+  }
+}
+
+async function resetUserPassword(id: string) {
+  if (!accessToken.value) return
+  actionBusy.value = true
+  tempPasswordNotice.value = ''
+  try {
+    const res = await apiFetch(apiUrl(apiBase, adminResetPasswordPath(id)), {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ must_change_password: true }),
+    })
+    if (!res.ok) throw new Error(`reset ${res.status}`)
+    const data = await res.json()
+    if (data.temporary_password) {
+      tempPasswordNotice.value = `${t('users.tempPassword')}: ${data.temporary_password}`
+    }
+    notice.value = t('users.resetPassword')
+    await loadUsers()
+  } catch (e) {
+    error.value = String(e)
+  } finally {
+    actionBusy.value = false
+  }
+}
+
+async function revokeUserSessions(id: string) {
+  if (!accessToken.value) return
+  actionBusy.value = true
+  try {
+    const res = await apiFetch(apiUrl(apiBase, adminRevokeSessionsPath(id)), {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({}),
+    })
+    if (!res.ok) throw new Error(`revoke ${res.status}`)
+    notice.value = t('users.revokeSessions')
+  } catch (e) {
+    error.value = String(e)
+  } finally {
+    actionBusy.value = false
+  }
+}
+
+async function unbanUserId(id: string) {
+  if (!accessToken.value) return
+  actionBusy.value = true
+  try {
+    const res = await apiFetch(apiUrl(apiBase, unbanUserPath()), {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ user_id: id, reason: 'admin unban' }),
+    })
+    if (res.status !== 204) throw new Error(`unban ${res.status}`)
+    notice.value = t('users.unban')
+    await loadUsers()
+    await loadAudit()
+  } catch (e) {
+    error.value = String(e)
+  } finally {
+    actionBusy.value = false
+  }
+}
+
+async function banUserId(id: string) {
+  userIdInput.value = id
+  await banUser()
+}
+
+async function setUserStatus(id: string, status: string) {
+  if (!accessToken.value) return
+  actionBusy.value = true
+  try {
+    const res = await apiFetch(apiUrl(apiBase, `${adminUsersPath()}/${encodeURIComponent(id)}`), {
+      method: 'PATCH',
+      headers: authHeaders(),
+      body: JSON.stringify({ status }),
+    })
+    if (!res.ok) throw new Error(`patch ${res.status}`)
+    notice.value = status === 'disabled' ? t('users.disable') : t('users.enable')
+    await loadUsers()
   } catch (e) {
     error.value = String(e)
   } finally {
@@ -1290,58 +1522,98 @@ onMounted(() => {
         <p v-if="error" class="flash err" data-testid="login-error">{{ error }}</p>
 
         <label class="field">
-          <span>{{ t('login.email') }}</span>
+          <span>{{ t('login.email') }} / username</span>
           <input
             v-model="email"
-            type="email"
+            type="text"
             autocomplete="username"
             :placeholder="t('login.emailPlaceholder')"
             data-testid="login-email"
           />
         </label>
-        <div class="row">
+
+        <template v-if="!useOtpLogin">
+          <label class="field">
+            <span>Password</span>
+            <input
+              v-model="password"
+              type="password"
+              autocomplete="current-password"
+              placeholder="••••••••"
+              data-testid="login-password"
+              @keyup.enter="passwordLogin"
+            />
+          </label>
+          <button
+            type="button"
+            class="btn primary"
+            data-testid="login-submit"
+            :disabled="loginBusy || !email.trim() || !password"
+            @click="passwordLogin"
+          >
+            {{ loginBusy ? t('login.submitting') : t('login.submit') }}
+          </button>
           <button
             type="button"
             class="btn"
-            data-testid="login-send-otp"
-            :disabled="loginBusy || !email.trim() || resendCooldown > 0"
-            @click="sendOtp"
+            style="margin-top: 8px"
+            data-testid="login-toggle-otp"
+            @click="useOtpLogin = true"
           >
-            <template v-if="loginBusy && !otpSent">{{ t('login.sending') }}</template>
-            <template v-else-if="resendCooldown > 0">
-              {{ t('login.resendIn', { n: resendCooldown }) }}
-            </template>
-            <template v-else-if="otpSent">{{ t('login.resend') }}</template>
-            <template v-else>{{ t('login.sendOtp') }}</template>
+            Dev OTP
           </button>
-        </div>
-        <label class="field">
-          <span>{{ t('login.otp') }}</span>
-          <input
-            v-model="otpCode"
-            type="text"
-            inputmode="numeric"
-            autocomplete="one-time-code"
-            :placeholder="t('login.otpPlaceholder')"
-            data-testid="login-otp"
-          />
-          <span class="otp-dev-tip">{{ t('login.tipDev') }} · 123456</span>
-        </label>
-        <button
-          type="button"
-          class="btn primary"
-          data-testid="login-submit"
-          :disabled="loginBusy || !email.trim() || !otpCode.trim()"
-          @click="verifyOtp"
-        >
-          {{ loginBusy ? t('login.submitting') : t('login.submit') }}
-        </button>
-        <div class="login-meta">
-          <span class="login-secure">{{ t('login.secureNote') }}</span>
-          <span class="dim mono" style="font-size: 0.72rem"
-            >{{ t('login.api') }} {{ apiBase }}</span
+        </template>
+
+        <template v-else>
+          <div class="row">
+            <button
+              type="button"
+              class="btn"
+              data-testid="login-send-otp"
+              :disabled="loginBusy || !email.trim() || resendCooldown > 0"
+              @click="sendOtp"
+            >
+              <template v-if="loginBusy && !otpSent">{{ t('login.sending') }}</template>
+              <template v-else-if="resendCooldown > 0">
+                {{ t('login.resendIn', { n: resendCooldown }) }}
+              </template>
+              <template v-else-if="otpSent">{{ t('login.resend') }}</template>
+              <template v-else>{{ t('login.sendOtp') }}</template>
+            </button>
+          </div>
+          <label class="field">
+            <span>{{ t('login.otp') }}</span>
+            <input
+              v-model="otpCode"
+              type="text"
+              inputmode="numeric"
+              autocomplete="one-time-code"
+              :placeholder="t('login.otpPlaceholder')"
+              data-testid="login-otp"
+            />
+            <span class="otp-dev-tip">{{ t('login.tipDev') }} · 123456</span>
+          </label>
+          <button
+            type="button"
+            class="btn primary"
+            data-testid="login-submit-otp"
+            :disabled="loginBusy || !email.trim() || !otpCode.trim()"
+            @click="verifyOtp"
           >
-        </div>
+            {{ loginBusy ? t('login.submitting') : t('login.submit') }}
+          </button>
+          <button
+            type="button"
+            class="btn"
+            style="margin-top: 8px"
+            data-testid="login-toggle-password"
+            @click="useOtpLogin = false"
+          >
+            Password
+          </button>
+        </template>
+
+        <p class="login-secure">{{ t('login.secureNote') }} · API {{ apiBase }}</p>
       </div>
     </div>
   </div>
@@ -2198,6 +2470,144 @@ onMounted(() => {
           <div v-else class="empty" data-testid="gifts-empty">
             <div class="empty-icon">✦</div>
             {{ t('gifts.empty') }}
+          </div>
+        </section>
+
+        <!-- Users -->
+        <section v-else-if="nav === 'users'" class="panel" data-testid="panel-users">
+          <div class="panel-head">
+            <h2>{{ t('users.title') }}</h2>
+            <button type="button" class="btn sm" :disabled="usersBusy" @click="loadUsers">
+              {{ t('common.refresh') }}
+            </button>
+          </div>
+          <p class="panel-desc">{{ t('navBlurb.users') }}</p>
+          <p v-if="tempPasswordNotice" class="flash ok" data-testid="temp-password">
+            {{ tempPasswordNotice }}
+          </p>
+
+          <div class="split-actions" style="margin-bottom: 16px">
+            <div class="action-card">
+              <h3>{{ t('users.create') }}</h3>
+              <label class="field">
+                <span>{{ t('users.displayName') }}</span>
+                <input v-model="createDisplayName" type="text" data-testid="create-display-name" />
+              </label>
+              <label class="field">
+                <span>{{ t('users.username') }}</span>
+                <input v-model="createUsername" type="text" data-testid="create-username" />
+              </label>
+              <label class="field">
+                <span>{{ t('users.email') }}</span>
+                <input v-model="createEmail" type="email" data-testid="create-email" />
+              </label>
+              <label class="field">
+                <span>{{ t('users.password') }}</span>
+                <input v-model="createPassword" type="text" data-testid="create-password" />
+              </label>
+              <button
+                type="button"
+                class="btn primary"
+                data-testid="create-user-submit"
+                :disabled="createBusy || !createDisplayName.trim()"
+                @click="createUser"
+              >
+                {{ t('users.create') }}
+              </button>
+            </div>
+            <div class="action-card">
+              <h3>{{ t('users.search') }}</h3>
+              <label class="field">
+                <span>{{ t('users.searchPlaceholder') }}</span>
+                <input
+                  v-model="usersQuery"
+                  type="search"
+                  data-testid="users-query"
+                  @keyup.enter="loadUsers"
+                />
+              </label>
+              <button type="button" class="btn" :disabled="usersBusy" @click="loadUsers">
+                {{ t('users.search') }}
+              </button>
+              <p class="dim">{{ t('users.total', { n: usersTotal }) }}</p>
+            </div>
+          </div>
+
+          <div v-if="usersList.length" class="table-wrap">
+            <table data-testid="users-table">
+              <thead>
+                <tr>
+                  <th>{{ t('users.displayName') }}</th>
+                  <th>{{ t('users.username') }}</th>
+                  <th>{{ t('users.email') }}</th>
+                  <th>{{ t('users.status') }}</th>
+                  <th>{{ t('users.actions') }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="u in usersList" :key="u.id">
+                  <td>
+                    {{ u.display_name }}
+                    <div class="dim mono" style="font-size: 0.72rem">{{ shortId(u.id) }}</div>
+                  </td>
+                  <td class="mono">{{ u.username || '—' }}</td>
+                  <td>{{ u.email || '—' }}</td>
+                  <td>
+                    {{ u.status }}
+                    <span v-if="u.banned" class="pill danger">{{ t('users.banned') }}</span>
+                    <span v-if="u.muted" class="pill">{{ t('users.muted') }}</span>
+                  </td>
+                  <td class="row" style="gap: 4px; flex-wrap: wrap">
+                    <button type="button" class="btn sm" :disabled="actionBusy" @click="resetUserPassword(u.id)">
+                      {{ t('users.resetPassword') }}
+                    </button>
+                    <button type="button" class="btn sm" :disabled="actionBusy" @click="revokeUserSessions(u.id)">
+                      {{ t('users.revokeSessions') }}
+                    </button>
+                    <button
+                      v-if="!u.banned"
+                      type="button"
+                      class="btn sm danger"
+                      :disabled="actionBusy"
+                      @click="banUserId(u.id)"
+                    >
+                      {{ t('users.ban') }}
+                    </button>
+                    <button
+                      v-else
+                      type="button"
+                      class="btn sm"
+                      :disabled="actionBusy"
+                      @click="unbanUserId(u.id)"
+                    >
+                      {{ t('users.unban') }}
+                    </button>
+                    <button
+                      v-if="u.status === 'active'"
+                      type="button"
+                      class="btn sm"
+                      :disabled="actionBusy"
+                      @click="setUserStatus(u.id, 'disabled')"
+                    >
+                      {{ t('users.disable') }}
+                    </button>
+                    <button
+                      v-else-if="u.status === 'disabled'"
+                      type="button"
+                      class="btn sm primary"
+                      :disabled="actionBusy"
+                      @click="setUserStatus(u.id, 'active')"
+                    >
+                      {{ t('users.enable') }}
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-else class="empty" data-testid="users-empty">
+            <div class="empty-icon">◎</div>
+            {{ usersBusy ? t('common.loading') : t('users.empty') }}
           </div>
         </section>
 

@@ -24,9 +24,11 @@ class SessionStore {
         'user_id': session.userId,
         'display_name': session.displayName,
         'email': session.email,
+        'username': session.username,
         'access_token': session.accessToken,
         'refresh_token': session.refreshToken,
         'expires_in': session.expiresIn,
+        'must_change_password': session.mustChangePassword,
       }),
     );
   }
@@ -43,9 +45,11 @@ class SessionStore {
         userId: map['user_id'] as String? ?? '',
         displayName: map['display_name'] as String? ?? '',
         email: map['email'] as String?,
+        username: map['username'] as String?,
         accessToken: access,
         refreshToken: map['refresh_token'] as String? ?? '',
         expiresIn: map['expires_in'] as int? ?? 0,
+        mustChangePassword: map['must_change_password'] as bool? ?? false,
       );
     } catch (_) {
       return null;

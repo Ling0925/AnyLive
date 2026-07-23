@@ -3,7 +3,8 @@
 use std::sync::Arc;
 
 use anylive_auth::{
-    LogoutRequest, OtpSendRequest, OtpVerifyRequest, RefreshRequest, RefreshStore, TokenPair,
+    ChangePasswordRequest, LogoutRequest, OtpSendRequest, OtpVerifyRequest, PasswordLoginRequest,
+    RefreshRequest, RefreshStore, TokenPair,
 };
 use anylive_domain::User;
 use axum::extract::{Path, State};
@@ -42,6 +43,19 @@ pub struct OauthExchangeBody {
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
+pub struct PasswordLoginBody {
+    /// Email or username.
+    pub identifier: String,
+    pub password: String,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct PasswordChangeBody {
+    pub current_password: String,
+    pub new_password: String,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct RefreshBody {
     pub refresh_token: String,
 }
@@ -58,6 +72,9 @@ pub struct AuthSessionResponse {
     pub access_token: String,
     pub refresh_token: String,
     pub expires_in: i64,
+    /// True when the client must force a password change before normal use.
+    #[serde(default)]
+    pub must_change_password: bool,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -65,6 +82,9 @@ pub struct UserDto {
     pub id: String,
     pub display_name: String,
     pub email: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    pub status: String,
     pub created_at: String,
     /// True when the user has confirmed age eligibility.
     pub age_confirmed: bool,
@@ -90,6 +110,8 @@ impl UserDto {
             id: u.id.0.to_string(),
             display_name: u.display_name,
             email: u.email,
+            username: u.username,
+            status: u.status.as_str().to_string(),
             created_at: u.created_at.to_rfc3339(),
             age_confirmed,
             privacy_accepted,
@@ -196,6 +218,9 @@ pub async fn otp_send(
 }
 
 /// Verify OTP and issue tokens.
+///
+/// When `FEATURE_PUBLIC_REGISTER=1` (or invite gate is active), new emails are
+/// upserted. When public register is off, only **existing** accounts may log in.
 #[utoipa::path(
     post,
     path = "/api/v1/auth/otp/verify",
@@ -215,25 +240,99 @@ pub async fn otp_verify(
         .await
         .map_err(ApiError::from)?;
 
-    if !state.features.public_register && !state.invite.is_enabled() {
-        return Err(ApiError(anylive_common::AppError::new(
-            anylive_common::ErrorCode::ForbiddenPolicy,
-            "public registration disabled (FEATURE_PUBLIC_REGISTER=0); enable INVITE_ONLY allowlist/codes or re-enable the flag",
-        )));
+    let allow_create = state.features.public_register || state.invite.is_enabled();
+    if allow_create {
+        // Invite gate only applies when creating / open register path.
+        state
+            .invite
+            .check(&body.email, body.invite_code.as_deref())
+            .map_err(ApiError::from)?;
     }
 
-    state
-        .invite
-        .check(&body.email, body.invite_code.as_deref())
-        .map_err(ApiError::from)?;
+    let req = OtpVerifyRequest {
+        email: body.email,
+        code: body.code,
+    };
+    let gate = |user: User| {
+        let state = state.clone();
+        async move {
+            if !user.status.can_login() {
+                return Err(anylive_common::AppError::new(
+                    anylive_common::ErrorCode::ForbiddenPolicy,
+                    "account is not active",
+                ));
+            }
+            if state.deleted_users.is_deleted(user.id).await {
+                return Err(anylive_common::AppError::unauthorized("account deleted"));
+            }
+            match state.moderation.try_is_banned(user.id).await {
+                Ok(true) => Err(anylive_common::AppError::new(
+                    anylive_common::ErrorCode::ForbiddenPolicy,
+                    "user is banned",
+                )),
+                Ok(false) => Ok(user),
+                Err(e) => Err(e),
+            }
+        }
+    };
 
     // Gate deleted + banned **before** issuing tokens / inserting refresh rows.
+    let session = if allow_create {
+        state
+            .auth
+            .verify_otp_gated(req, gate)
+            .await
+            .map_err(ApiError::from)?
+    } else {
+        state
+            .auth
+            .verify_otp_existing_gated(req, gate)
+            .await
+            .map_err(ApiError::from)?
+    };
+
+    let extras = state.profile_extras.get(session.user.id).await;
+    Ok(Json(AuthSessionResponse {
+        user: UserDto::from_user(
+            session.user,
+            extras.age_confirmed(),
+            extras.privacy_accepted(),
+            extras.avatar_url.clone(),
+            extras.region.clone(),
+        ),
+        access_token: session.tokens.access_token,
+        refresh_token: session.tokens.refresh_token,
+        expires_in: session.tokens.expires_in,
+        must_change_password: session.must_change_password,
+    }))
+}
+
+/// Password login (email or username).
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/password/login",
+    tag = "auth",
+    request_body = PasswordLoginBody,
+    responses((status = 200, description = "Session", body = AuthSessionResponse))
+)]
+pub async fn password_login(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<PasswordLoginBody>,
+) -> Result<Json<AuthSessionResponse>, ApiError> {
+    let ip = client_ip(&headers, None);
+    state
+        .otp_ip_limiter
+        .check(&format!("password-login:{ip}"))
+        .await
+        .map_err(ApiError::from)?;
+
     let session = state
         .auth
-        .verify_otp_gated(
-            OtpVerifyRequest {
-                email: body.email,
-                code: body.code,
+        .password_login_gated(
+            PasswordLoginRequest {
+                identifier: body.identifier,
+                password: body.password,
             },
             |user| {
                 let state = state.clone();
@@ -267,7 +366,36 @@ pub async fn otp_verify(
         access_token: session.tokens.access_token,
         refresh_token: session.tokens.refresh_token,
         expires_in: session.tokens.expires_in,
+        must_change_password: session.must_change_password,
     }))
+}
+
+/// Change password for the authenticated user (also clears must_change and revokes sessions).
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/password/change",
+    tag = "auth",
+    security(("bearerAuth" = [])),
+    request_body = PasswordChangeBody,
+    responses((status = 204, description = "Password updated"))
+)]
+pub async fn password_change(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Json(body): Json<PasswordChangeBody>,
+) -> Result<StatusCode, ApiError> {
+    state
+        .auth
+        .change_password(
+            user.user_id,
+            ChangePasswordRequest {
+                current_password: body.current_password,
+                new_password: body.new_password,
+            },
+        )
+        .await
+        .map_err(ApiError::from)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// OAuth exchange scaffold (WBS E2.1).
@@ -345,6 +473,7 @@ pub async fn oauth_exchange(
         access_token: session.tokens.access_token,
         refresh_token: session.tokens.refresh_token,
         expires_in: session.tokens.expires_in,
+        must_change_password: session.must_change_password,
     }))
 }
 

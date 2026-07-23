@@ -106,6 +106,9 @@ paths:
       tags: [auth]
       operationId: authOtpVerify
       summary: Verify OTP and issue tokens (P1)
+      description: |
+        When FEATURE_PUBLIC_REGISTER=0 (Wave A default), only existing accounts may log in
+        (no upsert). Set FEATURE_PUBLIC_REGISTER=1 or enable INVITE_ONLY for self-register.
       requestBody:
         required: true
         content:
@@ -119,6 +122,54 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthSession"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+  /api/v1/auth/password/login:
+    post:
+      tags: [auth]
+      operationId: authPasswordLogin
+      summary: Password login (email or username)
+      description: |
+        Primary auth path for Wave A. Admin provisions accounts; clients log in with
+        identifier (email or username) + password. Returns AUTH_INVALID_CREDENTIALS
+        on failure (enumeration-safe). AUTH_ACCOUNT_LOCKED after too many failures.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordLoginRequest"
+      responses:
+        "200":
+          description: Tokens + user issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSession"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
+  /api/v1/auth/password/change:
+    post:
+      tags: [auth]
+      operationId: authPasswordChange
+      summary: Change password for the authenticated user
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordChangeRequest"
+      responses:
+        "204":
+          description: Password updated; all refresh sessions revoked
         "401":
           $ref: "#/components/responses/Error"
   /api/v1/auth/oauth/exchange:
@@ -1004,6 +1055,156 @@ paths:
               $ref: "#/components/schemas/BanUserRequest"
       responses:
         "204": {description: Banned}
+  /api/v1/admin/unban:
+    post:
+      tags: [admin]
+      operationId: adminUnban
+      summary: Unban a user
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BanUserRequest"
+      responses:
+        "204": {description: Unbanned}
+  /api/v1/admin/users:
+    get:
+      tags: [admin]
+      operationId: adminListUsers
+      summary: List/search users
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: q
+          in: query
+          schema: {type: string}
+        - name: status
+          in: query
+          schema: {type: string, enum: [active, disabled, deleted]}
+        - name: limit
+          in: query
+          schema: {type: integer, default: 50}
+        - name: offset
+          in: query
+          schema: {type: integer, default: 0}
+      responses:
+        "200":
+          description: User page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserListResponse"
+    post:
+      tags: [admin]
+      operationId: adminCreateUser
+      summary: Provision a user with password credentials
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAdminUserRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateAdminUserResponse"
+  /api/v1/admin/users/{id}:
+    get:
+      tags: [admin]
+      operationId: adminGetUser
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: User detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUser"
+    patch:
+      tags: [admin]
+      operationId: adminPatchUser
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchAdminUserRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUser"
+  /api/v1/admin/users/{id}/reset-password:
+    post:
+      tags: [admin]
+      operationId: adminResetPassword
+      summary: Reset password (revokes all sessions)
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetPasswordRequest"
+      responses:
+        "200":
+          description: Password reset; temporary_password only when generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResetPasswordResponse"
+  /api/v1/admin/users/{id}/revoke-sessions:
+    post:
+      tags: [admin]
+      operationId: adminRevokeSessions
+      summary: Kick all sessions for a user
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: {type: string}
+      responses:
+        "200":
+          description: Revoked count
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revoked]
+                properties:
+                  revoked: {type: integer}
   /api/v1/admin/mute:
     post:
       tags: [admin]
@@ -1488,6 +1689,124 @@ components:
           type: string
           minLength: 4
           maxLength: 8
+    PasswordLoginRequest:
+      type: object
+      required: [identifier, password]
+      properties:
+        identifier:
+          type: string
+          description: Email or username
+        password:
+          type: string
+          format: password
+    PasswordChangeRequest:
+      type: object
+      required: [current_password, new_password]
+      properties:
+        current_password:
+          type: string
+          format: password
+        new_password:
+          type: string
+          format: password
+    CreateAdminUserRequest:
+      type: object
+      required: [display_name]
+      properties:
+        display_name:
+          type: string
+        email:
+          type: string
+          format: email
+        username:
+          type: string
+        password:
+          type: string
+          format: password
+          description: When omitted, a temporary password is generated
+        must_change_password:
+          type: boolean
+        role:
+          type: string
+          description: Optional staff role admin|moderator|ops
+    CreateAdminUserResponse:
+      type: object
+      required: [user, must_change_password]
+      properties:
+        user:
+          $ref: "#/components/schemas/AdminUser"
+        temporary_password:
+          type: string
+          description: Present only once when generated server-side
+        must_change_password:
+          type: boolean
+    AdminUser:
+      type: object
+      required: [id, display_name, status, created_at, banned, muted, must_change_password]
+      properties:
+        id:
+          type: string
+          format: uuid
+        display_name:
+          type: string
+        email:
+          type: string
+        username:
+          type: string
+        status:
+          type: string
+          enum: [active, disabled, deleted]
+        created_at:
+          type: string
+          format: date-time
+        banned:
+          type: boolean
+        muted:
+          type: boolean
+        admin_role:
+          type: string
+        must_change_password:
+          type: boolean
+    AdminUserListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminUser"
+        total:
+          type: integer
+    PatchAdminUserRequest:
+      type: object
+      properties:
+        display_name:
+          type: string
+        email:
+          type: string
+          nullable: true
+        username:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [active, disabled, deleted]
+    ResetPasswordRequest:
+      type: object
+      properties:
+        password:
+          type: string
+          format: password
+        must_change_password:
+          type: boolean
+    ResetPasswordResponse:
+      type: object
+      required: [must_change_password]
+      properties:
+        temporary_password:
+          type: string
+        must_change_password:
+          type: boolean
     OauthExchangeRequest:
       type: object
       required: [provider, id_token]
@@ -1523,6 +1842,9 @@ components:
           type: string
         expires_in:
           type: integer
+        must_change_password:
+          type: boolean
+          description: When true, client should force password change before normal use
     RefreshRequest:
       type: object
       required: [refresh_token]
@@ -1708,6 +2030,12 @@ components:
         email:
           type: string
           format: email
+        username:
+          type: string
+        status:
+          type: string
+          enum: [active, disabled, deleted]
+          description: Account lifecycle status
         created_at:
           type: string
           format: date-time

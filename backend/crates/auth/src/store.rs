@@ -28,13 +28,34 @@ pub trait OtpStore: Send + Sync + Clone {
 pub trait UserStore: Send + Sync + Clone {
     async fn find_by_email(&self, email: &str) -> Result<Option<User>, AppError>;
     async fn find_by_id(&self, id: UserId) -> Result<Option<User>, AppError>;
+    /// Case-insensitive username lookup.
+    async fn find_by_username(&self, username: &str) -> Result<Option<User>, AppError>;
     async fn upsert_by_email(&self, email: &str) -> Result<User, AppError>;
+    /// Create a provisioned user (admin open-account). Fails if email/username conflicts.
+    async fn create_user(&self, user: User) -> Result<User, AppError>;
     /// Update display name for an existing user; returns the updated user.
     async fn update_display_name(
         &self,
         id: UserId,
         display_name: String,
     ) -> Result<User, AppError>;
+    /// Patch mutable account fields (admin).
+    async fn update_account(
+        &self,
+        id: UserId,
+        display_name: Option<String>,
+        email: Option<Option<String>>,
+        username: Option<Option<String>>,
+        status: Option<anylive_domain::UserStatus>,
+    ) -> Result<User, AppError>;
+    /// Admin list/search (username, email, display_name).
+    async fn list_users(
+        &self,
+        q: Option<&str>,
+        status: Option<anylive_domain::UserStatus>,
+        limit: usize,
+        offset: usize,
+    ) -> Result<(Vec<User>, usize), AppError>;
 }
 
 /// Active refresh tokens keyed by jti.
@@ -74,13 +95,15 @@ impl OtpStore for InMemoryOtpStore {
 pub struct InMemoryUserStore {
     by_id: Arc<RwLock<HashMap<Uuid, User>>>,
     by_email: Arc<RwLock<HashMap<String, Uuid>>>,
+    by_username: Arc<RwLock<HashMap<String, Uuid>>>,
 }
 
 #[async_trait]
 impl UserStore for InMemoryUserStore {
     async fn find_by_email(&self, email: &str) -> Result<Option<User>, AppError> {
+        let email = email.trim().to_lowercase();
         let map = self.by_email.read().await;
-        let Some(id) = map.get(email) else {
+        let Some(id) = map.get(&email) else {
             return Ok(None);
         };
         Ok(self.by_id.read().await.get(id).cloned())
@@ -90,11 +113,21 @@ impl UserStore for InMemoryUserStore {
         Ok(self.by_id.read().await.get(&id.0).cloned())
     }
 
+    async fn find_by_username(&self, username: &str) -> Result<Option<User>, AppError> {
+        let username = username.trim().to_ascii_lowercase();
+        let map = self.by_username.read().await;
+        let Some(id) = map.get(&username) else {
+            return Ok(None);
+        };
+        Ok(self.by_id.read().await.get(id).cloned())
+    }
+
     async fn upsert_by_email(&self, email: &str) -> Result<User, AppError> {
+        let email = email.trim().to_lowercase();
         // Hold both write locks for the check-and-insert to avoid duplicate users
         // under concurrent first-login races.
         let mut by_email = self.by_email.write().await;
-        if let Some(id) = by_email.get(email) {
+        if let Some(id) = by_email.get(&email) {
             return Ok(self
                 .by_id
                 .read()
@@ -111,11 +144,45 @@ impl UserStore for InMemoryUserStore {
         } else {
             local.to_string()
         };
-        let user = User::new(display, Some(email.to_string())).map_err(|e| {
+        let user = User::new(display, Some(email.clone())).map_err(|e| {
             AppError::validation(format!("cannot create user: {e}"))
         })?;
-        by_email.insert(email.to_string(), user.id.0);
+        by_email.insert(email, user.id.0);
         self.by_id.write().await.insert(user.id.0, user.clone());
+        Ok(user)
+    }
+
+    async fn create_user(&self, user: User) -> Result<User, AppError> {
+        let mut by_id = self.by_id.write().await;
+        if by_id.contains_key(&user.id.0) {
+            return Err(AppError::new(
+                anylive_common::ErrorCode::Conflict,
+                "user id already exists",
+            ));
+        }
+        if let Some(ref email) = user.email {
+            let key = email.trim().to_lowercase();
+            let mut by_email = self.by_email.write().await;
+            if by_email.contains_key(&key) {
+                return Err(AppError::new(
+                    anylive_common::ErrorCode::Conflict,
+                    "email already registered",
+                ));
+            }
+            by_email.insert(key, user.id.0);
+        }
+        if let Some(ref username) = user.username {
+            let key = username.trim().to_ascii_lowercase();
+            let mut by_username = self.by_username.write().await;
+            if by_username.contains_key(&key) {
+                return Err(AppError::new(
+                    anylive_common::ErrorCode::Conflict,
+                    "username already taken",
+                ));
+            }
+            by_username.insert(key, user.id.0);
+        }
+        by_id.insert(user.id.0, user.clone());
         Ok(user)
     }
 
@@ -132,6 +199,115 @@ impl UserStore for InMemoryUserStore {
             .ok_or_else(|| AppError::not_found("user not found"))?;
         user.display_name = name;
         Ok(user.clone())
+    }
+
+    async fn update_account(
+        &self,
+        id: UserId,
+        display_name: Option<String>,
+        email: Option<Option<String>>,
+        username: Option<Option<String>>,
+        status: Option<anylive_domain::UserStatus>,
+    ) -> Result<User, AppError> {
+        let mut by_id = self.by_id.write().await;
+        let user = by_id
+            .get(&id.0)
+            .cloned()
+            .ok_or_else(|| AppError::not_found("user not found"))?;
+        let mut next = user.clone();
+        if let Some(name) = display_name {
+            next.display_name = User::validate_display_name(name)
+                .map_err(|e| AppError::validation(format!("{e}")))?;
+        }
+        if let Some(status) = status {
+            next.status = status;
+        }
+        if let Some(email_opt) = email {
+            // reindex email
+            if let Some(ref old) = user.email {
+                self.by_email.write().await.remove(&old.to_lowercase());
+            }
+            if let Some(e) = email_opt {
+                let key = e.trim().to_lowercase();
+                if !key.contains('@') {
+                    return Err(AppError::validation("invalid email"));
+                }
+                let mut by_email = self.by_email.write().await;
+                if let Some(other) = by_email.get(&key) {
+                    if *other != id.0 {
+                        return Err(AppError::new(
+                            anylive_common::ErrorCode::Conflict,
+                            "email already registered",
+                        ));
+                    }
+                }
+                by_email.insert(key.clone(), id.0);
+                next.email = Some(key);
+            } else {
+                next.email = None;
+            }
+        }
+        if let Some(username_opt) = username {
+            if let Some(ref old) = user.username {
+                self.by_username
+                    .write()
+                    .await
+                    .remove(&old.to_ascii_lowercase());
+            }
+            if let Some(u) = username_opt {
+                let key = User::validate_username(u)
+                    .map_err(|e| AppError::validation(format!("{e}")))?;
+                let mut by_username = self.by_username.write().await;
+                if let Some(other) = by_username.get(&key) {
+                    if *other != id.0 {
+                        return Err(AppError::new(
+                            anylive_common::ErrorCode::Conflict,
+                            "username already taken",
+                        ));
+                    }
+                }
+                by_username.insert(key.clone(), id.0);
+                next.username = Some(key);
+            } else {
+                next.username = None;
+            }
+        }
+        by_id.insert(id.0, next.clone());
+        Ok(next)
+    }
+
+    async fn list_users(
+        &self,
+        q: Option<&str>,
+        status: Option<anylive_domain::UserStatus>,
+        limit: usize,
+        offset: usize,
+    ) -> Result<(Vec<User>, usize), AppError> {
+        let guard = self.by_id.read().await;
+        let needle = q.map(|s| s.trim().to_ascii_lowercase()).filter(|s| !s.is_empty());
+        let mut items: Vec<User> = guard
+            .values()
+            .filter(|u| status.map(|s| u.status == s).unwrap_or(true))
+            .filter(|u| {
+                let Some(ref n) = needle else {
+                    return true;
+                };
+                u.display_name.to_ascii_lowercase().contains(n)
+                    || u.email
+                        .as_ref()
+                        .map(|e| e.to_ascii_lowercase().contains(n))
+                        .unwrap_or(false)
+                    || u.username
+                        .as_ref()
+                        .map(|un| un.to_ascii_lowercase().contains(n))
+                        .unwrap_or(false)
+            })
+            .cloned()
+            .collect();
+        items.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        let total = items.len();
+        let page = items.into_iter().skip(offset).take(limit).collect();
+        Ok((page, total))
     }
 }
 

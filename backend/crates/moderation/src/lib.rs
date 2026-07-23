@@ -192,6 +192,26 @@ impl MemoryModeration {
         Ok(())
     }
 
+    pub async fn unban_user(
+        &self,
+        actor: UserId,
+        target: UserId,
+        reason: impl Into<String>,
+    ) -> Result<(), AppError> {
+        self.require_admin(actor).await?;
+        let mut g = self.inner.lock().await;
+        g.banned_users.remove(&target.0);
+        g.audit.push(AuditEvent {
+            id: Uuid::new_v4(),
+            actor_id: actor,
+            action: "unban_user".into(),
+            target: target.0.to_string(),
+            detail: reason.into(),
+            created_at: Utc::now(),
+        });
+        Ok(())
+    }
+
     pub async fn is_banned(&self, user_id: UserId) -> bool {
         self.inner.lock().await.banned_users.contains(&user_id.0)
     }

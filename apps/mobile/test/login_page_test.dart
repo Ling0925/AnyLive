@@ -16,26 +16,43 @@ void main() {
     environment: 'local',
   );
 
-  testWidgets('login page shows email field send otp and age checkboxes',
+  testWidgets('login page shows password fields and age checkboxes',
       (tester) async {
     await tester.pumpWidget(
       const MaterialApp(home: LoginPage(config: config)),
     );
     expect(find.text('AnyLive Login'), findsOneWidget);
-    expect(find.byType(TextField), findsOneWidget);
-    expect(find.text('Send OTP'), findsOneWidget);
+    expect(find.text('Email or username'), findsOneWidget);
+    expect(find.text('Password'), findsOneWidget);
+    expect(find.text('Sign in'), findsOneWidget);
     expect(find.text('I confirm I am 18 or older'), findsOneWidget);
     expect(find.text('I accept the privacy policy'), findsOneWidget);
     expect(find.text('Privacy Policy'), findsOneWidget);
     expect(find.text('https://anylive.example/privacy'), findsOneWidget);
     expect(find.text('Terms of Service'), findsOneWidget);
     expect(find.text('https://anylive.example/terms'), findsOneWidget);
+    expect(find.text('Dev OTP (local only)'), findsOneWidget);
   });
 
-  testWidgets('verify disabled until age confirmed', (tester) async {
+  testWidgets('sign in disabled until age confirmed', (tester) async {
     final httpClient = MockClient((request) async {
-      if (request.url.path == '/api/v1/auth/otp/send') {
-        return http.Response('', 204);
+      if (request.url.path == '/api/v1/auth/password/login') {
+        return http.Response(
+          jsonEncode({
+            'user': {
+              'id': 'u1',
+              'display_name': 'host',
+              'username': 'host1',
+              'created_at': '2026-01-01T00:00:00Z',
+            },
+            'access_token': 'acc',
+            'refresh_token': 'ref',
+            'expires_in': 900,
+            'must_change_password': false,
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
       }
       return http.Response('unexpected', 500);
     });
@@ -48,46 +65,51 @@ void main() {
       ),
     );
 
-    await tester.enterText(find.byType(TextField), 'user@example.com');
-    await tester.tap(find.text('Send OTP'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Verify & continue'), findsOneWidget);
-    // Age not confirmed → button disabled.
-    final verifyButton = tester.widget<FilledButton>(
-      find.widgetWithText(FilledButton, 'Verify & continue'),
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Email or username'),
+      'host1',
     );
-    expect(verifyButton.onPressed, isNull);
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Password'),
+      'secret-pass-1',
+    );
+    await tester.pump();
 
-    // Confirm age → button enabled.
+    final signInDisabled = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, 'Sign in'),
+    );
+    expect(signInDisabled.onPressed, isNull);
+
     await tester.tap(find.text('I confirm I am 18 or older'));
     await tester.pump();
-    final enabled = tester.widget<FilledButton>(
-      find.widgetWithText(FilledButton, 'Verify & continue'),
+    final signInEnabled = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, 'Sign in'),
     );
-    expect(enabled.onPressed, isNotNull);
+    expect(signInEnabled.onPressed, isNotNull);
   });
 
-  testWidgets('verify patches age/privacy then navigates', (tester) async {
+  testWidgets('password login patches age/privacy then calls onLoggedIn',
+      (tester) async {
     var patchCalled = false;
     Map<String, dynamic>? patchBody;
+    AuthSession? loggedIn;
 
     final httpClient = MockClient((request) async {
       final path = request.url.path;
-      if (path == '/api/v1/auth/otp/send') {
-        return http.Response('', 204);
-      }
-      if (path == '/api/v1/auth/otp/verify') {
+      if (path == '/api/v1/auth/password/login') {
         return http.Response(
           jsonEncode({
-            'access_token': 'tok-1',
-            'refresh_token': 'ref-1',
-            'expires_in': 3600,
             'user': {
               'id': 'u1',
-              'display_name': 'Tester',
-              'email': 'user@example.com',
+              'display_name': 'host',
+              'email': 'host@example.com',
+              'username': 'host1',
+              'created_at': '2026-01-01T00:00:00Z',
             },
+            'access_token': 'acc',
+            'refresh_token': 'ref',
+            'expires_in': 900,
+            'must_change_password': false,
           }),
           200,
           headers: {'content-type': 'application/json'},
@@ -99,9 +121,9 @@ void main() {
         return http.Response(
           jsonEncode({
             'id': 'u1',
-            'display_name': 'Tester',
-            'email': 'user@example.com',
-            'created_at': 't',
+            'display_name': 'host',
+            'email': 'host@example.com',
+            'created_at': '2026-01-01T00:00:00Z',
             'age_confirmed': true,
             'privacy_accepted': true,
           }),
@@ -109,11 +131,8 @@ void main() {
           headers: {'content-type': 'application/json'},
         );
       }
-      // Home / feed may hit other endpoints after navigation — soft-fail.
-      return http.Response('{}', 200,
-          headers: {'content-type': 'application/json'});
+      return http.Response('unexpected $path', 500);
     });
-
     final api = ApiClient(baseUrl: config.normalizedApiBaseUrl);
     final auth = AuthRepository(client: api, httpClient: httpClient);
 
@@ -122,25 +141,31 @@ void main() {
         home: LoginPage(
           config: config,
           authRepository: auth,
-          profileRepositoryFactory: (client) => ProfileRepository(
-            client: client,
+          profileRepositoryFactory: (c) => ProfileRepository(
+            client: c,
             httpClient: httpClient,
           ),
+          onLoggedIn: (s) => loggedIn = s,
         ),
       ),
     );
 
-    await tester.enterText(find.byType(TextField).first, 'user@example.com');
-    await tester.tap(find.text('Send OTP'));
-    await tester.pumpAndSettle();
-
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Email or username'),
+      'host1',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Password'),
+      'secret-pass-1',
+    );
     await tester.tap(find.text('I confirm I am 18 or older'));
     await tester.tap(find.text('I accept the privacy policy'));
     await tester.pump();
-
-    await tester.tap(find.text('Verify & continue'));
+    await tester.tap(find.text('Sign in'));
     await tester.pumpAndSettle();
 
+    expect(loggedIn, isNotNull);
+    expect(loggedIn!.accessToken, 'acc');
     expect(patchCalled, isTrue);
     expect(patchBody?['age_confirmed'], isTrue);
     expect(patchBody?['privacy_accepted'], isTrue);

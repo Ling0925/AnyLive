@@ -15,6 +15,7 @@
 //! Default (no env) keeps in-memory stores so `cargo test --workspace` needs no live PG.
 
 mod chat;
+mod credentials;
 mod deleted_users;
 mod moderation;
 mod otp;
@@ -29,6 +30,7 @@ mod users;
 mod wallet;
 
 pub use chat::{validate_chat_body, AnyChat, PostgresChat};
+pub use credentials::{AnyCredentialStore, PostgresCredentialStore};
 pub use deleted_users::{AnyDeletedUsers, MemoryDeletedUsers, PostgresDeletedUsers};
 pub use moderation::{AnyModeration, PostgresModeration};
 pub use otp::{AnyOtpStore, PostgresOtpStore};
@@ -62,6 +64,7 @@ pub const MIGRATION_FILES: &[&str] = &[
     "008_avatar_recording.sql",
     "009_profile_region.sql",
     "010_admin_roles.sql",
+    "011_user_credentials.sql",
 ];
 
 /// Validate that a SQL identifier is safe for use in limited admin tooling.
@@ -124,6 +127,7 @@ mod tests {
                 "008_avatar_recording.sql",
                 "009_profile_region.sql",
                 "010_admin_roles.sql",
+                "011_user_credentials.sql",
             ]
         );
     }

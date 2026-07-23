@@ -20,6 +20,9 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
 reqwest = { workspace = true }
+argon2 = { workspace = true }
+password-hash = { workspace = true }
+rand_core = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

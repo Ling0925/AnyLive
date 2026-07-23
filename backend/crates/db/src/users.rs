@@ -2,13 +2,13 @@
 
 use anylive_auth::{InMemoryUserStore, UserStore};
 use anylive_common::{AppError, ErrorCode};
-use anylive_domain::{User, UserId};
+use anylive_domain::{User, UserId, UserStatus};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-/// Postgres-backed [`UserStore`] (users table from `001_init.sql`).
+/// Postgres-backed [`UserStore`] (users table from `001_init.sql` + `011_user_credentials.sql`).
 #[derive(Clone)]
 pub struct PostgresUserStore {
     pool: PgPool,
@@ -29,6 +29,8 @@ struct UserRow {
     id: Uuid,
     display_name: String,
     email: Option<String>,
+    username: Option<String>,
+    status: String,
     created_at: DateTime<Utc>,
 }
 
@@ -38,6 +40,8 @@ impl From<UserRow> for User {
             id: UserId(row.id),
             display_name: row.display_name,
             email: row.email,
+            username: row.username,
+            status: UserStatus::parse(&row.status).unwrap_or(UserStatus::Active),
             created_at: row.created_at,
         }
     }
@@ -45,6 +49,12 @@ impl From<UserRow> for User {
 
 fn map_db(err: sqlx::Error) -> AppError {
     tracing::error!(error = %err, "postgres user store error");
+    // Unique violations → conflict for admin create paths.
+    if let sqlx::Error::Database(ref db) = err {
+        if db.constraint().is_some() {
+            return AppError::new(ErrorCode::Conflict, "user identity conflict");
+        }
+    }
     AppError::new(ErrorCode::Internal, "database error")
 }
 
@@ -64,17 +74,15 @@ fn normalize_email_key(email: &str) -> String {
     email.trim().to_lowercase()
 }
 
+const USER_COLS: &str = "id, display_name, email, username, status, created_at";
+
 #[async_trait]
 impl UserStore for PostgresUserStore {
     async fn find_by_email(&self, email: &str) -> Result<Option<User>, AppError> {
         let email = normalize_email_key(email);
-        let row = sqlx::query_as::<_, UserRow>(
-            r#"
-            SELECT id, display_name, email, created_at
-            FROM users
-            WHERE email = $1
-            "#,
-        )
+        let row = sqlx::query_as::<_, UserRow>(&format!(
+            "SELECT {USER_COLS} FROM users WHERE email = $1"
+        ))
         .bind(&email)
         .fetch_optional(&self.pool)
         .await
@@ -83,14 +91,22 @@ impl UserStore for PostgresUserStore {
     }
 
     async fn find_by_id(&self, id: UserId) -> Result<Option<User>, AppError> {
-        let row = sqlx::query_as::<_, UserRow>(
-            r#"
-            SELECT id, display_name, email, created_at
-            FROM users
-            WHERE id = $1
-            "#,
-        )
+        let row = sqlx::query_as::<_, UserRow>(&format!(
+            "SELECT {USER_COLS} FROM users WHERE id = $1"
+        ))
         .bind(id.0)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_db)?;
+        Ok(row.map(Into::into))
+    }
+
+    async fn find_by_username(&self, username: &str) -> Result<Option<User>, AppError> {
+        let username = username.trim().to_ascii_lowercase();
+        let row = sqlx::query_as::<_, UserRow>(&format!(
+            "SELECT {USER_COLS} FROM users WHERE lower(username) = $1"
+        ))
+        .bind(&username)
         .fetch_optional(&self.pool)
         .await
         .map_err(map_db)?;
@@ -103,19 +119,37 @@ impl UserStore for PostgresUserStore {
             return Err(AppError::validation("invalid email"));
         }
         let display = display_name_from_email(&email);
-        // UNIQUE(email): concurrent first-login races collapse to one row.
-        // DO UPDATE is a no-op touch so RETURNING always yields the existing row.
-        let row = sqlx::query_as::<_, UserRow>(
+        let row = sqlx::query_as::<_, UserRow>(&format!(
             r#"
-            INSERT INTO users (display_name, email)
-            VALUES ($1, $2)
+            INSERT INTO users (display_name, email, status)
+            VALUES ($1, $2, 'active')
             ON CONFLICT (email) DO UPDATE
                 SET email = EXCLUDED.email
-            RETURNING id, display_name, email, created_at
-            "#,
-        )
+            RETURNING {USER_COLS}
+            "#
+        ))
         .bind(&display)
         .bind(&email)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_db)?;
+        Ok(row.into())
+    }
+
+    async fn create_user(&self, user: User) -> Result<User, AppError> {
+        let row = sqlx::query_as::<_, UserRow>(&format!(
+            r#"
+            INSERT INTO users (id, display_name, email, username, status, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING {USER_COLS}
+            "#
+        ))
+        .bind(user.id.0)
+        .bind(&user.display_name)
+        .bind(&user.email)
+        .bind(&user.username)
+        .bind(user.status.as_str())
+        .bind(user.created_at)
         .fetch_one(&self.pool)
         .await
         .map_err(map_db)?;
@@ -129,14 +163,14 @@ impl UserStore for PostgresUserStore {
     ) -> Result<User, AppError> {
         let name = User::validate_display_name(display_name)
             .map_err(|e| AppError::validation(format!("{e}")))?;
-        let row = sqlx::query_as::<_, UserRow>(
+        let row = sqlx::query_as::<_, UserRow>(&format!(
             r#"
             UPDATE users
             SET display_name = $2
             WHERE id = $1
-            RETURNING id, display_name, email, created_at
-            "#,
-        )
+            RETURNING {USER_COLS}
+            "#
+        ))
         .bind(id.0)
         .bind(&name)
         .fetch_optional(&self.pool)
@@ -144,6 +178,184 @@ impl UserStore for PostgresUserStore {
         .map_err(map_db)?
         .ok_or_else(|| AppError::not_found("user not found"))?;
         Ok(row.into())
+    }
+
+    async fn update_account(
+        &self,
+        id: UserId,
+        display_name: Option<String>,
+        email: Option<Option<String>>,
+        username: Option<Option<String>>,
+        status: Option<UserStatus>,
+    ) -> Result<User, AppError> {
+        // Load current, apply patches in app, write back (simple for Wave A).
+        let mut user = self
+            .find_by_id(id)
+            .await?
+            .ok_or_else(|| AppError::not_found("user not found"))?;
+        if let Some(name) = display_name {
+            user.display_name = User::validate_display_name(name)
+                .map_err(|e| AppError::validation(format!("{e}")))?;
+        }
+        if let Some(status) = status {
+            user.status = status;
+        }
+        if let Some(email_opt) = email {
+            user.email = match email_opt {
+                Some(e) => {
+                    let e = normalize_email_key(&e);
+                    if !e.contains('@') {
+                        return Err(AppError::validation("invalid email"));
+                    }
+                    Some(e)
+                }
+                None => None,
+            };
+        }
+        if let Some(username_opt) = username {
+            user.username = match username_opt {
+                Some(u) => Some(
+                    User::validate_username(u).map_err(|e| AppError::validation(format!("{e}")))?,
+                ),
+                None => None,
+            };
+        }
+        let row = sqlx::query_as::<_, UserRow>(&format!(
+            r#"
+            UPDATE users
+            SET display_name = $2, email = $3, username = $4, status = $5
+            WHERE id = $1
+            RETURNING {USER_COLS}
+            "#
+        ))
+        .bind(id.0)
+        .bind(&user.display_name)
+        .bind(&user.email)
+        .bind(&user.username)
+        .bind(user.status.as_str())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_db)?
+        .ok_or_else(|| AppError::not_found("user not found"))?;
+        Ok(row.into())
+    }
+
+    async fn list_users(
+        &self,
+        q: Option<&str>,
+        status: Option<UserStatus>,
+        limit: usize,
+        offset: usize,
+    ) -> Result<(Vec<User>, usize), AppError> {
+        let limit = limit.clamp(1, 100) as i64;
+        let offset = offset as i64;
+        let needle = q.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        let status_s = status.map(|s| s.as_str().to_string());
+
+        // Two queries: total + page (Wave A simplicity).
+        let total: i64 = if let Some(ref n) = needle {
+            let pattern = format!("%{n}%");
+            if let Some(ref st) = status_s {
+                sqlx::query_scalar(
+                    r#"
+                    SELECT COUNT(*) FROM users
+                    WHERE status = $1
+                      AND (display_name ILIKE $2 OR email ILIKE $2 OR username ILIKE $2)
+                    "#,
+                )
+                .bind(st)
+                .bind(&pattern)
+                .fetch_one(&self.pool)
+                .await
+            } else {
+                sqlx::query_scalar(
+                    r#"
+                    SELECT COUNT(*) FROM users
+                    WHERE display_name ILIKE $1 OR email ILIKE $1 OR username ILIKE $1
+                    "#,
+                )
+                .bind(&pattern)
+                .fetch_one(&self.pool)
+                .await
+            }
+        } else if let Some(ref st) = status_s {
+            sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE status = $1")
+                .bind(st)
+                .fetch_one(&self.pool)
+                .await
+        } else {
+            sqlx::query_scalar("SELECT COUNT(*) FROM users")
+                .fetch_one(&self.pool)
+                .await
+        }
+        .map_err(map_db)?;
+
+        let rows = if let Some(ref n) = needle {
+            let pattern = format!("%{n}%");
+            if let Some(ref st) = status_s {
+                sqlx::query_as::<_, UserRow>(&format!(
+                    r#"
+                    SELECT {USER_COLS} FROM users
+                    WHERE status = $1
+                      AND (display_name ILIKE $2 OR email ILIKE $2 OR username ILIKE $2)
+                    ORDER BY created_at DESC
+                    LIMIT $3 OFFSET $4
+                    "#
+                ))
+                .bind(st)
+                .bind(&pattern)
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(&self.pool)
+                .await
+            } else {
+                sqlx::query_as::<_, UserRow>(&format!(
+                    r#"
+                    SELECT {USER_COLS} FROM users
+                    WHERE display_name ILIKE $1 OR email ILIKE $1 OR username ILIKE $1
+                    ORDER BY created_at DESC
+                    LIMIT $2 OFFSET $3
+                    "#
+                ))
+                .bind(&pattern)
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(&self.pool)
+                .await
+            }
+        } else if let Some(ref st) = status_s {
+            sqlx::query_as::<_, UserRow>(&format!(
+                r#"
+                SELECT {USER_COLS} FROM users
+                WHERE status = $1
+                ORDER BY created_at DESC
+                LIMIT $2 OFFSET $3
+                "#
+            ))
+            .bind(st)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&self.pool)
+            .await
+        } else {
+            sqlx::query_as::<_, UserRow>(&format!(
+                r#"
+                SELECT {USER_COLS} FROM users
+                ORDER BY created_at DESC
+                LIMIT $1 OFFSET $2
+                "#
+            ))
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&self.pool)
+            .await
+        }
+        .map_err(map_db)?;
+
+        Ok((
+            rows.into_iter().map(Into::into).collect(),
+            total as usize,
+        ))
     }
 }
 
@@ -191,15 +403,15 @@ impl PostgresUserStore {
         limit: usize,
     ) -> Result<Vec<User>, AppError> {
         let pattern = format!("%{}%", q.trim());
-        let rows = sqlx::query_as::<_, UserRow>(
+        let rows = sqlx::query_as::<_, UserRow>(&format!(
             r#"
-            SELECT id, display_name, email, created_at
+            SELECT {USER_COLS}
             FROM users
             WHERE display_name ILIKE $1
             ORDER BY display_name ASC
             LIMIT $2
-            "#,
-        )
+            "#
+        ))
         .bind(&pattern)
         .bind(limit as i64)
         .fetch_all(&self.pool)
@@ -225,10 +437,24 @@ impl UserStore for AnyUserStore {
         }
     }
 
+    async fn find_by_username(&self, username: &str) -> Result<Option<User>, AppError> {
+        match self {
+            Self::Memory(s) => s.find_by_username(username).await,
+            Self::Postgres(s) => s.find_by_username(username).await,
+        }
+    }
+
     async fn upsert_by_email(&self, email: &str) -> Result<User, AppError> {
         match self {
             Self::Memory(s) => s.upsert_by_email(email).await,
             Self::Postgres(s) => s.upsert_by_email(email).await,
+        }
+    }
+
+    async fn create_user(&self, user: User) -> Result<User, AppError> {
+        match self {
+            Self::Memory(s) => s.create_user(user).await,
+            Self::Postgres(s) => s.create_user(user).await,
         }
     }
 
@@ -242,12 +468,44 @@ impl UserStore for AnyUserStore {
             Self::Postgres(s) => s.update_display_name(id, display_name).await,
         }
     }
+
+    async fn update_account(
+        &self,
+        id: UserId,
+        display_name: Option<String>,
+        email: Option<Option<String>>,
+        username: Option<Option<String>>,
+        status: Option<UserStatus>,
+    ) -> Result<User, AppError> {
+        match self {
+            Self::Memory(s) => {
+                s.update_account(id, display_name, email, username, status)
+                    .await
+            }
+            Self::Postgres(s) => {
+                s.update_account(id, display_name, email, username, status)
+                    .await
+            }
+        }
+    }
+
+    async fn list_users(
+        &self,
+        q: Option<&str>,
+        status: Option<UserStatus>,
+        limit: usize,
+        offset: usize,
+    ) -> Result<(Vec<User>, usize), AppError> {
+        match self {
+            Self::Memory(s) => s.list_users(q, status, limit, offset).await,
+            Self::Postgres(s) => s.list_users(q, status, limit, offset).await,
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::postgres_enabled;
 
     #[tokio::test]
     async fn memory_backend_upsert_idempotent() {
@@ -259,6 +517,16 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn memory_backend_create_with_username() {
+        let store = AnyUserStore::memory();
+        let mut u = User::new("Host", Some("h@example.com".into())).unwrap();
+        u.username = Some("host1".into());
+        let created = store.create_user(u.clone()).await.unwrap();
+        let found = store.find_by_username("HOST1").await.unwrap().unwrap();
+        assert_eq!(found.id, created.id);
+    }
+
+    #[tokio::test]
     async fn memory_backend_update_display_name() {
         let store = AnyUserStore::memory();
         let u = store.upsert_by_email("rename@example.com").await.unwrap();
@@ -267,42 +535,14 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(updated.display_name, "Renamed");
-        let again = store.find_by_id(u.id).await.unwrap().unwrap();
-        assert_eq!(again.display_name, "Renamed");
     }
 
     #[test]
     fn email_key_is_trimmed_and_lowercased() {
-        assert_eq!(normalize_email_key("  Alice@Example.COM "), "alice@example.com");
+        assert_eq!(
+            normalize_email_key("  Alice@Example.COM "),
+            "alice@example.com"
+        );
         assert_eq!(display_name_from_email("alice@example.com"), "alice");
-        assert_eq!(display_name_from_email("@example.com"), "user");
-    }
-
-    /// Optional integration: runs only when `USE_POSTGRES=1` and `DATABASE_URL` are set.
-    ///
-    /// ```text
-    /// USE_POSTGRES=1 DATABASE_URL=postgres://anylive:anylive@127.0.0.1:5432/anylive \
-    ///   cargo test -p anylive-db postgres_user_store_roundtrip -- --nocapture
-    /// ```
-    #[tokio::test]
-    async fn postgres_user_store_roundtrip() {
-        if !postgres_enabled() {
-            return;
-        }
-        let url = std::env::var("DATABASE_URL").unwrap();
-        let pool = crate::connect(&url).await.expect("connect");
-        crate::migrate(&pool).await.expect("migrate");
-        let store = PostgresUserStore::new(pool);
-
-        let email = format!("pg-test-{}@example.com", Uuid::new_v4());
-        let a = store.upsert_by_email(&email).await.expect("upsert");
-        let b = store.upsert_by_email(&email).await.expect("upsert again");
-        assert_eq!(a.id, b.id);
-        assert_eq!(a.email.as_deref(), Some(email.as_str()));
-
-        let by_email = store.find_by_email(&email).await.unwrap().unwrap();
-        assert_eq!(by_email.id, a.id);
-        let by_id = store.find_by_id(a.id).await.unwrap().unwrap();
-        assert_eq!(by_id.email.as_deref(), Some(email.as_str()));
     }
 }

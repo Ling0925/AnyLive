@@ -12,14 +12,18 @@ class AuthSession {
     required this.accessToken,
     required this.refreshToken,
     required this.expiresIn,
+    this.username,
+    this.mustChangePassword = false,
   });
 
   final String userId;
   final String displayName;
   final String? email;
+  final String? username;
   final String accessToken;
   final String refreshToken;
   final int expiresIn;
+  final bool mustChangePassword;
 
   factory AuthSession.fromJson(Map<String, dynamic> json) {
     final user = json['user'] as Map<String, dynamic>? ?? {};
@@ -27,9 +31,11 @@ class AuthSession {
       userId: user['id'] as String? ?? '',
       displayName: user['display_name'] as String? ?? '',
       email: user['email'] as String?,
+      username: user['username'] as String?,
       accessToken: json['access_token'] as String? ?? '',
       refreshToken: json['refresh_token'] as String? ?? '',
       expiresIn: json['expires_in'] as int? ?? 0,
+      mustChangePassword: json['must_change_password'] as bool? ?? false,
     );
   }
 }
@@ -43,6 +49,46 @@ class AuthRepository {
 
   final ApiClient client;
   final http.Client httpClient;
+
+  /// Password login by email or username.
+  Future<AuthSession> passwordLogin({
+    required String identifier,
+    required String password,
+  }) async {
+    final res = await httpClient.post(
+      client.uri('/api/v1/auth/password/login'),
+      headers: client.jsonHeaders(),
+      body: jsonEncode({
+        'identifier': identifier,
+        'password': password,
+      }),
+    );
+    if (res.statusCode != 200) {
+      throw AuthException('password_login_failed', res.statusCode, res.body);
+    }
+    final map = jsonDecode(res.body) as Map<String, dynamic>;
+    final session = AuthSession.fromJson(map);
+    client.accessToken = session.accessToken;
+    return session;
+  }
+
+  /// Change password for the authenticated user.
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    final res = await httpClient.post(
+      client.uri('/api/v1/auth/password/change'),
+      headers: client.jsonHeaders(auth: true),
+      body: jsonEncode({
+        'current_password': currentPassword,
+        'new_password': newPassword,
+      }),
+    );
+    if (res.statusCode != 204 && res.statusCode != 200) {
+      throw AuthException('password_change_failed', res.statusCode, res.body);
+    }
+  }
 
   Future<void> sendOtp(String email) async {
     final res = await httpClient.post(
@@ -131,10 +177,11 @@ class RefreshSessionInfo {
 
 class AuthException implements Exception {
   AuthException(this.code, this.statusCode, this.body);
+
   final String code;
   final int statusCode;
   final String body;
 
   @override
-  String toString() => 'AuthException($code, $statusCode)';
+  String toString() => 'AuthException($code, $statusCode): $body';
 }

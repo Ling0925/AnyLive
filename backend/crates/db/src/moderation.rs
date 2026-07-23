@@ -202,6 +202,27 @@ impl PostgresModeration {
         Ok(())
     }
 
+    pub async fn unban_user(
+        &self,
+        actor: UserId,
+        target: UserId,
+        reason: impl Into<String>,
+    ) -> Result<(), AppError> {
+        self.require_admin(actor).await?;
+        let reason = reason.into();
+        let mut tx = self.pool.begin().await.map_err(map_db)?;
+
+        sqlx::query("DELETE FROM banned_users WHERE user_id = $1")
+            .bind(target.0)
+            .execute(&mut *tx)
+            .await
+            .map_err(map_db)?;
+
+        push_audit(&mut tx, actor, "unban_user", target.0.to_string(), reason).await?;
+        tx.commit().await.map_err(map_db)?;
+        Ok(())
+    }
+
     pub async fn is_banned(&self, user_id: UserId) -> bool {
         match self.try_is_banned(user_id).await {
             Ok(v) => v,
@@ -543,6 +564,18 @@ impl AnyModeration {
         }
     }
 
+    pub async fn unban_user(
+        &self,
+        actor: UserId,
+        target: UserId,
+        reason: impl Into<String>,
+    ) -> Result<(), AppError> {
+        match self {
+            Self::Memory(m) => m.unban_user(actor, target, reason).await,
+            Self::Postgres(m) => m.unban_user(actor, target, reason).await,
+        }
+    }
+
     pub async fn is_banned(&self, user_id: UserId) -> bool {
         match self {
             Self::Memory(m) => m.is_banned(user_id).await,
@@ -644,6 +677,10 @@ pub mod sql {
             INSERT INTO banned_users (user_id, reason)
             VALUES ($1, $2)
             ON CONFLICT (user_id) DO UPDATE SET reason = EXCLUDED.reason
+            "#;
+
+    pub const DELETE_BANNED: &str = r#"
+            DELETE FROM banned_users WHERE user_id = $1
             "#;
 
     pub const UPSERT_MUTED: &str = r#"

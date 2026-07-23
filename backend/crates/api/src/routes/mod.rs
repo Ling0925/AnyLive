@@ -2,6 +2,7 @@
 
 pub mod admin;
 pub mod admin_ops;
+pub mod admin_users;
 pub mod auth;
 pub mod avatar;
 pub mod chat;
@@ -24,6 +25,7 @@ pub mod webhooks;
 
 pub use admin::*;
 pub use admin_ops::*;
+pub use admin_users::*;
 pub use auth::*;
 pub use avatar::*;
 pub use chat::*;

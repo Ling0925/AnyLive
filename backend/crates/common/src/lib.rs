@@ -16,7 +16,9 @@ pub enum ErrorCode {
     Conflict,
     RateLimited,
     AuthInvalidOtp,
+    AuthInvalidCredentials,
     AuthTokenRevoked,
+    AuthAccountLocked,
     RoomNotLive,
     MediaProviderError,
     GiftInsufficientBalance,
@@ -36,7 +38,9 @@ impl ErrorCode {
             Self::Conflict => "CONFLICT",
             Self::RateLimited => "RATE_LIMITED",
             Self::AuthInvalidOtp => "AUTH_INVALID_OTP",
+            Self::AuthInvalidCredentials => "AUTH_INVALID_CREDENTIALS",
             Self::AuthTokenRevoked => "AUTH_TOKEN_REVOKED",
+            Self::AuthAccountLocked => "AUTH_ACCOUNT_LOCKED",
             Self::RoomNotLive => "ROOM_NOT_LIVE",
             Self::MediaProviderError => "MEDIA_PROVIDER_ERROR",
             Self::GiftInsufficientBalance => "GIFT_INSUFFICIENT_BALANCE",
@@ -50,9 +54,11 @@ impl ErrorCode {
         match self {
             Self::Internal | Self::MediaProviderError => StatusCode::INTERNAL_SERVER_ERROR,
             Self::NotFound => StatusCode::NOT_FOUND,
-            Self::Unauthorized | Self::AuthInvalidOtp | Self::AuthTokenRevoked => {
-                StatusCode::UNAUTHORIZED
-            }
+            Self::Unauthorized
+            | Self::AuthInvalidOtp
+            | Self::AuthInvalidCredentials
+            | Self::AuthTokenRevoked => StatusCode::UNAUTHORIZED,
+            Self::AuthAccountLocked => StatusCode::TOO_MANY_REQUESTS,
             Self::Forbidden | Self::ForbiddenPolicy => StatusCode::FORBIDDEN,
             Self::Validation => StatusCode::BAD_REQUEST,
             Self::Conflict | Self::RoomNotLive | Self::WalletConflict => StatusCode::CONFLICT,

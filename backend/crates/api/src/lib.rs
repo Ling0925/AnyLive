@@ -65,6 +65,14 @@ pub fn build_app_with_state_and_cors(state: Arc<AppState>, cors: CorsLayer) -> R
         .route("/api/v1/auth/otp/send", post(routes::otp_send))
         .route("/api/v1/auth/otp/verify", post(routes::otp_verify))
         .route(
+            "/api/v1/auth/password/login",
+            post(routes::password_login),
+        )
+        .route(
+            "/api/v1/auth/password/change",
+            post(routes::password_change),
+        )
+        .route(
             "/api/v1/auth/oauth/exchange",
             post(routes::oauth_exchange),
         )
@@ -176,6 +184,7 @@ pub fn build_app_with_state_and_cors(state: Arc<AppState>, cors: CorsLayer) -> R
         )
         .route("/api/v1/admin/grant", post(routes::grant_admin))
         .route("/api/v1/admin/ban", post(routes::ban_user))
+        .route("/api/v1/admin/unban", post(routes::unban_user))
         .route("/api/v1/admin/mute", post(routes::mute_user))
         .route("/api/v1/admin/unmute", post(routes::unmute_user))
         .route(
@@ -183,6 +192,19 @@ pub fn build_app_with_state_and_cors(state: Arc<AppState>, cors: CorsLayer) -> R
             post(routes::force_close_room),
         )
         .route("/api/v1/admin/audit", get(routes::list_audit))
+        .route("/api/v1/admin/users", get(routes::admin_list_users).post(routes::admin_create_user))
+        .route(
+            "/api/v1/admin/users/{id}",
+            get(routes::admin_get_user).patch(routes::admin_patch_user),
+        )
+        .route(
+            "/api/v1/admin/users/{id}/reset-password",
+            post(routes::admin_reset_password),
+        )
+        .route(
+            "/api/v1/admin/users/{id}/revoke-sessions",
+            post(routes::admin_revoke_sessions),
+        )
         .route(
             "/api/v1/admin/wallet/reconcile",
             get(routes::wallet_reconcile),
@@ -225,6 +247,8 @@ pub fn build_app_with_state_and_cors(state: Arc<AppState>, cors: CorsLayer) -> R
         routes::meta,
         routes::otp_send,
         routes::otp_verify,
+        routes::password_login,
+        routes::password_change,
         routes::oauth_exchange,
         routes::token_refresh,
         routes::logout,
@@ -272,10 +296,17 @@ pub fn build_app_with_state_and_cors(state: Arc<AppState>, cors: CorsLayer) -> R
         routes::list_messages,
         routes::grant_admin,
         routes::ban_user,
+        routes::unban_user,
         routes::mute_user,
         routes::unmute_user,
         routes::force_close_room,
         routes::list_audit,
+        routes::admin_create_user,
+        routes::admin_list_users,
+        routes::admin_get_user,
+        routes::admin_patch_user,
+        routes::admin_reset_password,
+        routes::admin_revoke_sessions,
         routes::wallet_reconcile,
         routes::expire_pay_orders,
         routes::analytics_summary,
@@ -538,7 +569,7 @@ mod tests {
         let json = body_json(res).await;
         assert_eq!(json["features"]["pk"], false);
         assert_eq!(json["features"]["cohost"], false);
-        assert_eq!(json["features"]["public_register"], true);
+        assert_eq!(json["features"]["public_register"], false);
         assert_eq!(json["features"]["client_events"], true);
     }
 
@@ -570,8 +601,11 @@ mod tests {
         assert!(paths.get("/api/v1/meta").is_some());
         assert!(paths.get("/api/v1/auth/otp/send").is_some());
         assert!(paths.get("/api/v1/auth/otp/verify").is_some());
+        assert!(paths.get("/api/v1/auth/password/login").is_some());
+        assert!(paths.get("/api/v1/auth/password/change").is_some());
         assert!(paths.get("/api/v1/auth/token/refresh").is_some());
         assert!(paths.get("/api/v1/auth/logout").is_some());
+        assert!(paths.get("/api/v1/admin/users").is_some());
         assert!(paths.get("/api/v1/me").is_some());
     }
 
@@ -812,6 +846,164 @@ mod tests {
         assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
         let json = body_json(res).await;
         assert_eq!(json["code"], "UNAUTHORIZED");
+    }
+
+    #[tokio::test]
+    async fn password_admin_create_login_and_ban_gate() {
+        let state = AppState::dev();
+        let app = build_app_with_state(state);
+        // Bootstrap admin via OTP (dev flags allow public register).
+        let admin_token = login(&app, "pw-admin@example.com").await;
+        let me = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/me")
+                    .header("authorization", format!("Bearer {admin_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let admin_id = body_json(me).await["id"].as_str().unwrap().to_string();
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/admin/grant")
+                    .header("authorization", format!("Bearer {admin_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(r#"{{"user_id":"{admin_id}"}}"#)))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+        // Admin provisions host1 with password.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/admin/users")
+                    .header("authorization", format!("Bearer {admin_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"display_name":"Host One","username":"host1","email":"host1@example.com","password":"secret-pass-1","must_change_password":false}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::CREATED);
+        let created = body_json(res).await;
+        assert_eq!(created["user"]["username"], "host1");
+        assert_eq!(created["must_change_password"], false);
+        let host_id = created["user"]["id"].as_str().unwrap().to_string();
+
+        // Password login.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/auth/password/login")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"identifier":"host1","password":"secret-pass-1"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let session = body_json(res).await;
+        assert!(!session["access_token"].as_str().unwrap().is_empty());
+        assert_eq!(session["must_change_password"], false);
+        assert_eq!(session["user"]["username"], "host1");
+
+        // Wrong password → AUTH_INVALID_CREDENTIALS.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/auth/password/login")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"identifier":"host1","password":"wrong-pass!!"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(body_json(res).await["code"], "AUTH_INVALID_CREDENTIALS");
+
+        // Ban host → password login forbidden.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/admin/ban")
+                    .header("authorization", format!("Bearer {admin_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"user_id":"{host_id}","reason":"spam"}}"#
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/auth/password/login")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"identifier":"host1","password":"secret-pass-1"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+        // Unban restores login.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/admin/unban")
+                    .header("authorization", format!("Bearer {admin_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(r#"{{"user_id":"{host_id}"}}"#)))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/auth/password/login")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"identifier":"host1@example.com","password":"secret-pass-1"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
     }
 
     async fn login(app: &axum::Router, email: &str) -> String {

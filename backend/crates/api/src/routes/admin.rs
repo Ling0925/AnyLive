@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+use anylive_auth::RefreshStore;
 use crate::auth_user::AuthUser;
 use crate::error::ApiError;
 use crate::routes::rooms::RoomDto;
@@ -152,7 +153,7 @@ pub async fn grant_admin(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Ban a user (admin).
+/// Ban a user (admin). Also revokes all refresh sessions.
 #[utoipa::path(post, path = "/api/v1/admin/ban", tag = "admin", security(("bearerAuth" = [])), request_body = BanUserBody, responses((status = 204)))]
 pub async fn ban_user(
     State(state): State<Arc<AppState>>,
@@ -170,6 +171,12 @@ pub async fn ban_user(
         )
         .await
         .map_err(ApiError::from)?;
+    // Kick all sessions so banned users cannot keep using access tokens via refresh.
+    let _ = state
+        .auth
+        .refresh_store()
+        .revoke_all_for_user(UserId(target))
+        .await;
     Ok(StatusCode::NO_CONTENT)
 }
 

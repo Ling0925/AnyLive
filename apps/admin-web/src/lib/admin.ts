@@ -14,6 +14,7 @@ export function canAccessModule(role: string, module: string): boolean {
       'rooms',
       'reports',
       'users',
+      'gifts',
       'moderation',
       'audit',
     ].includes(module)
@@ -126,6 +127,7 @@ export type AdminNavKey =
   | 'rooms'
   | 'reports'
   | 'gifts'
+  | 'users'
   | 'moderation'
   | 'audit'
 
@@ -143,6 +145,7 @@ export const ADMIN_NAV: AdminNavItem[] = [
   { key: 'rooms', labelKey: 'nav.rooms', blurbKey: 'navBlurb.rooms' },
   { key: 'reports', labelKey: 'nav.reports', blurbKey: 'navBlurb.reports' },
   { key: 'gifts', labelKey: 'nav.gifts', blurbKey: 'navBlurb.gifts' },
+  { key: 'users', labelKey: 'nav.users', blurbKey: 'navBlurb.users' },
   { key: 'moderation', labelKey: 'nav.moderation', blurbKey: 'navBlurb.moderation' },
   { key: 'audit', labelKey: 'nav.audit', blurbKey: 'navBlurb.audit' },
 ]
@@ -264,6 +267,7 @@ export function apiUrl(base: string, path: string): string {
 export const API_PATHS = {
   otpSend: '/api/v1/auth/otp/send',
   otpVerify: '/api/v1/auth/otp/verify',
+  passwordLogin: '/api/v1/auth/password/login',
   tokenRefresh: '/api/v1/auth/token/refresh',
   logout: '/api/v1/auth/logout',
   me: '/api/v1/me',
@@ -271,12 +275,14 @@ export const API_PATHS = {
   publicGifts: '/api/v1/gifts',
   adminGifts: '/api/v1/admin/gifts',
   adminBan: '/api/v1/admin/ban',
+  adminUnban: '/api/v1/admin/unban',
   adminMute: '/api/v1/admin/mute',
   adminUnmute: '/api/v1/admin/unmute',
   adminForceClose: '/api/v1/admin/rooms/force-close',
   adminReports: '/api/v1/admin/reports',
   adminAudit: '/api/v1/admin/audit',
   adminGrant: '/api/v1/admin/grant',
+  adminUsers: '/api/v1/admin/users',
   adminWalletReconcile: '/api/v1/admin/wallet/reconcile',
   adminPayExpireOrders: '/api/v1/admin/pay/expire-orders',
   adminAnalyticsSummary: '/api/v1/admin/analytics/summary',
@@ -314,6 +320,30 @@ export function logoutPath(): string {
 
 export function banUserPath(): string {
   return API_PATHS.adminBan
+}
+
+export function unbanUserPath(): string {
+  return API_PATHS.adminUnban
+}
+
+export function adminUsersPath(): string {
+  return API_PATHS.adminUsers
+}
+
+export function adminUserPath(id: string): string {
+  return `${API_PATHS.adminUsers}/${encodeURIComponent(id.trim())}`
+}
+
+export function adminResetPasswordPath(id: string): string {
+  return `${API_PATHS.adminUsers}/${encodeURIComponent(id.trim())}/reset-password`
+}
+
+export function adminRevokeSessionsPath(id: string): string {
+  return `${API_PATHS.adminUsers}/${encodeURIComponent(id.trim())}/revoke-sessions`
+}
+
+export function passwordLoginPath(): string {
+  return API_PATHS.passwordLogin
 }
 
 export function muteUserPath(): string {

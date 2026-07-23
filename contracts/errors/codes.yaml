@@ -34,10 +34,18 @@ codes:
     http: 401
     retryable: false
     description: OTP invalid or expired
+  AUTH_INVALID_CREDENTIALS:
+    http: 401
+    retryable: false
+    description: Username/email or password incorrect (enumeration-safe)
   AUTH_TOKEN_REVOKED:
     http: 401
     retryable: false
     description: Refresh or access token revoked
+  AUTH_ACCOUNT_LOCKED:
+    http: 429
+    retryable: true
+    description: Account temporarily locked after failed password attempts
   ROOM_NOT_LIVE:
     http: 409
     retryable: false

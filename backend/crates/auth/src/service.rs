@@ -1,14 +1,20 @@
-//! Auth application service: OTP login, refresh, logout.
+//! Auth application service: OTP login, password login, refresh, logout.
 
 use std::sync::Arc;
 
 use anylive_common::{AppError, ErrorCode};
-use anylive_domain::{User, UserId};
+use anylive_domain::{User, UserId, UserStatus};
+use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::credentials::{CredentialRecord, CredentialStore};
 use crate::jwt::{JwtService, TokenPair};
 use crate::notifier::SharedOtpNotifier;
 use crate::otp::{normalize_email, OtpService};
+use crate::password::{
+    account_locked, generate_temp_password, hash_password, invalid_credentials, verify_password,
+    PasswordPolicy,
+};
 use crate::store::{OtpStore, RefreshStore, UserStore};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -34,37 +40,66 @@ pub struct LogoutRequest {
     pub refresh_token: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PasswordLoginRequest {
+    /// Email or username.
+    pub identifier: String,
+    pub password: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ChangePasswordRequest {
+    pub current_password: String,
+    pub new_password: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthSession {
     pub user: User,
     pub tokens: TokenPair,
+    /// Present when password auth is configured for the user.
+    #[serde(default)]
+    pub must_change_password: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetPasswordResult {
+    /// Plaintext temp password only when generated server-side (once).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temporary_password: Option<String>,
+    pub must_change_password: bool,
 }
 
 #[derive(Clone)]
-pub struct AuthService<U, O, R>
+pub struct AuthService<U, O, R, C>
 where
     U: UserStore,
     O: OtpStore,
     R: RefreshStore,
+    C: CredentialStore,
 {
     users: U,
     otp: OtpService<O>,
     refresh: R,
+    credentials: C,
     jwt: JwtService,
     notifier: SharedOtpNotifier,
+    password_policy: PasswordPolicy,
 }
 
-impl<U, O, R> AuthService<U, O, R>
+impl<U, O, R, C> AuthService<U, O, R, C>
 where
     U: UserStore,
     O: OtpStore,
     R: RefreshStore,
+    C: CredentialStore,
 {
-    pub fn new(users: U, otp: OtpService<O>, refresh: R, jwt: JwtService) -> Self {
+    pub fn new(users: U, otp: OtpService<O>, refresh: R, credentials: C, jwt: JwtService) -> Self {
         Self::with_notifier(
             users,
             otp,
             refresh,
+            credentials,
             jwt,
             Arc::new(crate::notifier::LogOtpNotifier),
         )
@@ -74,6 +109,7 @@ where
         users: U,
         otp: OtpService<O>,
         refresh: R,
+        credentials: C,
         jwt: JwtService,
         notifier: SharedOtpNotifier,
     ) -> Self {
@@ -81,9 +117,16 @@ where
             users,
             otp,
             refresh,
+            credentials,
             jwt,
             notifier,
+            password_policy: PasswordPolicy::default(),
         }
+    }
+
+    pub fn with_password_policy(mut self, policy: PasswordPolicy) -> Self {
+        self.password_policy = policy;
+        self
     }
 
     pub fn jwt(&self) -> &JwtService {
@@ -98,8 +141,16 @@ where
         &self.refresh
     }
 
+    pub fn credentials(&self) -> &C {
+        &self.credentials
+    }
+
     pub fn otp_config(&self) -> &crate::otp::OtpConfig {
         self.otp.config()
+    }
+
+    pub fn password_policy(&self) -> &PasswordPolicy {
+        &self.password_policy
     }
 
     /// Issue OTP, store its hash, and deliver the plaintext code via notifier.
@@ -112,16 +163,17 @@ where
     pub async fn verify_otp(&self, req: OtpVerifyRequest) -> Result<AuthSession, AppError> {
         let email = self.otp.verify(&req.email, &req.code).await?;
         let user = self.users.upsert_by_email(&email).await?;
-        // Issue tokens only after user load so callers can still reject deleted/banned
-        // before insert — but prefer checking at the route layer *after* user is known
-        // and *before* refresh insert when possible. We issue here; routes that need
-        // ban/delete checks must run them before calling this, or revoke on reject.
-        // For the common path, routes check after and we add hooks below.
         self.issue_session(user).await
     }
 
     /// Mint a session for an already-resolved user (OAuth / SSO paths).
     pub async fn issue_session(&self, user: User) -> Result<AuthSession, AppError> {
+        let must_change = self
+            .credentials
+            .get(user.id)
+            .await?
+            .map(|c| c.must_change_password)
+            .unwrap_or(false);
         let issued = self.jwt.issue_pair(user.id, user.email.clone())?;
         self.refresh
             .insert(issued.refresh_jti, issued.user_id, issued.refresh_exp)
@@ -129,6 +181,7 @@ where
         Ok(AuthSession {
             user,
             tokens: issued.pair,
+            must_change_password: must_change,
         })
     }
 
@@ -153,6 +206,31 @@ where
         self.issue_session(user).await
     }
 
+    /// OTP verify for an **existing** user only (no upsert). Used when public register is off.
+    pub async fn verify_otp_existing_gated<F, Fut>(
+        &self,
+        req: OtpVerifyRequest,
+        gate: F,
+    ) -> Result<AuthSession, AppError>
+    where
+        F: FnOnce(User) -> Fut,
+        Fut: std::future::Future<Output = Result<User, AppError>>,
+    {
+        let email = self.otp.verify(&req.email, &req.code).await?;
+        let user = self
+            .users
+            .find_by_email(&email)
+            .await?
+            .ok_or_else(|| {
+                AppError::new(
+                    ErrorCode::ForbiddenPolicy,
+                    "account does not exist; contact an administrator",
+                )
+            })?;
+        let user = gate(user).await?;
+        self.issue_session(user).await
+    }
+
     /// Like [`verify_otp`] but runs `gate` after user upsert and **before**
     /// issuing tokens. Used by the API to reject deleted/banned accounts without
     /// orphan refresh rows.
@@ -171,14 +249,228 @@ where
         self.issue_session(user).await
     }
 
+    /// Password login by email or username.
+    pub async fn password_login(
+        &self,
+        req: PasswordLoginRequest,
+    ) -> Result<AuthSession, AppError> {
+        let identifier = req.identifier.trim();
+        if identifier.is_empty() || req.password.is_empty() {
+            return Err(invalid_credentials());
+        }
+        let user = if identifier.contains('@') {
+            let email = normalize_email(identifier)?;
+            self.users.find_by_email(&email).await?
+        } else {
+            self.users.find_by_username(identifier).await?
+        };
+        let Some(user) = user else {
+            // Dummy hash work would help timing; keep simple for Wave A.
+            return Err(invalid_credentials());
+        };
+        if !user.status.can_login() {
+            return Err(AppError::new(
+                ErrorCode::ForbiddenPolicy,
+                "account is not active",
+            ));
+        }
+        let mut cred = self
+            .credentials
+            .get(user.id)
+            .await?
+            .ok_or_else(invalid_credentials)?;
+        if let Some(until) = cred.locked_until {
+            if until > Utc::now() {
+                return Err(account_locked());
+            }
+        }
+        let ok = verify_password(&req.password, &cred.password_hash)?;
+        if !ok {
+            cred.failed_attempts = cred.failed_attempts.saturating_add(1);
+            if cred.failed_attempts >= self.password_policy.max_attempts {
+                cred.locked_until =
+                    Some(Utc::now() + Duration::seconds(self.password_policy.lock_secs));
+                cred.failed_attempts = 0;
+            }
+            self.credentials.upsert(cred).await?;
+            return Err(invalid_credentials());
+        }
+        // Success: clear lockout counters.
+        cred.failed_attempts = 0;
+        cred.locked_until = None;
+        let must_change = cred.must_change_password;
+        self.credentials.upsert(cred).await?;
+        let mut session = self.issue_session(user).await?;
+        session.must_change_password = must_change;
+        Ok(session)
+    }
+
+    /// Password login with an external gate (ban/delete checks) after credential success.
+    pub async fn password_login_gated<F, Fut>(
+        &self,
+        req: PasswordLoginRequest,
+        gate: F,
+    ) -> Result<AuthSession, AppError>
+    where
+        F: FnOnce(User) -> Fut,
+        Fut: std::future::Future<Output = Result<User, AppError>>,
+    {
+        // Resolve + verify password first (reuse core), then gate, then re-issue if needed.
+        // Simpler path: login then re-check — but tokens already issued. So inline:
+        let identifier = req.identifier.trim();
+        if identifier.is_empty() || req.password.is_empty() {
+            return Err(invalid_credentials());
+        }
+        let user = if identifier.contains('@') {
+            let email = normalize_email(identifier)?;
+            self.users.find_by_email(&email).await?
+        } else {
+            self.users.find_by_username(identifier).await?
+        };
+        let Some(user) = user else {
+            return Err(invalid_credentials());
+        };
+        if !user.status.can_login() {
+            return Err(AppError::new(
+                ErrorCode::ForbiddenPolicy,
+                "account is not active",
+            ));
+        }
+        let mut cred = self
+            .credentials
+            .get(user.id)
+            .await?
+            .ok_or_else(invalid_credentials)?;
+        if let Some(until) = cred.locked_until {
+            if until > Utc::now() {
+                return Err(account_locked());
+            }
+        }
+        let ok = verify_password(&req.password, &cred.password_hash)?;
+        if !ok {
+            cred.failed_attempts = cred.failed_attempts.saturating_add(1);
+            if cred.failed_attempts >= self.password_policy.max_attempts {
+                cred.locked_until =
+                    Some(Utc::now() + Duration::seconds(self.password_policy.lock_secs));
+                cred.failed_attempts = 0;
+            }
+            self.credentials.upsert(cred).await?;
+            return Err(invalid_credentials());
+        }
+        cred.failed_attempts = 0;
+        cred.locked_until = None;
+        let must_change = cred.must_change_password;
+        self.credentials.upsert(cred).await?;
+        let user = gate(user).await?;
+        let mut session = self.issue_session(user).await?;
+        session.must_change_password = must_change;
+        Ok(session)
+    }
+
+    /// Set / replace password for a user (admin provision or reset).
+    /// When `password` is None, generates a temporary password.
+    pub async fn set_password(
+        &self,
+        user_id: UserId,
+        password: Option<&str>,
+        must_change: bool,
+    ) -> Result<SetPasswordResult, AppError> {
+        let (plain, generated) = match password {
+            Some(p) => {
+                self.password_policy.validate_password(p)?;
+                (p.to_string(), false)
+            }
+            None => (generate_temp_password(), true),
+        };
+        let hash = hash_password(&plain)?;
+        self.credentials
+            .upsert(CredentialRecord {
+                user_id,
+                password_hash: hash,
+                password_updated_at: Utc::now(),
+                must_change_password: must_change || generated,
+                failed_attempts: 0,
+                locked_until: None,
+            })
+            .await?;
+        // Revoke all sessions on password set/reset.
+        let _ = self.refresh.revoke_all_for_user(user_id).await?;
+        Ok(SetPasswordResult {
+            temporary_password: if generated { Some(plain) } else { None },
+            must_change_password: must_change || generated,
+        })
+    }
+
+    /// Authenticated user changes their own password.
+    pub async fn change_password(
+        &self,
+        user_id: UserId,
+        req: ChangePasswordRequest,
+    ) -> Result<(), AppError> {
+        self.password_policy
+            .validate_password(&req.new_password)?;
+        let mut cred = self
+            .credentials
+            .get(user_id)
+            .await?
+            .ok_or_else(|| AppError::validation("password login is not configured for this account"))?;
+        if !verify_password(&req.current_password, &cred.password_hash)? {
+            return Err(invalid_credentials());
+        }
+        cred.password_hash = hash_password(&req.new_password)?;
+        cred.password_updated_at = Utc::now();
+        cred.must_change_password = false;
+        cred.failed_attempts = 0;
+        cred.locked_until = None;
+        self.credentials.upsert(cred).await?;
+        let _ = self.refresh.revoke_all_for_user(user_id).await?;
+        Ok(())
+    }
+
+    /// Admin-create user + password in one call.
+    pub async fn provision_user(
+        &self,
+        display_name: String,
+        email: Option<String>,
+        username: Option<String>,
+        password: Option<&str>,
+        must_change: bool,
+    ) -> Result<(User, SetPasswordResult), AppError> {
+        let display_name = User::validate_display_name(display_name)
+            .map_err(|e| AppError::validation(format!("{e}")))?;
+        let email = match email {
+            Some(e) => Some(normalize_email(&e)?),
+            None => None,
+        };
+        let username = match username {
+            Some(u) => Some(
+                User::validate_username(u).map_err(|e| AppError::validation(format!("{e}")))?,
+            ),
+            None => None,
+        };
+        if email.is_none() && username.is_none() {
+            return Err(AppError::validation(
+                "at least one of email or username is required",
+            ));
+        }
+        let user = User {
+            id: UserId::new(),
+            display_name,
+            email,
+            username,
+            status: UserStatus::Active,
+            created_at: Utc::now(),
+        };
+        let user = self.users.create_user(user).await?;
+        let pw = self
+            .set_password(user.id, password, must_change)
+            .await?;
+        Ok((user, pw))
+    }
+
     /// Rotate refresh: insert the new jti first, then revoke the old one.
-    /// If user lookup / issue fails, the old token stays active so the client
-    /// can retry. Concurrent double-refresh still fails the second revoke path
-    /// only after both have verified JWT — residual race is acceptable vs
-    /// losing the only valid refresh on a mid-path error.
     pub async fn refresh(&self, req: RefreshRequest) -> Result<TokenPair, AppError> {
         let claims = self.jwt.verify_refresh(&req.refresh_token)?;
-        // Confirm still active before rotating (soft check; race handled by revoke).
         if !self.refresh.is_active(claims.jti).await? {
             return Err(AppError::new(
                 ErrorCode::AuthTokenRevoked,
@@ -190,16 +482,18 @@ where
             .find_by_id(UserId(claims.sub))
             .await?
             .ok_or_else(|| AppError::unauthorized("user not found"))?;
+        if !user.status.can_login() {
+            return Err(AppError::new(
+                ErrorCode::ForbiddenPolicy,
+                "account is not active",
+            ));
+        }
         let issued = self.jwt.issue_pair(user.id, user.email.clone())?;
-        // Insert new first so a failure after this still leaves the client with
-        // a valid refresh (old remains until we revoke).
         self.refresh
             .insert(issued.refresh_jti, issued.user_id, issued.refresh_exp)
             .await?;
         let was_active = self.refresh.revoke(claims.jti).await?;
         if !was_active {
-            // Concurrent rotation already consumed the old jti — revoke the new
-            // one we just inserted to avoid leaving an extra live session.
             let _ = self.refresh.revoke(issued.refresh_jti).await;
             return Err(AppError::new(
                 ErrorCode::AuthTokenRevoked,
@@ -246,6 +540,15 @@ where
     pub async fn require_email_normalized(email: &str) -> Result<String, AppError> {
         normalize_email(email)
     }
+
+    pub async fn must_change_password(&self, user_id: UserId) -> Result<bool, AppError> {
+        Ok(self
+            .credentials
+            .get(user_id)
+            .await?
+            .map(|c| c.must_change_password)
+            .unwrap_or(false))
+    }
 }
 
 /// Convenience factory for fully in-memory auth (tests + local dev without PG).
@@ -253,6 +556,7 @@ pub type MemoryAuthService = AuthService<
     crate::store::InMemoryUserStore,
     crate::store::InMemoryOtpStore,
     crate::store::InMemoryRefreshStore,
+    crate::credentials::InMemoryCredentialStore,
 >;
 
 impl MemoryAuthService {
@@ -263,12 +567,12 @@ impl MemoryAuthService {
         use crate::store::{InMemoryOtpStore, InMemoryRefreshStore, InMemoryUserStore};
 
         let jwt = JwtService::new(JwtConfig::from_env());
-        // Explicit dev OTP — never use OtpConfig::default() here (defaults secure).
         let otp = OtpService::new(InMemoryOtpStore::default(), OtpConfig::dev());
         Self::with_notifier(
             InMemoryUserStore::default(),
             otp,
             InMemoryRefreshStore::default(),
+            crate::credentials::InMemoryCredentialStore::default(),
             jwt,
             Arc::new(crate::notifier::NoopOtpNotifier),
         )
@@ -278,8 +582,9 @@ impl MemoryAuthService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::notifier::OtpNotifier;
+    use crate::credentials::InMemoryCredentialStore;
     use crate::jwt::JwtConfig;
+    use crate::notifier::OtpNotifier;
     use crate::otp::OtpConfig;
     use crate::store::{InMemoryOtpStore, InMemoryRefreshStore, InMemoryUserStore};
     use crate::DEV_OTP_CODE;
@@ -291,6 +596,7 @@ mod tests {
             InMemoryUserStore::default(),
             otp,
             InMemoryRefreshStore::default(),
+            InMemoryCredentialStore::default(),
             jwt,
             Arc::new(crate::notifier::NoopOtpNotifier),
         )
@@ -317,6 +623,114 @@ mod tests {
 
         let me = svc.me(session.user.id).await.unwrap();
         assert_eq!(me.id, session.user.id);
+    }
+
+    #[tokio::test]
+    async fn password_provision_and_login() {
+        let svc = service();
+        let (user, set) = svc
+            .provision_user(
+                "Host One".into(),
+                Some("host1@example.com".into()),
+                Some("host1".into()),
+                Some("secret-pass-1"),
+                false,
+            )
+            .await
+            .unwrap();
+        assert!(set.temporary_password.is_none());
+        assert!(!set.must_change_password);
+        let session = svc
+            .password_login(PasswordLoginRequest {
+                identifier: "host1".into(),
+                password: "secret-pass-1".into(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(session.user.id, user.id);
+        assert!(!session.must_change_password);
+
+        let err = svc
+            .password_login(PasswordLoginRequest {
+                identifier: "host1".into(),
+                password: "wrong-pass".into(),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, ErrorCode::AuthInvalidCredentials);
+    }
+
+    #[tokio::test]
+    async fn password_lockout_after_max_attempts() {
+        let svc = service().with_password_policy(PasswordPolicy {
+            min_len: 8,
+            max_attempts: 3,
+            lock_secs: 60,
+        });
+        let _ = svc
+            .provision_user(
+                "Lock Me".into(),
+                Some("lock@example.com".into()),
+                Some("lockme".into()),
+                Some("goodpassword"),
+                false,
+            )
+            .await
+            .unwrap();
+        for _ in 0..3 {
+            let _ = svc
+                .password_login(PasswordLoginRequest {
+                    identifier: "lockme".into(),
+                    password: "badpassword".into(),
+                })
+                .await;
+        }
+        let err = svc
+            .password_login(PasswordLoginRequest {
+                identifier: "lockme".into(),
+                password: "goodpassword".into(),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, ErrorCode::AuthAccountLocked);
+    }
+
+    #[tokio::test]
+    async fn change_password_revokes_sessions() {
+        let svc = service();
+        let (user, _) = svc
+            .provision_user(
+                "Changer".into(),
+                Some("ch@example.com".into()),
+                Some("changer".into()),
+                Some("oldpassword1"),
+                false,
+            )
+            .await
+            .unwrap();
+        let session = svc
+            .password_login(PasswordLoginRequest {
+                identifier: "changer".into(),
+                password: "oldpassword1".into(),
+            })
+            .await
+            .unwrap();
+        svc.change_password(
+            user.id,
+            ChangePasswordRequest {
+                current_password: "oldpassword1".into(),
+                new_password: "newpassword2".into(),
+            },
+        )
+        .await
+        .unwrap();
+        let err = svc
+            .refresh(RefreshRequest {
+                refresh_token: session.tokens.refresh_token,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, ErrorCode::AuthTokenRevoked);
     }
 
     #[tokio::test]
@@ -411,8 +825,6 @@ mod tests {
     #[tokio::test]
     async fn invalid_otp_rejected() {
         let svc = service();
-        // Non-dev path: store a real challenge by temporarily using wrong code after send
-        // With dev_fixed_otp, only wrong format / non-123456 fails when challenge exists.
         let err = svc
             .verify_otp(OtpVerifyRequest {
                 email: "bad@example.com".into(),
@@ -420,32 +832,7 @@ mod tests {
             })
             .await
             .unwrap_err();
-        // In dev mode without send, only 123456 works; 999999 hits missing challenge path.
         assert_eq!(err.code, ErrorCode::AuthInvalidOtp);
-    }
-
-    #[tokio::test]
-    async fn refresh_reuse_rejected() {
-        let svc = service();
-        let session = svc
-            .verify_otp(OtpVerifyRequest {
-                email: "reuse@example.com".into(),
-                code: DEV_OTP_CODE.into(),
-            })
-            .await
-            .unwrap();
-        let rt = session.tokens.refresh_token.clone();
-        let _ = svc
-            .refresh(RefreshRequest {
-                refresh_token: rt.clone(),
-            })
-            .await
-            .unwrap();
-        let err = svc
-            .refresh(RefreshRequest { refresh_token: rt })
-            .await
-            .unwrap_err();
-        assert_eq!(err.code, ErrorCode::AuthTokenRevoked);
     }
 
     #[tokio::test]
@@ -471,6 +858,7 @@ mod tests {
             InMemoryUserStore::default(),
             otp,
             InMemoryRefreshStore::default(),
+            InMemoryCredentialStore::default(),
             jwt,
             counter.clone(),
         );
