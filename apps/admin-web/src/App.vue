@@ -1,9 +1,20 @@
 <script setup lang="ts">
 import { useAdminApp } from './composables/useAdminApp'
+import AppIcon from './components/AppIcon.vue'
+import {
+  Inbox,
+  FolderOpen,
+  Sun,
+  Moon,
+  Radio,
+  Shield,
+  ScrollText,
+  RefreshCw,
+  LogOut,
+} from './components/icons'
 
 const {
   ADMIN_NAV,
-  NAV_ICONS,
   actionBusy,
   actionReason,
   adminGateHint,
@@ -204,15 +215,21 @@ void previewVideoEl
         </div>
         <div class="login-features">
           <div class="login-feature">
-            <span class="login-feature-dot" />
+            <span class="login-feature-icon" aria-hidden="true">
+              <AppIcon :component="Radio" :size="16" />
+            </span>
             {{ t('login.features.rooms') }}
           </div>
           <div class="login-feature">
-            <span class="login-feature-dot" />
+            <span class="login-feature-icon" aria-hidden="true">
+              <AppIcon :component="Shield" :size="16" />
+            </span>
             {{ t('login.features.moderation') }}
           </div>
           <div class="login-feature">
-            <span class="login-feature-dot" />
+            <span class="login-feature-icon" aria-hidden="true">
+              <AppIcon :component="ScrollText" :size="16" />
+            </span>
             {{ t('login.features.audit') }}
           </div>
         </div>
@@ -402,9 +419,7 @@ void previewVideoEl
           @click="go(item.key)"
         >
           <span class="nav-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24">
-              <path :d="NAV_ICONS[item.key]" />
-            </svg>
+            <AppIcon :name="item.key" :size="15" />
           </span>
           <span>{{ t(item.labelKey) }}</span>
         </button>
@@ -453,9 +468,11 @@ void previewVideoEl
           :disabled="listBusy"
           @click="refreshLists"
         >
+          <AppIcon :component="RefreshCw" :size="14" />
           {{ t('topbar.refresh') }}
         </button>
         <button type="button" class="btn ghost" data-testid="logout" @click="logout">
+          <AppIcon :component="LogOut" :size="14" />
           {{ t('topbar.logout') }}
         </button>
       </div>
@@ -477,13 +494,8 @@ void previewVideoEl
             @click="onToggleTheme"
           >
             <!-- sun when dark (click → light); moon when light (click → dark) -->
-            <svg v-if="theme === 'dark'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <circle cx="12" cy="12" r="4" />
-              <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
-            </svg>
-            <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M21 14.5A8.5 8.5 0 1111.5 3a7 7 0 009.5 11.5z" />
-            </svg>
+            <AppIcon v-if="theme === 'dark'" :component="Sun" :size="16" />
+            <AppIcon v-else :component="Moon" :size="16" />
           </button>
           <div class="session">
             <div class="avatar">{{ avatarLetter }}</div>
@@ -684,7 +696,9 @@ void previewVideoEl
                 </table>
               </div>
               <div v-else class="empty">
-                <div class="empty-icon">◎</div>
+                <div class="empty-icon">
+                  <AppIcon :component="Inbox" :size="28" />
+                </div>
                 {{ t('dashboard.noRooms') }}
               </div>
             </section>
@@ -722,7 +736,9 @@ void previewVideoEl
                 </table>
               </div>
               <div v-else class="empty">
-                <div class="empty-icon">◇</div>
+                <div class="empty-icon">
+                  <AppIcon :component="FolderOpen" :size="28" />
+                </div>
                 {{ t('dashboard.noReports') }}
               </div>
             </section>
@@ -1038,7 +1054,9 @@ void previewVideoEl
             </table>
           </div>
           <div v-else class="empty" data-testid="rooms-empty">
-            <div class="empty-icon">◎</div>
+            <div class="empty-icon">
+              <AppIcon :component="Inbox" :size="28" />
+            </div>
             {{ t('rooms.empty') }}
           </div>
 
@@ -1156,7 +1174,9 @@ void previewVideoEl
             </table>
           </div>
           <div v-else class="empty" data-testid="reports-empty">
-            <div class="empty-icon">◇</div>
+            <div class="empty-icon">
+              <AppIcon :component="FolderOpen" :size="28" />
+            </div>
             {{ t('reports.empty') }}
           </div>
         </section>
@@ -1311,7 +1331,9 @@ void previewVideoEl
             </table>
           </div>
           <div v-else class="empty" data-testid="gifts-empty">
-            <div class="empty-icon">✦</div>
+            <div class="empty-icon">
+              <AppIcon :component="Inbox" :size="28" />
+            </div>
             {{ t('gifts.empty') }}
           </div>
         </section>
@@ -1506,7 +1528,9 @@ void previewVideoEl
             </table>
           </div>
           <div v-else class="empty" data-testid="users-empty">
-            <div class="empty-icon">◎</div>
+            <div class="empty-icon">
+              <AppIcon :component="Inbox" :size="28" />
+            </div>
             {{ usersBusy ? t('common.loading') : t('users.empty') }}
           </div>
 
@@ -1909,7 +1933,9 @@ void previewVideoEl
             </table>
           </div>
           <div v-else class="empty" data-testid="audit-empty">
-            <div class="empty-icon">☰</div>
+            <div class="empty-icon">
+              <AppIcon :component="FolderOpen" :size="28" />
+            </div>
             {{ t('audit.empty') }}
           </div>
         </section>
