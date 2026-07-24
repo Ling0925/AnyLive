@@ -5,6 +5,8 @@ import '../../config/app_config.dart';
 import '../../theme/any_colors.dart';
 import '../profile/profile_page.dart';
 import '../wallet/wallet_page.dart';
+import '../../l10n/l10n.dart';
+import '../../l10n/locale_scope.dart';
 
 /// YouTube-style "You" tab: account, wallet, privacy via existing pages.
 class YouPage extends StatelessWidget {
@@ -56,16 +58,16 @@ class YouPage extends StatelessWidget {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Log out?'),
-        content: const Text('You will need to sign in again with email OTP.'),
+        title: Text(ctx.l10n.logoutConfirmTitle),
+        content: Text(ctx.l10n.logoutConfirmBody),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
+            child: Text(ctx.l10n.cancel),
           ),
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Log out'),
+            child: Text(ctx.l10n.logOut),
           ),
         ],
       ),
@@ -77,15 +79,16 @@ class YouPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final label = (sessionLabel == null || sessionLabel!.isEmpty)
-        ? 'You'
+        ? l10n.youTitle
         : sessionLabel!;
     final initial = label.isNotEmpty ? label[0].toUpperCase() : '?';
 
     return Scaffold(
       backgroundColor: AnyColors.bg,
       appBar: AppBar(
-        title: const Text('You'),
+        title: Text(l10n.youTitle),
         backgroundColor: AnyColors.bg,
       ),
       body: ListView(
@@ -135,7 +138,7 @@ class YouPage extends StatelessWidget {
                           const SizedBox(height: 4),
                           if (sessionLabel != null && sessionLabel!.isNotEmpty)
                             Text(
-                              'signed in as $sessionLabel',
+                              l10n.signedInAs(sessionLabel!),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
@@ -163,33 +166,33 @@ class YouPage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 20),
-          _sectionLabel('Account'),
+          _sectionLabel(l10n.sectionAccount),
           _tile(
             context,
             key: const Key('you-profile'),
             icon: Icons.manage_accounts_outlined,
-            title: 'Profile & privacy',
-            subtitle: 'Edit name, privacy, export / delete',
+            title: l10n.profilePrivacy,
+            subtitle: l10n.profilePrivacySub,
             onTap: () => _openProfile(context),
           ),
           _tile(
             context,
             key: const Key('home-wallet'),
             icon: Icons.account_balance_wallet_outlined,
-            title: 'Wallet',
-            subtitle: 'Balance, top-up, ledger',
+            title: l10n.wallet,
+            subtitle: l10n.walletSub,
             onTap: () => _openWallet(context),
           ),
           // Alias key for newer finders.
           const Offstage(child: SizedBox.shrink(key: Key('you-wallet'))),
           const SizedBox(height: 16),
-          _sectionLabel('Session'),
+          _sectionLabel(l10n.sectionSession),
           _tile(
             context,
             key: const Key('you-logout'),
             icon: Icons.logout,
-            title: 'Logout',
-            subtitle: 'Clear local session',
+            title: l10n.logout,
+            subtitle: l10n.logoutSub,
             danger: true,
             onTap: () => _confirmLogout(context),
           ),
@@ -201,33 +204,37 @@ class YouPage extends StatelessWidget {
               child: TextButton(
                 key: const Key('home-logout'),
                 onPressed: () => onLogout?.call(),
-                child: const Text('Logout'),
+                child: Text(l10n.logout),
               ),
             ),
           ),
           const SizedBox(height: 16),
-          _sectionLabel('About'),
+          _sectionLabel(l10n.languageSection),
+          _LanguageTile(),
+          const SizedBox(height: 16),
+          _sectionLabel(l10n.sectionAbout),
+
           Padding(
             padding: const EdgeInsets.only(left: 4, top: 4),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'env: ${config.environment}',
+                  l10n.envLine(config.environment),
                   style: const TextStyle(
                     fontSize: 12,
                     color: AnyColors.textMuted,
                   ),
                 ),
                 Text(
-                  'flavor: ${config.flavorLabel}',
+                  l10n.flavorLine(config.flavorLabel),
                   style: const TextStyle(
                     fontSize: 12,
                     color: AnyColors.textMuted,
                   ),
                 ),
                 Text(
-                  'api: ${config.normalizedApiBaseUrl}',
+                  l10n.apiLine(config.normalizedApiBaseUrl),
                   style: const TextStyle(
                     fontSize: 12,
                     color: AnyColors.textMuted,
@@ -238,7 +245,7 @@ class YouPage extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           Text(
-            'AnyLive · ${config.flavorLabel}',
+            l10n.brandFlavor(config.flavorLabel),
             textAlign: TextAlign.center,
             style: const TextStyle(fontSize: 12, color: AnyColors.textMuted),
           ),
@@ -299,6 +306,56 @@ class YouPage extends StatelessWidget {
           ),
           trailing: const Icon(Icons.chevron_right, color: AnyColors.textMuted),
           onTap: onTap,
+        ),
+      ),
+    );
+  }
+}
+
+
+class _LanguageTile extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final controller = LocaleScope.maybeOf(context);
+    final code = controller?.locale.languageCode ?? 'zh';
+    return Material(
+      color: AnyColors.elevated,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        child: Row(
+          children: [
+            const Icon(Icons.language, color: AnyColors.accent),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                l10n.language,
+                style: const TextStyle(
+                  color: AnyColors.textPrimary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                key: const Key('language-picker'),
+                value: code == 'en' ? 'en' : 'zh',
+                dropdownColor: AnyColors.elevated,
+                style: const TextStyle(color: AnyColors.textPrimary),
+                items: [
+                  DropdownMenuItem(value: 'zh', child: Text(l10n.languageChinese)),
+                  DropdownMenuItem(value: 'en', child: Text(l10n.languageEnglish)),
+                ],
+                onChanged: controller == null
+                    ? null
+                    : (v) {
+                        if (v == null) return;
+                        controller.setLocale(Locale(v));
+                      },
+              ),
+            ),
+          ],
         ),
       ),
     );

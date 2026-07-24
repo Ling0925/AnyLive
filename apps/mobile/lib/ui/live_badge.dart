@@ -1,22 +1,25 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/l10n.dart';
 import '../theme/any_colors.dart';
 
-/// Red pill `LIVE` badge — never uses brand magenta.
+/// Red pill live badge — never uses brand magenta.
 class LiveBadge extends StatelessWidget {
   const LiveBadge({
     super.key,
-    this.label = 'LIVE',
+    this.label,
     this.compact = false,
   });
 
-  final String label;
+  /// When null, uses [AppLocalizations.liveBadge].
+  final String? label;
 
   /// Smaller padding for dense card overlays.
   final bool compact;
 
   @override
   Widget build(BuildContext context) {
+    final text = label ?? context.l10n.liveBadge;
     return Container(
       padding: EdgeInsets.symmetric(
         horizontal: compact ? 6 : 8,
@@ -27,7 +30,7 @@ class LiveBadge extends StatelessWidget {
         borderRadius: BorderRadius.circular(AnyColors.radiusPill),
       ),
       child: Text(
-        label,
+        text,
         style: TextStyle(
           color: Colors.white,
           fontSize: compact ? 10 : 11,

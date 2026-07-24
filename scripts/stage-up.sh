@@ -94,8 +94,29 @@ apply_local_otp_override() {
   fi
 }
 
+# Keep deploy/srs/srs.conf on_publish ?secret= in lockstep with API SRS_WEBHOOK_SECRET.
+# stage-up mints a random webhook secret into .env.stage.local, but srs.conf is a
+# static mount — if they diverge, OBS publish fails with "invalid webhook secret".
+sync_srs_webhook_secret() {
+  local conf="$ROOT/deploy/srs/srs.conf"
+  local secret
+  secret="$(grep -E '^SRS_WEBHOOK_SECRET=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- || true)"
+  if [ -z "$secret" ] || [ ! -f "$conf" ]; then
+    return 0
+  fi
+  if grep -q 'on_publish.*secret=' "$conf" 2>/dev/null; then
+    echo "==> sync SRS http_hooks secret into srs.conf"
+    if sed --version >/dev/null 2>&1; then
+      sed -i "s|secret=[^;\"]*|secret=${secret}|g" "$conf"
+    else
+      sed -i '' "s|secret=[^;\"]*|secret=${secret}|g" "$conf"
+    fi
+  fi
+}
+
 ensure_env_file
 apply_local_otp_override
+sync_srs_webhook_secret
 
 echo "==> compose config (stage overlay)"
 "${COMPOSE[@]}" config --quiet

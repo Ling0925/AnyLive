@@ -11,6 +11,7 @@ import '../../ui/empty_state.dart';
 import '../../ui/feed_skeleton.dart';
 import '../../ui/live_card.dart';
 import '../rooms/room_page.dart';
+import '../../l10n/l10n.dart';
 
 /// Which feed list this page shows when embedded in [MainShell].
 enum FeedMode {
@@ -232,7 +233,7 @@ class _FeedPageState extends State<FeedPage>
               const SizedBox(height: 12),
               Text(error, textAlign: TextAlign.center),
               const SizedBox(height: 12),
-              FilledButton(onPressed: onRetry, child: const Text('Retry')),
+              FilledButton(onPressed: onRetry, child: Text(context.l10n.retry)),
             ],
           ),
         ),
@@ -263,18 +264,19 @@ class _FeedPageState extends State<FeedPage>
     );
   }
 
-  String get _title {
+  String _titleOf(BuildContext context) {
+    final l10n = context.l10n;
     switch (widget.mode) {
       case FeedMode.home:
-        return 'Home';
+        return l10n.feedHome;
       case FeedMode.following:
-        return 'Following';
+        return l10n.feedFollowing;
       case FeedMode.discover:
-        return 'Discover';
+        return l10n.feedDiscover;
     }
   }
 
-  PreferredSizeWidget? _appBarBottom() {
+  PreferredSizeWidget? _appBarBottom(BuildContext context) {
     if (!_showSearch && !_isDiscover) return null;
 
     if (_isDiscover) {
@@ -285,9 +287,9 @@ class _FeedPageState extends State<FeedPage>
             if (_showSearch) _searchField(),
             TabBar(
               controller: _tabs,
-              tabs: const [
-                Tab(text: 'Hot'),
-                Tab(text: 'Following'),
+              tabs: [
+                Tab(text: context.l10n.feedHot),
+                Tab(text: context.l10n.feedFollowing),
               ],
             ),
           ],
@@ -309,7 +311,7 @@ class _FeedPageState extends State<FeedPage>
         key: const Key('feed-search'),
         controller: _searchController,
         decoration: InputDecoration(
-          hintText: 'Search rooms or users',
+          hintText: context.l10n.searchRoomsOrUsers,
           isDense: true,
           filled: true,
           fillColor: const Color(0xFF121212),
@@ -354,7 +356,7 @@ class _FeedPageState extends State<FeedPage>
               (r) => ListTile(
                 dense: true,
                 title: Text(r.title),
-                subtitle: Text('room · ${r.status}'),
+                subtitle: Text(context.l10n.roomStatusLine(r.status)),
                 onTap: () => _openRoom(r),
               ),
             ),
@@ -362,7 +364,7 @@ class _FeedPageState extends State<FeedPage>
               (u) => ListTile(
                 dense: true,
                 title: Text(u.displayName),
-                subtitle: Text('user · ${u.id}'),
+                subtitle: Text(context.l10n.userIdLine(u.id)),
               ),
             ),
           ],
@@ -380,8 +382,8 @@ class _FeedPageState extends State<FeedPage>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(_title),
-        bottom: _appBarBottom(),
+        title: Text(_titleOf(context)),
+        bottom: _appBarBottom(context),
         actions: [
           IconButton(
             onPressed: _refreshAll,
@@ -406,7 +408,7 @@ class _FeedPageState extends State<FeedPage>
           error: _hotError,
           items: _hot,
           onRetry: _reloadHot,
-          emptyLabel: 'No hot rooms',
+          emptyLabel: context.l10n.noHotRooms,
         );
       case FeedMode.following:
         return _roomList(
@@ -414,8 +416,8 @@ class _FeedPageState extends State<FeedPage>
           error: _followingError,
           items: _following,
           onRetry: _reloadFollowing,
-          emptyLabel: 'No rooms from people you follow',
-          emptyCta: widget.onJumpHome != null ? 'Browse Home' : null,
+          emptyLabel: context.l10n.noFollowingRooms,
+          emptyCta: widget.onJumpHome != null ? context.l10n.browseHome : null,
           onEmptyCta: widget.onJumpHome,
         );
       case FeedMode.discover:
@@ -427,14 +429,14 @@ class _FeedPageState extends State<FeedPage>
               error: _hotError,
               items: _hot,
               onRetry: _reloadHot,
-              emptyLabel: 'No hot rooms',
+              emptyLabel: context.l10n.noHotRooms,
             ),
             _roomList(
               loading: _followingLoading,
               error: _followingError,
               items: _following,
               onRetry: _reloadFollowing,
-              emptyLabel: 'No rooms from people you follow',
+              emptyLabel: context.l10n.noFollowingRooms,
             ),
           ],
         );

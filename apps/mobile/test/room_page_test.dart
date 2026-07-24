@@ -10,6 +10,7 @@ import 'package:anylive_mobile/features/rooms/room_page.dart';
 import 'package:anylive_mobile/player/stream_preview.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:anylive_mobile/l10n/l10n.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
@@ -192,6 +193,10 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        
+        locale: const Locale('en'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         home: RoomPage(
           config: config,
           accessToken: 'tok',
@@ -236,6 +241,10 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        
+        locale: const Locale('en'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         home: RoomPage(
           config: config,
           accessToken: 'tok',
@@ -268,6 +277,10 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        
+        locale: const Locale('en'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         home: RoomPage(
           config: config,
           accessToken: 'tok',
@@ -293,6 +306,10 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        
+        locale: const Locale('en'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         home: RoomPage(
           config: config,
           accessToken: 'tok',
@@ -324,6 +341,10 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        
+        locale: const Locale('en'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         home: RoomPage(
           config: config,
           accessToken: 'tok',
@@ -368,6 +389,10 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        
+        locale: const Locale('en'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         home: RoomPage(
           config: config,
           accessToken: 'tok',
@@ -395,6 +420,10 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        
+        locale: const Locale('en'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         home: RoomPage(
           config: config,
           accessToken: 'tok',

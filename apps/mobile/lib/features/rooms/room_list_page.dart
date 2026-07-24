@@ -5,6 +5,7 @@ import '../../api/api_client.dart';
 import '../../api/rooms_repository.dart';
 import '../../config/app_config.dart';
 import 'room_page.dart';
+import '../../l10n/l10n.dart';
 
 /// Lists live rooms from the control-plane API and hosts go-live + OBS publish.
 class RoomListPage extends StatefulWidget {
@@ -92,7 +93,7 @@ class _RoomListPageState extends State<RoomListPage> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('failed: $e')),
+        SnackBar(content: Text(context.l10n.actionFailed('action', '$e'))),
       );
     } finally {
       if (mounted) setState(() => _goingLive = false);
@@ -117,14 +118,14 @@ class _RoomListPageState extends State<RoomListPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Live rooms'),
+        title: Text(context.l10n.liveRooms),
         actions: [
           IconButton(onPressed: _reload, icon: const Icon(Icons.refresh)),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _goingLive ? null : _createAndStart,
-        label: Text(_goingLive ? 'Starting…' : 'Go live'),
+        label: Text(_goingLive ? context.l10n.starting : context.l10n.goLiveAction),
         icon: const Icon(Icons.videocam),
       ),
       body: _loading
@@ -132,7 +133,7 @@ class _RoomListPageState extends State<RoomListPage> {
           : _error != null
               ? Center(child: Text(_error!))
               : _items.isEmpty
-                  ? const Center(child: Text('No live rooms'))
+                  ? Center(child: Text(context.l10n.noLiveRooms))
                   : ListView.separated(
                       itemCount: _items.length,
                       separatorBuilder: (_, _) => const Divider(height: 1),
@@ -164,7 +165,7 @@ class _GoLiveDialog extends StatelessWidget {
     await Clipboard.setData(ClipboardData(text: value));
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('$label copied')),
+      SnackBar(content: Text(context.l10n.labelCopied(label))),
     );
   }
 
@@ -175,29 +176,29 @@ class _GoLiveDialog extends StatelessWidget {
     // push_url is rtmp://host/app/stream — OBS wants Server=rtmp://host/app and Key=stream.
     final server = _obsServerFromPushUrl(push, key);
     return AlertDialog(
-      title: const Text('You are live'),
+      title: Text(context.l10n.youAreLive),
       content: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(room.title, style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            Text('Room: ${room.id}',
+            SizedBox(height: 8),
+            Text(context.l10n.roomIdLine(room.id),
                 style: Theme.of(context).textTheme.bodySmall),
-            const SizedBox(height: 16),
-            Text('OBS Server (Custom RTMP)',
+            SizedBox(height: 16),
+            Text(context.l10n.obsServerCustom,
                 style: Theme.of(context).textTheme.labelLarge),
-            const SizedBox(height: 4),
-            SelectableText(server.isEmpty ? '(unavailable)' : server),
-            const SizedBox(height: 8),
-            Text('OBS Stream key',
+            SizedBox(height: 4),
+            SelectableText(server.isEmpty ? context.l10n.unavailable : server),
+            SizedBox(height: 8),
+            Text(context.l10n.obsStreamKey,
                 style: Theme.of(context).textTheme.labelLarge),
             SelectableText(key),
-            const SizedBox(height: 8),
-            const Text(
-              'In OBS: Settings → Stream → Service=Custom. '
-              'Paste Server and Stream key separately — do not put the key in the server URL.',
+            SizedBox(height: 8),
+            Text(
+              '${context.l10n.obsInstructions} '
+              '${context.l10n.obsKeySeparate}',
             ),
           ],
         ),
@@ -205,20 +206,20 @@ class _GoLiveDialog extends StatelessWidget {
       actions: [
         if (server.isNotEmpty)
           TextButton(
-            onPressed: () => _copy(context, 'OBS Server', server),
-            child: const Text('Copy server'),
+            onPressed: () => _copy(context, context.l10n.obsServer, server),
+            child: Text(context.l10n.copyServer),
           ),
         TextButton(
           onPressed: () => _copy(context, 'Stream key', key),
-          child: const Text('Copy stream key'),
+          child: Text(context.l10n.copyStreamKey),
         ),
         FilledButton(
           onPressed: () => Navigator.of(context).pop(true),
-          child: const Text('Open room'),
+          child: Text(context.l10n.openRoom),
         ),
         TextButton(
           onPressed: () => Navigator.of(context).pop(false),
-          child: const Text('Close'),
+          child: Text(context.l10n.close),
         ),
       ],
     );

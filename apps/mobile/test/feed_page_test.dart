@@ -7,6 +7,7 @@ import 'package:anylive_mobile/features/home/home_page.dart';
 import 'package:anylive_mobile/ui/feed_skeleton.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:anylive_mobile/l10n/l10n.dart';
 
 class FakeSocialRepo extends SocialRepository {
   FakeSocialRepo({
@@ -56,6 +57,10 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        
+        locale: const Locale('en'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         home: FeedPage(
           config: config,
           accessToken: 'tok',
@@ -85,6 +90,10 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        
+        locale: const Locale('en'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         home: FeedPage(
           config: config,
           accessToken: 'tok',
@@ -99,7 +108,11 @@ void main() {
 
   testWidgets('home shows MainShell tabs when logged in', (tester) async {
     await tester.pumpWidget(
-      const MaterialApp(
+      MaterialApp(
+        
+        locale: const Locale('en'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         home: HomePage(
           config: config,
           sessionLabel: 'Ada',

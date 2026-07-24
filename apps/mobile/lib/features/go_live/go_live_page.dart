@@ -7,6 +7,7 @@ import '../../config/app_config.dart';
 import '../../theme/any_colors.dart';
 import '../../ui/live_badge.dart';
 import '../rooms/room_page.dart';
+import '../../l10n/l10n.dart';
 
 /// OBS-first Go Live tab (create + start + publish credentials).
 class GoLivePage extends StatefulWidget {
@@ -29,7 +30,7 @@ class GoLivePage extends StatefulWidget {
 
 class _GoLivePageState extends State<GoLivePage> {
   late final RoomsRepository _rooms;
-  final _titleController = TextEditingController(text: 'My Live');
+  final _titleController = TextEditingController();
   Room? _room;
   PublishInfo? _publish;
   String? _error;
@@ -59,7 +60,7 @@ class _GoLivePageState extends State<GoLivePage> {
     });
     try {
       final title = _titleController.text.trim().isEmpty
-          ? 'My Live'
+          ? context.l10n.defaultLiveTitle
           : _titleController.text.trim();
       final room = await _rooms.createRoom(title);
       final started = await _rooms.startRoom(room.id);
@@ -95,7 +96,7 @@ class _GoLivePageState extends State<GoLivePage> {
         _busy = false;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Live ended')),
+        SnackBar(content: Text(context.l10n.liveEnded)),
       );
     } catch (e) {
       if (!mounted) return;
@@ -134,7 +135,7 @@ class _GoLivePageState extends State<GoLivePage> {
     await Clipboard.setData(ClipboardData(text: value));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('$label copied')),
+      SnackBar(content: Text(context.l10n.labelCopied(label))),
     );
   }
 
@@ -183,42 +184,42 @@ class _GoLivePageState extends State<GoLivePage> {
     return Scaffold(
       backgroundColor: AnyColors.bg,
       appBar: AppBar(
-        title: const Text('Go Live'),
+        title: Text(context.l10n.goLiveTitle),
         backgroundColor: AnyColors.bg,
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
         children: [
           Text(
-            isLive ? 'You are live' : 'Broadcast with OBS',
+            isLive ? context.l10n.youAreLive : context.l10n.broadcastWithObs,
             style: const TextStyle(
               color: AnyColors.textPrimary,
               fontSize: 20,
               fontWeight: FontWeight.w700,
             ),
           ),
-          const SizedBox(height: 8),
-          const Text(
+          SizedBox(height: 8),
+          Text(
             'Stream with OBS (recommended for P1). Paste Server + full Stream Key including ?exp=&sig=.',
             style: TextStyle(color: AnyColors.textSecondary, height: 1.35),
           ),
-          const SizedBox(height: 16),
+          SizedBox(height: 16),
           TextField(
             key: const Key('go-live-title'),
             controller: _titleController,
             enabled: !isLive && !_busy,
-            decoration: const InputDecoration(
-              labelText: 'Room title',
-              hintText: 'My Live',
+            decoration: InputDecoration(
+              labelText: context.l10n.roomTitle,
+              hintText: context.l10n.defaultLiveTitle,
             ),
           ),
-          const SizedBox(height: 16),
+          SizedBox(height: 16),
           if (!isLive)
             FilledButton.icon(
               key: const Key('go-live-start'),
               onPressed: _busy ? null : _startLive,
               icon: const Icon(Icons.videocam),
-              label: Text(_busy ? 'Working…' : 'Start live'),
+              label: Text(_busy ? context.l10n.working : context.l10n.startLive),
             ),
           if (_error != null) ...[
             const SizedBox(height: 12),
@@ -252,9 +253,9 @@ class _GoLivePageState extends State<GoLivePage> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 6),
+                  SizedBox(height: 6),
                   Text(
-                    'status: ${room.status}',
+                    context.l10n.roomStatus(room.status),
                     style: const TextStyle(
                       color: AnyColors.textMuted,
                       fontSize: 12,
@@ -273,45 +274,45 @@ class _GoLivePageState extends State<GoLivePage> {
               ),
             ),
             if (publish != null || room.isLive) ...[
-              const SizedBox(height: 16),
+              SizedBox(height: 16),
               _credTile(
-                label: 'OBS Server',
+                label: context.l10n.obsServer,
                 value: server,
-                onCopy: () => _copy('Server', server),
+                onCopy: () => _copy(context.l10n.server, server),
               ),
               _credTile(
                 label: 'Stream Key (full, with ?exp=&sig=)',
                 value: key,
-                onCopy: () => _copy('Stream key', key),
+                onCopy: () => _copy(context.l10n.streamKey, key),
               ),
             ],
-            const SizedBox(height: 12),
+            SizedBox(height: 12),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
                 OutlinedButton(
                   onPressed: _busy ? null : _refreshPublish,
-                  child: const Text('Refresh OBS keys'),
+                  child: Text(context.l10n.refreshObsKeys),
                 ),
                 OutlinedButton(
                   key: const Key('go-live-open-room'),
                   onPressed: _openRoom,
-                  child: const Text('Open my room'),
+                  child: Text(context.l10n.openMyRoom),
                 ),
                 if (room.isLive)
                   OutlinedButton(
                     key: const Key('go-live-end'),
                     onPressed: _busy ? null : _stopLive,
-                    child: const Text(
-                      'End live',
+                    child: Text(
+                      context.l10n.endLive,
                       style: TextStyle(color: AnyColors.danger),
                     ),
                   ),
               ],
             ),
           ],
-          const SizedBox(height: 24),
+          SizedBox(height: 24),
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
@@ -319,9 +320,9 @@ class _GoLivePageState extends State<GoLivePage> {
               borderRadius: BorderRadius.circular(10),
               border: Border.all(color: AnyColors.border),
             ),
-            child: const Text(
-              'In OBS: Settings → Stream → Service = Custom.\n'
-              'Paste Server and Stream key separately — do not put the key in the server URL.',
+            child: Text(
+              '${context.l10n.obsInstructions}\n'
+              '${context.l10n.obsKeySeparate}',
               style: TextStyle(
                 color: AnyColors.textMuted,
                 fontSize: 13,
@@ -360,7 +361,7 @@ class _GoLivePageState extends State<GoLivePage> {
                 fontWeight: FontWeight.w600,
               ),
             ),
-            const SizedBox(height: 6),
+            SizedBox(height: 6),
             SelectableText(
               value.isEmpty ? '—' : value,
               style: const TextStyle(
@@ -374,7 +375,7 @@ class _GoLivePageState extends State<GoLivePage> {
               child: TextButton.icon(
                 onPressed: value.isEmpty ? null : onCopy,
                 icon: const Icon(Icons.copy, size: 16),
-                label: const Text('Copy'),
+                label: Text(context.l10n.copy),
               ),
             ),
           ],

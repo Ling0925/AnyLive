@@ -19,6 +19,7 @@ import '../../player/hls_player_logic.dart';
 import '../../player/stream_preview.dart';
 import '../../theme/any_colors.dart';
 import '../../ui/live_badge.dart';
+import '../../l10n/l10n.dart';
 
 /// Live room detail: title/status, HLS preview, chat, gifts, wallet, follow, report.
 ///
@@ -298,14 +299,14 @@ class _RoomPageState extends State<RoomPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            st.recordingEnabled ? 'Recording enabled' : 'Recording disabled',
+            st.recordingEnabled ? context.l10n.recordingEnabled : context.l10n.recordingDisabled,
           ),
         ),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('recording failed: $e')),
+        SnackBar(content: Text(context.l10n.actionFailed('recording', '$e'))),
       );
     } finally {
       if (mounted) setState(() => _hostBusy = false);
@@ -375,8 +376,8 @@ class _RoomPageState extends State<RoomPage> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Text(
-                  'Share live',
+                Text(
+                  context.l10n.shareLive,
                   style: TextStyle(
                     color: AnyColors.textPrimary,
                     fontSize: 16,
@@ -391,18 +392,18 @@ class _RoomPageState extends State<RoomPage> {
                     fontSize: 13,
                   ),
                 ),
-                const SizedBox(height: 16),
+                SizedBox(height: 16),
                 FilledButton.icon(
                   key: const Key('room-share-copy'),
                   onPressed: () {
                     Clipboard.setData(ClipboardData(text: shareUrl));
                     Navigator.of(ctx).pop();
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Link copied')),
+                      SnackBar(content: Text(context.l10n.linkCopied)),
                     );
                   },
                   icon: const Icon(Icons.link),
-                  label: const Text('Copy link'),
+                  label: Text(context.l10n.copyLink),
                 ),
               ],
             ),
@@ -481,20 +482,20 @@ class _RoomPageState extends State<RoomPage> {
         if (!mounted) return;
         setState(() => _followingHost = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Unfollowed host')),
+          SnackBar(content: Text(context.l10n.unfollowedHost)),
         );
       } else {
         await _social.follow(_room.ownerId);
         if (!mounted) return;
         setState(() => _followingHost = true);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Following host')),
+          SnackBar(content: Text(context.l10n.followingHost)),
         );
       }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('follow failed: $e')),
+        SnackBar(content: Text(context.l10n.actionFailed('follow', '$e'))),
       );
     } finally {
       if (mounted) setState(() => _followBusy = false);
@@ -516,12 +517,12 @@ class _RoomPageState extends State<RoomPage> {
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Report submitted')),
+        SnackBar(content: Text(context.l10n.reportSubmitted)),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('report failed: $e')),
+        SnackBar(content: Text(context.l10n.actionFailed('report', '$e'))),
       );
     }
   }
@@ -546,7 +547,7 @@ class _RoomPageState extends State<RoomPage> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('chat failed: $e')),
+        SnackBar(content: Text(context.l10n.actionFailed('chat', '$e'))),
       );
     } finally {
       if (mounted) setState(() => _sending = false);
@@ -594,7 +595,7 @@ class _RoomPageState extends State<RoomPage> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('gift failed: $e')),
+        SnackBar(content: Text(context.l10n.actionFailed('gift', '$e'))),
       );
     } finally {
       if (mounted) setState(() => _sending = false);
@@ -618,13 +619,15 @@ class _RoomPageState extends State<RoomPage> {
       ));
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Co-host invite sent (${session.status})')),
+        SnackBar(
+          content: Text(context.l10n.cohostInviteSent(session.status)),
+        ),
       );
     } catch (e) {
       if (!mounted) return;
       final msg = e is InteractiveException && e.statusCode == 403
-          ? 'invite unavailable (feature off)'
-          : 'invite failed: $e';
+          ? context.l10n.inviteUnavailable
+          : context.l10n.actionFailed('invite', '$e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(msg)),
       );
@@ -643,16 +646,16 @@ class _RoomPageState extends State<RoomPage> {
         SnackBar(
           content: Text(
             accept
-                ? 'Co-host accepted (${session.status})'
-                : 'Co-host declined (${session.status})',
+                ? context.l10n.cohostAccepted(session.status)
+                : context.l10n.cohostDeclined(session.status),
           ),
         ),
       );
     } catch (e) {
       if (!mounted) return;
       final msg = e is InteractiveException && e.statusCode == 403
-          ? 'co-host unavailable (feature off)'
-          : 'respond failed: $e';
+          ? context.l10n.cohostUnavailable
+          : context.l10n.actionFailed('respond', '$e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(msg)),
       );
@@ -668,13 +671,15 @@ class _RoomPageState extends State<RoomPage> {
       await showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('LiveKit join'),
+          title: Text(ctx.l10n.livekitJoin),
           content: SingleChildScrollView(
             child: SelectableText(
-              'url: ${info.url}\n'
-              'room: ${info.roomName}\n'
-              'identity: ${info.identity ?? "-"}\n'
-              'token: ${info.token}',
+              ctx.l10n.livekitJoinDetail(
+                info.url,
+                info.roomName,
+                info.identity ?? '-',
+                info.token,
+              ),
             ),
           ),
           actions: [
@@ -683,11 +688,11 @@ class _RoomPageState extends State<RoomPage> {
                 Clipboard.setData(ClipboardData(text: info.token));
                 Navigator.of(ctx).pop();
               },
-              child: const Text('Copy token'),
+              child: Text(ctx.l10n.copyToken),
             ),
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Close'),
+              child: Text(ctx.l10n.close),
             ),
           ],
         ),
@@ -695,7 +700,9 @@ class _RoomPageState extends State<RoomPage> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('LiveKit join failed: $e')),
+        SnackBar(
+          content: Text(context.l10n.actionFailed('LiveKit join', '$e')),
+        ),
       );
     }
   }
@@ -718,13 +725,13 @@ class _RoomPageState extends State<RoomPage> {
       if (!mounted) return;
       setState(() => _pk = pk);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('PK started')),
+        SnackBar(content: Text(context.l10n.pkStarted)),
       );
     } catch (e) {
       if (!mounted) return;
       final msg = e is InteractiveException && e.statusCode == 403
-          ? 'PK unavailable (feature off)'
-          : 'PK start failed: $e';
+          ? context.l10n.pkUnavailable
+          : context.l10n.actionFailed('PK start', '$e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(msg)),
       );
@@ -747,16 +754,16 @@ class _RoomPageState extends State<RoomPage> {
         SnackBar(
           content: Text(
             pk.winnerRoomId == null
-                ? 'PK ended'
-                : 'PK ended · winner ${pk.winnerRoomId}',
+                ? context.l10n.pkEnded
+                : context.l10n.pkEndedWithWinner(pk.winnerRoomId!),
           ),
         ),
       );
     } catch (e) {
       if (!mounted) return;
       final msg = e is InteractiveException && e.statusCode == 403
-          ? 'PK unavailable (feature off)'
-          : 'PK end failed: $e';
+          ? context.l10n.pkUnavailable
+          : context.l10n.actionFailed('PK end', '$e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(msg)),
       );
@@ -773,15 +780,15 @@ class _RoomPageState extends State<RoomPage> {
       await showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('OBS publish'),
+          title: Text(context.l10n.obsPublish),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text('Server', style: Theme.of(ctx).textTheme.labelLarge),
+              Text(ctx.l10n.server, style: Theme.of(ctx).textTheme.labelLarge),
               SelectableText(server.isEmpty ? info.pushUrl : server),
-              const SizedBox(height: 8),
-              Text('Stream key', style: Theme.of(ctx).textTheme.labelLarge),
+              SizedBox(height: 8),
+              Text(ctx.l10n.streamKey, style: Theme.of(ctx).textTheme.labelLarge),
               SelectableText(info.streamKey),
             ],
           ),
@@ -790,17 +797,17 @@ class _RoomPageState extends State<RoomPage> {
               onPressed: () {
                 Clipboard.setData(ClipboardData(text: server.isEmpty ? info.pushUrl : server));
               },
-              child: const Text('Copy server'),
+              child: Text(ctx.l10n.copyServer),
             ),
             TextButton(
               onPressed: () {
                 Clipboard.setData(ClipboardData(text: info.streamKey));
               },
-              child: const Text('Copy key'),
+              child: Text(ctx.l10n.copyKey),
             ),
             FilledButton(
               onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Close'),
+              child: Text(ctx.l10n.close),
             ),
           ],
         ),
@@ -808,7 +815,9 @@ class _RoomPageState extends State<RoomPage> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('publish info failed: $e')),
+        SnackBar(
+          content: Text(context.l10n.actionFailed('publish info', '$e')),
+        ),
       );
     } finally {
       if (mounted) setState(() => _hostBusy = false);
@@ -834,14 +843,14 @@ class _RoomPageState extends State<RoomPage> {
       }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Live started — use OBS publish for stream key'),
+        SnackBar(
+          content: Text(context.l10n.liveStartedObsHint),
         ),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('start failed: $e')),
+        SnackBar(content: Text(context.l10n.actionFailed('start', '$e'))),
       );
     } finally {
       if (mounted) setState(() => _hostBusy = false);
@@ -860,12 +869,12 @@ class _RoomPageState extends State<RoomPage> {
       });
       _presencePoll?.cancel();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Live stopped — room idle (not closed)')),
+        SnackBar(content: Text(context.l10n.liveStoppedIdle)),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('stop failed: $e')),
+        SnackBar(content: Text(context.l10n.actionFailed('stop', '$e'))),
       );
     } finally {
       if (mounted) setState(() => _hostBusy = false);
@@ -878,12 +887,12 @@ class _RoomPageState extends State<RoomPage> {
       if (!mounted) return;
       setState(() => _balance = balance);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Topped up +100')),
+        SnackBar(content: Text(context.l10n.toppedUp)),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('topup failed: $e')),
+        SnackBar(content: Text(context.l10n.actionFailed('topup', '$e'))),
       );
     }
   }
@@ -897,7 +906,7 @@ class _RoomPageState extends State<RoomPage> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('like failed: $e')),
+        SnackBar(content: Text(context.l10n.actionFailed('like', '$e'))),
       );
     }
   }
@@ -907,19 +916,19 @@ class _RoomPageState extends State<RoomPage> {
       PopupMenuItem(
         value: 'like',
         enabled: _room.isLive,
-        child: Text('Like ($_likeCount)'),
+        child: Text(context.l10n.likeCount(_likeCount)),
       ),
-      const PopupMenuItem(
+      PopupMenuItem(
         value: 'share',
-        child: Text('Share'),
+        child: Text(context.l10n.share),
       ),
-      const PopupMenuItem(
+      PopupMenuItem(
         value: 'report',
-        child: Text('Report'),
+        child: Text(context.l10n.report),
       ),
-      const PopupMenuItem(
+      PopupMenuItem(
         value: 'refresh',
-        child: Text('Refresh'),
+        child: Text(context.l10n.refresh),
       ),
     ];
 
@@ -927,65 +936,65 @@ class _RoomPageState extends State<RoomPage> {
       items.add(const PopupMenuDivider());
       if (!_room.isLive) {
         items.add(
-          const PopupMenuItem(
+          PopupMenuItem(
             key: Key('host-start-live'),
             value: 'start',
-            child: Text('Start live'),
+            child: Text(context.l10n.startLive),
           ),
         );
       }
       if (_room.isLive) {
         if (_featureCohost) {
-          items.addAll(const [
+          items.addAll([
             PopupMenuItem(
               key: Key('cohost-invite'),
               value: 'cohost-invite',
-              child: Text('Invite co-host'),
+              child: Text(context.l10n.inviteCohost),
             ),
             PopupMenuItem(
               key: Key('cohost-accept'),
               value: 'cohost-accept',
-              child: Text('Accept co-host'),
+              child: Text(context.l10n.acceptCohost),
             ),
             PopupMenuItem(
               key: Key('cohost-decline'),
               value: 'cohost-decline',
-              child: Text('Decline co-host'),
+              child: Text(context.l10n.declineCohost),
             ),
           ]);
         }
         if (_featurePk) {
           if (_pk == null || !_pk!.isActive) {
             items.add(
-              const PopupMenuItem(
+              PopupMenuItem(
                 key: Key('pk-start'),
                 value: 'pk-start',
-                child: Text('Start PK'),
+                child: Text(context.l10n.startPk),
               ),
             );
           } else {
             items.add(
-              const PopupMenuItem(
+              PopupMenuItem(
                 key: Key('pk-end'),
                 value: 'pk-end',
-                child: Text('End PK'),
+                child: Text(context.l10n.endPk),
               ),
             );
           }
         }
         if (_featureCohost || _featurePk) {
           items.add(
-            const PopupMenuItem(
-              key: Key('livekit-join'),
+            PopupMenuItem(
+              key: const Key('livekit-join'),
               value: 'livekit-join',
-              child: Text('LiveKit join'),
+              child: Text(context.l10n.livekitJoin),
             ),
           );
         }
         items.add(
-          const PopupMenuItem(
+          PopupMenuItem(
             value: 'obs',
-            child: Text('OBS publish'),
+            child: Text(context.l10n.obsPublish),
           ),
         );
         items.add(
@@ -993,15 +1002,15 @@ class _RoomPageState extends State<RoomPage> {
             key: const Key('recording-toggle'),
             value: 'recording',
             child: Text(
-              _recordingEnabled ? 'Disable recording' : 'Enable recording',
+              _recordingEnabled ? context.l10n.disableRecording : context.l10n.enableRecording,
             ),
           ),
         );
         items.add(
-          const PopupMenuItem(
+          PopupMenuItem(
             key: Key('host-stop-live'),
             value: 'stop',
-            child: Text('Stop live'),
+            child: Text(context.l10n.stopLive),
           ),
         );
       }
@@ -1082,7 +1091,7 @@ class _RoomPageState extends State<RoomPage> {
             key: const Key('room-host-menu'),
             enabled: !_hostBusy,
             icon: const Icon(Icons.more_vert),
-            tooltip: 'More',
+            tooltip: context.l10n.more,
             onSelected: _onMoreSelected,
             itemBuilder: (_) => _moreMenuItems(),
           ),
@@ -1126,14 +1135,14 @@ class _RoomPageState extends State<RoomPage> {
                             busy: _followBusy,
                             onToggle: _toggleFollow,
                           ),
-                          const Divider(height: 1, color: Color(0x14FFFFFF)),
+                          Divider(height: 1, color: Color(0x14FFFFFF)),
                           // 4) Chat panel (scrolls with stage on short viewports)
                           if (_messages.isEmpty)
-                            const Padding(
+                            Padding(
                               padding: EdgeInsets.symmetric(vertical: 24),
                               child: Center(
                                 child: Text(
-                                  'No messages yet',
+                                  context.l10n.noMessagesYet,
                                   style: TextStyle(
                                     color: AnyColors.textSecondary,
                                     fontSize: 13,
@@ -1190,8 +1199,8 @@ class _RoomPageState extends State<RoomPage> {
                       onSend: _sendChat,
                       enabled: !_sending && _room.isLive,
                       offlineHint: !_room.isLive && !_roomTerminal
-                          ? 'Room offline — chat send disabled'
-                          : (_roomTerminal ? 'Stream ended — chat closed' : null),
+                          ? context.l10n.roomOfflineChatDisabled
+                          : (_roomTerminal ? context.l10n.streamEndedChatClosed : null),
                     ),
                     // 6) Gift dock + balance / top-up (hide when permanently closed)
                     if (!_roomTerminal)
@@ -1229,11 +1238,11 @@ class _ReportRoomDialogState extends State<_ReportRoomDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Report room'),
+      title: Text(context.l10n.reportRoom),
       content: TextField(
         controller: _reasonController,
-        decoration: const InputDecoration(
-          labelText: 'Reason',
+        decoration: InputDecoration(
+          labelText: context.l10n.reason,
           border: OutlineInputBorder(),
         ),
         maxLines: 3,
@@ -1242,12 +1251,12 @@ class _ReportRoomDialogState extends State<_ReportRoomDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
+          child: Text(context.l10n.cancel),
         ),
         FilledButton(
           onPressed: () =>
               Navigator.of(context).pop(_reasonController.text.trim()),
-          child: const Text('Submit'),
+          child: Text(context.l10n.submit),
         ),
       ],
     );
@@ -1273,12 +1282,12 @@ class _InviteCohostDialogState extends State<_InviteCohostDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Invite co-host'),
+      title: Text(context.l10n.inviteCohost),
       content: TextField(
         key: const Key('cohost-invitee-id'),
         controller: _controller,
-        decoration: const InputDecoration(
-          labelText: 'Invitee user id (UUID)',
+        decoration: InputDecoration(
+          labelText: context.l10n.inviteeUserId,
           border: OutlineInputBorder(),
         ),
         autofocus: true,
@@ -1286,11 +1295,11 @@ class _InviteCohostDialogState extends State<_InviteCohostDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
+          child: Text(context.l10n.cancel),
         ),
         FilledButton(
           onPressed: () => Navigator.of(context).pop(_controller.text.trim()),
-          child: const Text('Invite'),
+          child: Text(context.l10n.invite),
         ),
       ],
     );
@@ -1316,12 +1325,12 @@ class _StartPkDialogState extends State<_StartPkDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Start PK'),
+      title: Text(context.l10n.startPk),
       content: TextField(
         key: const Key('pk-opponent-room-id'),
         controller: _controller,
-        decoration: const InputDecoration(
-          labelText: 'Opponent room id (UUID)',
+        decoration: InputDecoration(
+          labelText: context.l10n.opponentRoomId,
           border: OutlineInputBorder(),
         ),
         autofocus: true,
@@ -1329,11 +1338,11 @@ class _StartPkDialogState extends State<_StartPkDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
+          child: Text(context.l10n.cancel),
         ),
         FilledButton(
           onPressed: () => Navigator.of(context).pop(_controller.text.trim()),
-          child: const Text('Start'),
+          child: Text(context.l10n.start),
         ),
       ],
     );
@@ -1413,10 +1422,10 @@ class _PlayerStage extends StatelessWidget {
                     child: Row(
                       children: [
                         if (room.isLive && !roomOffline)
-                          const LiveBadge(compact: true)
+                          LiveBadge(compact: true)
                         else
                           Text(
-                            roomTerminal ? 'ENDED' : room.status.toUpperCase(),
+                            roomTerminal ? context.l10n.statusEnded : room.status.toUpperCase(),
                             style: const TextStyle(
                               color: Colors.white70,
                               fontSize: 11,
@@ -1463,7 +1472,7 @@ class _PlayerStage extends StatelessWidget {
                         decoration: BoxDecoration(
                           color: AnyColors.accent.withValues(alpha: 0.92),
                           borderRadius: BorderRadius.circular(16),
-                          boxShadow: const [
+                          boxShadow: [
                             BoxShadow(
                               color: Color(0x66C850FF),
                               blurRadius: 18,
@@ -1529,8 +1538,18 @@ class _MetaRow extends StatelessWidget {
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
-                'PK ${pk!.status}: ${pk!.scoreA} – ${pk!.scoreB}'
-                '${pk!.winnerRoomId != null ? ' · win ${pk!.winnerRoomId}' : ''}',
+                pk!.winnerRoomId == null
+                    ? context.l10n.pkScoreLine(
+                        pk!.status,
+                        pk!.scoreA,
+                        pk!.scoreB,
+                      )
+                    : context.l10n.pkScoreLineWinner(
+                        pk!.status,
+                        pk!.scoreA,
+                        pk!.scoreB,
+                        pk!.winnerRoomId!,
+                      ),
                 key: const Key('pk-score'),
                 style: const TextStyle(
                   color: AnyColors.textPrimary,
@@ -1543,19 +1562,19 @@ class _MetaRow extends StatelessWidget {
           Row(
             children: [
               if (room.isLive && !roomOffline) ...[
-                const LiveBadge(compact: true),
-                const SizedBox(width: 8),
+                LiveBadge(compact: true),
+                SizedBox(width: 8),
               ] else
                 Container(
                   padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
                     color: AnyColors.bgElevated,
                     borderRadius:
                         BorderRadius.circular(AnyColors.radiusPill),
                   ),
                   child: Text(
-                    roomTerminal ? 'ENDED' : room.status.toUpperCase(),
+                    roomTerminal ? context.l10n.statusEnded : room.status.toUpperCase(),
                     style: const TextStyle(
                       color: AnyColors.textSecondary,
                       fontSize: 10,
@@ -1616,7 +1635,7 @@ class _ChannelRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final label = ownerId.isEmpty
-        ? 'Host'
+        ? context.l10n.host
         : (ownerId.length <= 12 ? ownerId : '${ownerId.substring(0, 10)}…');
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
@@ -1648,8 +1667,8 @@ class _ChannelRow extends StatelessWidget {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                const Text(
-                  'Host',
+                Text(
+                  context.l10n.host,
                   style: TextStyle(
                     color: AnyColors.textSecondary,
                     fontSize: 12,
@@ -1669,7 +1688,7 @@ class _ChannelRow extends StatelessWidget {
                       side: const BorderSide(color: Color(0x33FFFFFF)),
                       visualDensity: VisualDensity.compact,
                     ),
-                    child: const Text('Unfollow'),
+                    child: Text(context.l10n.unfollow),
                   )
                 : FilledButton(
                     key: const ValueKey('follow'),
@@ -1677,7 +1696,7 @@ class _ChannelRow extends StatelessWidget {
                     style: FilledButton.styleFrom(
                       visualDensity: VisualDensity.compact,
                     ),
-                    child: const Text('Follow'),
+                    child: Text(context.l10n.follow),
                   ),
           ),
         ],
@@ -1702,7 +1721,7 @@ class _ChatInput extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hint = offlineHint ?? 'Say something…';
+    final hint = offlineHint ?? context.l10n.saySomething;
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
       child: Row(
@@ -1757,24 +1776,24 @@ class _GiftDock extends StatelessWidget {
           children: [
             Row(
               children: [
-                const Icon(
+                Icon(
                   Icons.account_balance_wallet,
                   size: 16,
                   color: AnyColors.accent,
                 ),
-                const SizedBox(width: 6),
+                SizedBox(width: 6),
                 Text(
-                  'Balance: $balance',
+                  context.l10n.balance(balance),
                   style: const TextStyle(
                     color: AnyColors.textPrimary,
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                const Spacer(),
+                Spacer(),
                 TextButton(
                   onPressed: onTopup,
-                  child: const Text('Top up'),
+                  child: Text(context.l10n.topUp),
                 ),
               ],
             ),

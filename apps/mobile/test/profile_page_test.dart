@@ -6,6 +6,7 @@ import 'package:anylive_mobile/features/home/home_page.dart';
 import 'package:anylive_mobile/features/profile/profile_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:anylive_mobile/l10n/l10n.dart';
 
 class FakeProfileRepo extends ProfileRepository {
   FakeProfileRepo({
@@ -114,6 +115,10 @@ void main() {
     String? saved;
     await tester.pumpWidget(
       MaterialApp(
+        
+        locale: const Locale('en'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         home: ProfilePage(
           config: config,
           accessToken: 'tok',
@@ -160,6 +165,10 @@ void main() {
     final compliance = FakeComplianceRepo();
     await tester.pumpWidget(
       MaterialApp(
+        
+        locale: const Locale('en'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         home: ProfilePage(
           config: config,
           accessToken: 'tok',
@@ -192,7 +201,11 @@ void main() {
 
   testWidgets('You tab shows Profile and Logout when logged in', (tester) async {
     await tester.pumpWidget(
-      const MaterialApp(
+      MaterialApp(
+        
+        locale: const Locale('en'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         home: HomePage(
           config: config,
           sessionLabel: 'Ada',

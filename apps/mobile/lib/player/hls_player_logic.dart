@@ -47,3 +47,18 @@ bool isLikelyHlsUrl(String? url) {
   if (path.endsWith('.m3u8') || path.contains('/hls/')) return true;
   return false;
 }
+
+/// Rewrite `localhost` / `0.0.0.0` hosts to [preferHost] for browser playback.
+///
+/// API often emits `http://localhost:8080/...` while the Flutter web app is
+/// opened at `http://127.0.0.1:5174`. Mixed loopback hostnames can break HLS
+/// fetches / cookies in some browsers; keep host consistent with the page.
+String normalizePlaybackUrl(String url, {String preferHost = '127.0.0.1'}) {
+  final raw = url.trim();
+  if (raw.isEmpty) return raw;
+  final uri = Uri.tryParse(raw);
+  if (uri == null || !uri.hasScheme) return raw;
+  final host = uri.host.toLowerCase();
+  if (host != 'localhost' && host != '0.0.0.0' && host != '::1') return raw;
+  return uri.replace(host: preferHost).toString();
+}

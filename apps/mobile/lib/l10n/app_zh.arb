@@ -1,0 +1,392 @@
+{
+  "@@locale": "zh",
+  "appTitle": "AnyLive",
+  "appTitleFlavor": "AnyLive（{flavor}）",
+  "@appTitleFlavor": {
+    "placeholders": {
+      "flavor": {"type": "String"}
+    }
+  },
+  "appTagline": "AnyLive 移动端",
+  "envFlavorLine": "环境：{env} · {flavor}",
+  "@envFlavorLine": {
+    "placeholders": {
+      "env": {"type": "String"},
+      "flavor": {"type": "String"}
+    }
+  },
+  "envLine": "环境：{env}",
+  "@envLine": {
+    "placeholders": {
+      "env": {"type": "String"}
+    }
+  },
+  "flavorLine": "渠道：{flavor}",
+  "@flavorLine": {
+    "placeholders": {
+      "flavor": {"type": "String"}
+    }
+  },
+  "apiLine": "API：{url}",
+  "@apiLine": {
+    "placeholders": {
+      "url": {"type": "String"}
+    }
+  },
+  "brandFlavor": "AnyLive · {flavor}",
+  "@brandFlavor": {
+    "placeholders": {
+      "flavor": {"type": "String"}
+    }
+  },
+
+  "navHome": "首页",
+  "navFollowing": "关注",
+  "navGoLive": "开播",
+  "goLiveAction": "开播",
+  "navYou": "我的",
+  "signIn": "登录",
+  "language": "语言",
+  "languageSystem": "跟随系统",
+  "languageChinese": "中文",
+  "languageEnglish": "English",
+  "languageSection": "语言与显示",
+
+  "loginTitle": "AnyLive 登录",
+  "loginHeadline": "邮箱登录",
+  "loginDevOtpHint": "本地联调：ALLOW_DEV_OTP=1 时固定验证码 123456。",
+  "loginOtpHint": "我们会发送一次性验证码到邮箱，若较慢请检查垃圾箱。",
+  "email": "邮箱",
+  "otpCode": "验证码",
+  "otpCodeDev": "验证码（开发：123456）",
+  "sendOtp": "发送验证码",
+  "resendCode": "重新发送",
+  "resendInSeconds": "{seconds} 秒后可重发",
+  "@resendInSeconds": {
+    "placeholders": {
+      "seconds": {"type": "int"}
+    }
+  },
+  "ageConfirm": "我确认已满 18 岁",
+  "privacyAccept": "我接受隐私政策",
+  "pleaseWait": "请稍候…",
+  "verifyContinue": "验证并继续",
+  "useDifferentEmail": "使用其他邮箱",
+  "privacyPolicy": "隐私政策",
+  "termsOfService": "服务条款",
+  "enterValidEmail": "请输入有效邮箱地址。",
+  "enterOtpFromEmail": "请输入邮箱中的验证码。",
+  "errInvalidRequest": "请求无效，请检查邮箱和验证码。",
+  "errInvalidOrExpiredOtp": "验证码无效或已过期，请重新获取。",
+  "errOtpNotFound": "未找到验证码，请先发送。",
+  "errTooManyAttempts": "尝试次数过多，请稍后再试。",
+  "errCannotReachApi": "无法连接 API（{url}）。",
+  "@errCannotReachApi": {
+    "placeholders": {
+      "url": {"type": "String"}
+    }
+  },
+
+  "youTitle": "我的",
+  "signedInAs": "已登录：{name}",
+  "@signedInAs": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "sectionAccount": "账号",
+  "sectionSession": "会话",
+  "sectionAbout": "关于",
+  "profilePrivacy": "资料与隐私",
+  "profilePrivacySub": "修改昵称、隐私、导出 / 注销",
+  "wallet": "钱包",
+  "walletSub": "余额、充值、流水",
+  "logout": "退出登录",
+  "logoutSub": "撤销本设备会话",
+  "logoutConfirmTitle": "退出登录？",
+  "logoutConfirmBody": "退出后需再次使用邮箱验证码登录。",
+  "cancel": "取消",
+  "logOut": "退出",
+
+  "editProfile": "编辑资料",
+  "displayName": "昵称",
+  "displayNameRequired": "请填写昵称",
+  "avatarUrl": "头像 URL",
+  "regionHint": "地区（如 US、SG）",
+  "save": "保存",
+  "saving": "保存中…",
+  "profileSaved": "资料已保存",
+  "avatarUrlSet": "头像 URL 已更新",
+  "creatorCenter": "创作者中心",
+  "loadingStats": "加载统计…",
+  "followers": "粉丝",
+  "following": "关注中",
+  "liveRooms": "直播间",
+  "totalRooms": "房间总数",
+  "giftCoins": "礼物币",
+  "giftCredits": "礼物积分",
+  "yourRooms": "我的房间",
+  "privacyData": "隐私与数据",
+  "exportMyData": "导出我的数据",
+  "exportCopied": "已复制导出内容（{chars} 字符）",
+  "@exportCopied": {
+    "placeholders": {
+      "chars": {"type": "int"}
+    }
+  },
+  "signOutAllDevices": "退出全部设备",
+  "signOutAllDevicesCount": "退出全部设备（{count}）",
+  "@signOutAllDevicesCount": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "signOutAllConfirmTitle": "退出全部设备？",
+  "signOutAllConfirmBody": "将撤销所有刷新会话，本设备也需要重新登录。",
+  "signOutAll": "全部退出",
+  "revokedSessions": "已撤销 {count} 个会话",
+  "@revokedSessions": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "sessionRevoked": "会话已撤销",
+  "activeSessions": "活跃会话",
+  "activeSessionsHint": "每行对应一个刷新令牌，撤销即结束该设备。",
+  "revoke": "撤销",
+  "deleteAccount": "注销账号",
+  "deleteAccountConfirmTitle": "注销账号？",
+  "deleteAccountConfirmBody": "将软删除账号，并立即退出登录。",
+  "delete": "删除",
+  "close": "关闭",
+  "retry": "重试",
+  "copy": "复制",
+  "submit": "提交",
+  "start": "开始",
+  "invite": "邀请",
+  "more": "更多",
+  "reason": "原因",
+  "refresh": "刷新",
+
+  "balance": "余额：{amount}",
+  "@balance": {
+    "placeholders": {
+      "amount": {"type": "int"}
+    }
+  },
+  "recentLedger": "最近流水",
+  "noLedgerEntries": "暂无流水",
+  "ledgerUnavailable": "流水暂不可用",
+  "coinPackages": "金币套餐",
+  "noPayProducts": "暂无支付商品（需开启 PAY_CHANNELS=mock）。",
+  "buySandbox": "购买（沙箱）",
+  "mockTopup": "模拟充值 +100",
+  "toppedUp": "已充值 +100",
+  "creditedCoins": "已入账 {coins} 金币（订单 {orderId}，{status}）",
+  "@creditedCoins": {
+    "placeholders": {
+      "coins": {"type": "int"},
+      "orderId": {"type": "String"},
+      "status": {"type": "String"}
+    }
+  },
+  "topUp": "充值",
+
+  "feedHome": "首页",
+  "feedFollowing": "关注",
+  "feedDiscover": "发现",
+  "feedHot": "热门",
+  "searchRoomsOrUsers": "搜索房间或用户",
+  "noHotRooms": "暂无热门直播",
+  "noFollowingRooms": "关注的人暂未开播",
+  "browseHome": "去首页看看",
+  "roomStatusLine": "房间 · {status}",
+  "@roomStatusLine": {
+    "placeholders": {
+      "status": {"type": "String"}
+    }
+  },
+  "userIdLine": "用户 · {id}",
+  "@userIdLine": {
+    "placeholders": {
+      "id": {"type": "String"}
+    }
+  },
+
+  "goLiveTitle": "开播",
+  "youAreLive": "正在直播",
+  "broadcastWithObs": "使用 OBS 推流",
+  "roomTitle": "房间标题",
+  "working": "处理中…",
+  "startLive": "开始直播",
+  "endLive": "结束直播",
+  "stopLive": "停止直播",
+  "openMyRoom": "打开我的房间",
+  "openRoom": "打开房间",
+  "roomStatus": "状态：{status}",
+  "@roomStatus": {
+    "placeholders": {
+      "status": {"type": "String"}
+    }
+  },
+  "obsServer": "OBS 服务器",
+  "obsServerCustom": "OBS 服务器（自定义 RTMP）",
+  "obsStreamKey": "OBS 推流密钥",
+  "server": "服务器",
+  "streamKey": "推流密钥",
+  "refreshObsKeys": "刷新 OBS 密钥",
+  "copyServer": "复制服务器",
+  "copyKey": "复制密钥",
+  "copyStreamKey": "复制推流密钥",
+  "obsInstructions": "OBS：设置 → 推流 → 服务=自定义。",
+  "obsKeySeparate": "请分别粘贴服务器与推流密钥，不要把密钥写进服务器地址。",
+  "liveEnded": "直播已结束",
+  "starting": "启动中…",
+  "noLiveRooms": "暂无直播",
+  "roomIdLine": "房间：{id}",
+  "@roomIdLine": {
+    "placeholders": {
+      "id": {"type": "String"}
+    }
+  },
+  "unavailable": "（不可用）",
+  "defaultLiveTitle": "我的直播",
+  "untitledLive": "未命名直播",
+  "liveBadge": "直播中",
+
+  "shareLive": "分享直播",
+  "linkCopied": "链接已复制",
+  "copyLink": "复制链接",
+  "unfollowedHost": "已取消关注主播",
+  "followingHost": "已关注主播",
+  "reportSubmitted": "举报已提交",
+  "reportRoom": "举报房间",
+  "follow": "关注",
+  "unfollow": "取消关注",
+  "likeCount": "点赞（{count}）",
+  "@likeCount": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "share": "分享",
+  "report": "举报",
+  "host": "主播",
+  "noMessagesYet": "还没有消息",
+  "saySomething": "说点什么…",
+  "roomOfflineChatDisabled": "房间离线 — 无法发送聊天",
+  "streamEndedChatClosed": "直播已结束 — 聊天已关闭",
+  "recordingEnabled": "已开启录制",
+  "recordingDisabled": "已关闭录制",
+  "enableRecording": "开启录制",
+  "disableRecording": "关闭录制",
+  "obsPublish": "OBS 推流信息",
+  "liveStartedObsHint": "已开播 — 请用 OBS 推流密钥开播",
+  "liveStoppedIdle": "已停播 — 房间为空闲（未关闭）",
+  "inviteCohost": "邀请连麦",
+  "acceptCohost": "接受连麦",
+  "declineCohost": "拒绝连麦",
+  "inviteeUserId": "被邀请用户 ID（UUID）",
+  "startPk": "开始 PK",
+  "endPk": "结束 PK",
+  "opponentRoomId": "对手房间 ID（UUID）",
+  "pkStarted": "PK 已开始",
+  "pkEnded": "PK 已结束",
+  "pkUnavailable": "PK 不可用（功能关闭）",
+  "cohostUnavailable": "连麦不可用（功能关闭）",
+  "inviteUnavailable": "邀请不可用（功能关闭）",
+  "livekitJoin": "LiveKit 加入",
+  "copyToken": "复制令牌",
+  "statusEnded": "已结束",
+
+  "streamEnded": "直播已结束",
+  "hostOffline": "主播离线",
+  "livePlayUrlUnavailable": "直播中 — 播放地址不可用",
+  "openStreamExternal": "在外部播放器打开直播地址",
+  "roomForceClosed": "该房间已被强制关闭",
+  "hostStoppedMayReturn": "主播已停播 — 可能再次开播",
+  "copiedStreamUrl": "已复制直播地址",
+  "hlsBrowserHlsJs": "HLS（浏览器 · hls.js · 静音）",
+  "hlsBrowserMuted": "HLS（浏览器 · 静音自动播放）",
+  "hlsInApp": "HLS（应用内）",
+  "hlsStream": "HLS 直播流",
+  "playerDisabledCopyUrl": "应用内播放器已关闭 — 请复制地址外部打开",
+  "browserAutoplayMuted": "浏览器自动播放为静音，请用控件取消静音。",
+  "copyStreamUrl": "复制直播地址",
+  "playRetry": "播放 / 重试",
+  "openingStream": "正在打开直播…",
+  "buffering": "缓冲中…",
+  "waitingForVideo": "等待画面…",
+  "tapToPlay": "点按播放",
+  "actionFailed": "{action} 失败：{error}",
+  "@actionFailed": {
+    "placeholders": {
+      "action": {"type": "String"},
+      "error": {"type": "String"}
+    }
+  },
+  "cohostInviteSent": "连麦邀请已发送（{status}）",
+  "@cohostInviteSent": {
+    "placeholders": {
+      "status": {"type": "String"}
+    }
+  },
+  "cohostAccepted": "已接受连麦（{status}）",
+  "@cohostAccepted": {
+    "placeholders": {
+      "status": {"type": "String"}
+    }
+  },
+  "cohostDeclined": "已拒绝连麦（{status}）",
+  "@cohostDeclined": {
+    "placeholders": {
+      "status": {"type": "String"}
+    }
+  },
+  "pkEndedWithWinner": "PK 已结束 · 胜者 {winnerRoomId}",
+  "@pkEndedWithWinner": {
+    "placeholders": {
+      "winnerRoomId": {"type": "String"}
+    }
+  },
+  "pkScoreLine": "PK {status}：{scoreA} – {scoreB}",
+  "@pkScoreLine": {
+    "placeholders": {
+      "status": {"type": "String"},
+      "scoreA": {"type": "int"},
+      "scoreB": {"type": "int"}
+    }
+  },
+  "pkScoreLineWinner": "PK {status}：{scoreA} – {scoreB} · 胜 {winnerRoomId}",
+  "@pkScoreLineWinner": {
+    "placeholders": {
+      "status": {"type": "String"},
+      "scoreA": {"type": "int"},
+      "scoreB": {"type": "int"},
+      "winnerRoomId": {"type": "String"}
+    }
+  },
+  "livekitJoinDetail": "url: {url}\nroom: {room}\nidentity: {identity}\ntoken: {token}",
+  "@livekitJoinDetail": {
+    "placeholders": {
+      "url": {"type": "String"},
+      "room": {"type": "String"},
+      "identity": {"type": "String"},
+      "token": {"type": "String"}
+    }
+  },
+  "labelCopied": "已复制{label}",
+  "@labelCopied": {
+    "placeholders": {
+      "label": {"type": "String"}
+    }
+  },
+  "coinsPriceLine": "{coins} 金币 · {amount} {currency}",
+  "@coinsPriceLine": {
+    "placeholders": {
+      "coins": {"type": "int"},
+      "amount": {"type": "String"},
+      "currency": {"type": "String"}
+    }
+  }
+}

@@ -7,6 +7,7 @@ import '../../api/events_repository.dart';
 import '../../api/gifts_repository.dart';
 import '../../api/pay_repository.dart';
 import '../../config/app_config.dart';
+import '../../l10n/l10n.dart';
 
 /// Wallet balance + mock pay packages (sandbox complete).
 class WalletPage extends StatefulWidget {
@@ -100,7 +101,7 @@ class _WalletPageState extends State<WalletPage> {
       return sorted.take(20).toList();
     } catch (_) {
       if (mounted) {
-        setState(() => _ledgerHint = 'Ledger unavailable');
+        setState(() => _ledgerHint = context.l10n.ledgerUnavailable);
       }
       return const [];
     }
@@ -119,7 +120,7 @@ class _WalletPageState extends State<WalletPage> {
       if (!mounted) return;
       setState(() {
         _balance = balance;
-        _hint = 'Mock topup +100';
+        _hint = context.l10n.mockTopup;
         _busy = false;
       });
       unawaited(_refreshLedgerQuiet());
@@ -158,7 +159,7 @@ class _WalletPageState extends State<WalletPage> {
       setState(() {
         _balance = balance;
         _hint =
-            'Credited ${done.coins} coins (order ${done.id}, ${done.status})';
+            context.l10n.creditedCoins(done.coins, done.id, done.status);
         _busy = false;
       });
       unawaited(_refreshLedgerQuiet());
@@ -182,7 +183,7 @@ class _WalletPageState extends State<WalletPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Wallet'),
+        title: Text(context.l10n.wallet),
         actions: [
           IconButton(onPressed: _loading ? null : _load, icon: const Icon(Icons.refresh)),
         ],
@@ -194,14 +195,14 @@ class _WalletPageState extends State<WalletPage> {
               children: [
                 Text(
                   key: const Key('wallet-balance'),
-                  'Balance: $_balance',
+                  context.l10n.balance(_balance),
                   style: Theme.of(context).textTheme.headlineSmall,
                 ),
                 const SizedBox(height: 12),
                 FilledButton.tonal(
                   key: const Key('wallet-mock-topup'),
                   onPressed: _busy ? null : _mockTopup,
-                  child: const Text('Mock topup +100'),
+                  child: Text(context.l10n.mockTopup),
                 ),
                 if (_hint != null) ...[
                   const SizedBox(height: 12),
@@ -220,14 +221,14 @@ class _WalletPageState extends State<WalletPage> {
                 ],
                 const SizedBox(height: 24),
                 Text(
-                  'Recent ledger',
+                  context.l10n.recentLedger,
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 8),
                 if (_ledger.isEmpty)
                   Text(
                     key: const Key('wallet-ledger-empty'),
-                    _ledgerHint ?? 'No ledger entries yet',
+                    _ledgerHint ?? context.l10n.noLedgerEntries,
                     style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                   )
                 else
@@ -242,22 +243,28 @@ class _WalletPageState extends State<WalletPage> {
                   ),
                 const SizedBox(height: 24),
                 Text(
-                  'Coin packages',
+                  context.l10n.coinPackages,
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 8),
                 if (_products.isEmpty)
-                  const Text('No pay products (enable PAY_CHANNELS=mock).')
+                  Text(context.l10n.noPayProducts)
                 else
                   ..._products.map(
                     (p) => Card(
                       key: Key('pay-product-${p.id}'),
                       child: ListTile(
                         title: Text(p.title),
-                        subtitle: Text('${p.coins} coins · ${p.amount} ${p.currency}'),
+                        subtitle: Text(
+                          context.l10n.coinsPriceLine(
+                            p.coins,
+                            p.amount,
+                            p.currency,
+                          ),
+                        ),
                         trailing: FilledButton(
                           onPressed: _busy ? null : () => _buy(p),
-                          child: const Text('Buy (sandbox)'),
+                          child: Text(context.l10n.buySandbox),
                         ),
                       ),
                     ),

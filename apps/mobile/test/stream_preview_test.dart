@@ -4,16 +4,17 @@ import 'package:anylive_mobile/player/stream_preview.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'l10n_test_harness.dart';
+
 void main() {
   testWidgets('stream preview ends state', (tester) async {
-    await tester.pumpWidget(
-      const MaterialApp(
-        home: Scaffold(
-          body: StreamPreview(
-            status: 'closed',
-            hlsUrl: 'http://cdn/live/r1.m3u8',
-            enableEmbeddedPlayer: false,
-          ),
+    await pumpL10n(
+      tester,
+      const Scaffold(
+        body: StreamPreview(
+          status: 'closed',
+          hlsUrl: 'http://cdn/live/r1.m3u8',
+          enableEmbeddedPlayer: false,
         ),
       ),
     );
@@ -23,14 +24,13 @@ void main() {
   });
 
   testWidgets('stream preview idle is offline not permanent end', (tester) async {
-    await tester.pumpWidget(
-      const MaterialApp(
-        home: Scaffold(
-          body: StreamPreview(
-            status: 'idle',
-            hlsUrl: 'http://cdn/live/r1.m3u8',
-            enableEmbeddedPlayer: false,
-          ),
+    await pumpL10n(
+      tester,
+      const Scaffold(
+        body: StreamPreview(
+          status: 'idle',
+          hlsUrl: 'http://cdn/live/r1.m3u8',
+          enableEmbeddedPlayer: false,
         ),
       ),
     );
@@ -42,14 +42,13 @@ void main() {
 
   testWidgets('stream preview shows copy url without native player',
       (tester) async {
-    await tester.pumpWidget(
-      const MaterialApp(
-        home: Scaffold(
-          body: StreamPreview(
-            status: 'live',
-            hlsUrl: 'http://cdn/live/r1.m3u8',
-            enableEmbeddedPlayer: false,
-          ),
+    await pumpL10n(
+      tester,
+      const Scaffold(
+        body: StreamPreview(
+          status: 'live',
+          hlsUrl: 'http://cdn/live/r1.m3u8',
+          enableEmbeddedPlayer: false,
         ),
       ),
     );

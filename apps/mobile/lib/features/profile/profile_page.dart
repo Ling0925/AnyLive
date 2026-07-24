@@ -10,6 +10,7 @@ import '../../api/compliance_repository.dart';
 import '../../api/profile_repository.dart';
 import '../../api/session_store.dart';
 import '../../config/app_config.dart';
+import '../../l10n/l10n.dart';
 
 /// Profile editor + GDPR export/delete hooks.
 class ProfilePage extends StatefulWidget {
@@ -169,12 +170,12 @@ class _ProfilePageState extends State<ProfilePage> {
         _sessionCount = _sessions.length;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Session revoked')),
+        SnackBar(content: Text(context.l10n.sessionRevoked)),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('revoke failed: $e')),
+        SnackBar(content: Text(context.l10n.actionFailed('revoke', '$e'))),
       );
     }
   }
@@ -183,19 +184,17 @@ class _ProfilePageState extends State<ProfilePage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Sign out all devices?'),
-        content: const Text(
-          'Revokes every refresh session. This device will need to log in again.',
-        ),
+        title: Text(context.l10n.signOutAllConfirmTitle),
+        content: Text(context.l10n.signOutAllConfirmBody),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
+            child: Text(context.l10n.cancel),
           ),
           FilledButton(
             key: const Key('confirm-logout-all'),
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Sign out all'),
+            child: Text(context.l10n.signOutAll),
           ),
         ],
       ),
@@ -209,7 +208,7 @@ class _ProfilePageState extends State<ProfilePage> {
         _sessions = const [];
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Revoked $n session(s)')),
+        SnackBar(content: Text(context.l10n.revokedSessions(n))),
       );
       final deleted = widget.onAccountDeleted;
       if (deleted != null) {
@@ -218,7 +217,9 @@ class _ProfilePageState extends State<ProfilePage> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('logout-all failed: $e')),
+        SnackBar(
+          content: Text(context.l10n.actionFailed('logout-all', '$e')),
+        ),
       );
     }
   }
@@ -226,7 +227,7 @@ class _ProfilePageState extends State<ProfilePage> {
   Future<void> _save() async {
     final trimmed = _name.text.trim();
     if (trimmed.isEmpty) {
-      setState(() => _error = 'Display name is required');
+      setState(() => _error = context.l10n.displayNameRequired);
       return;
     }
     setState(() {
@@ -243,7 +244,7 @@ class _ProfilePageState extends State<ProfilePage> {
       if (!mounted) return;
       widget.onDisplayNameChanged?.call(updated.displayName);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Profile saved')),
+        SnackBar(content: Text(context.l10n.profileSaved)),
       );
       setState(() {
         _name.text = updated.displayName;
@@ -285,7 +286,7 @@ class _ProfilePageState extends State<ProfilePage> {
         _busyAvatar = false;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Avatar URL set')),
+        SnackBar(content: Text(context.l10n.avatarUrlSet)),
       );
     } on ProfileException catch (e) {
       if (!mounted) return;
@@ -318,7 +319,7 @@ class _ProfilePageState extends State<ProfilePage> {
       if (!mounted) return;
       setState(() {
         _busyDsar = false;
-        _exportHint = 'Export copied (${pretty.length} chars)';
+        _exportHint = context.l10n.exportCopied(pretty.length);
       });
     } on ComplianceException catch (e) {
       if (!mounted) return;
@@ -339,19 +340,17 @@ class _ProfilePageState extends State<ProfilePage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete account?'),
-        content: const Text(
-          'This soft-deletes your account. You will be signed out.',
-        ),
+        title: Text(context.l10n.deleteAccountConfirmTitle),
+        content: Text(context.l10n.deleteAccountConfirmBody),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
+            child: Text(context.l10n.cancel),
           ),
           FilledButton(
             key: const Key('confirm-delete-account'),
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Delete'),
+            child: Text(context.l10n.delete),
           ),
         ],
       ),
@@ -381,7 +380,7 @@ class _ProfilePageState extends State<ProfilePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Edit profile')),
+      appBar: AppBar(title: Text(context.l10n.editProfile)),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : SingleChildScrollView(
@@ -391,16 +390,16 @@ class _ProfilePageState extends State<ProfilePage> {
                 children: [
                   if (_email != null) ...[
                     Text(
-                      'Email',
+                      context.l10n.email,
                       style: Theme.of(context).textTheme.labelLarge,
                     ),
-                    const SizedBox(height: 4),
+                    SizedBox(height: 4),
                     Text(_email!),
-                    const SizedBox(height: 16),
+                    SizedBox(height: 16),
                   ],
                   if (_avatarUrl != null && _avatarUrl!.isNotEmpty) ...[
                     Text(
-                      'Avatar URL',
+                      context.l10n.avatarUrl,
                       style: Theme.of(context).textTheme.labelLarge,
                     ),
                     const SizedBox(height: 4),
@@ -409,7 +408,7 @@ class _ProfilePageState extends State<ProfilePage> {
                       _avatarUrl!,
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
-                    const SizedBox(height: 8),
+                    SizedBox(height: 8),
                   ],
                   OutlinedButton.icon(
                     key: const Key('avatar-presign-confirm'),
@@ -419,30 +418,30 @@ class _ProfilePageState extends State<ProfilePage> {
                       _busyAvatar ? 'Setting avatar…' : 'Set avatar URL',
                     ),
                   ),
-                  const SizedBox(height: 16),
+                  SizedBox(height: 16),
                   TextField(
                     controller: _name,
-                    decoration: const InputDecoration(
-                      labelText: 'Display name',
+                    decoration: InputDecoration(
+                      labelText: context.l10n.displayName,
                       border: OutlineInputBorder(),
                     ),
                     enabled: !_saving,
                   ),
-                  const SizedBox(height: 8),
+                  SizedBox(height: 8),
                   TextField(
                     key: const Key('profile-region'),
                     controller: _region,
-                    decoration: const InputDecoration(
-                      labelText: 'Region (e.g. US, SG)',
+                    decoration: InputDecoration(
+                      labelText: context.l10n.regionHint,
                       border: OutlineInputBorder(),
                     ),
                     enabled: !_saving,
                     textCapitalization: TextCapitalization.characters,
                   ),
-                  const SizedBox(height: 8),
+                  SizedBox(height: 8),
                   CheckboxListTile(
                     contentPadding: EdgeInsets.zero,
-                    title: const Text('I confirm I am 18 or older'),
+                    title: Text(context.l10n.ageConfirm),
                     value: _ageConfirmed,
                     onChanged: _saving
                         ? null
@@ -451,7 +450,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   ),
                   CheckboxListTile(
                     contentPadding: EdgeInsets.zero,
-                    title: const Text('I accept the privacy policy'),
+                    title: Text(context.l10n.privacyAccept),
                     value: _privacyAccepted,
                     onChanged: _saving
                         ? null
@@ -468,7 +467,7 @@ class _ProfilePageState extends State<ProfilePage> {
                     ),
                   ],
                   if (_exportHint != null) ...[
-                    const SizedBox(height: 12),
+                    SizedBox(height: 12),
                     Text(
                       key: const Key('export-copied-hint'),
                       _exportHint!,
@@ -477,18 +476,18 @@ class _ProfilePageState extends State<ProfilePage> {
                           ),
                     ),
                   ],
-                  const SizedBox(height: 16),
+                  SizedBox(height: 16),
                   FilledButton(
                     onPressed: _saving ? null : _save,
-                    child: Text(_saving ? 'Saving…' : 'Save'),
+                    child: Text(_saving ? context.l10n.saving : context.l10n.save),
                   ),
-                  const SizedBox(height: 24),
+                  SizedBox(height: 24),
                   Text(
                     key: const Key('creator-center-title'),
-                    'Creator center',
+                    context.l10n.creatorCenter,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
-                  const SizedBox(height: 8),
+                  SizedBox(height: 8),
                   if (_creatorError != null)
                     Text(
                       key: const Key('creator-center-error'),
@@ -498,9 +497,9 @@ class _ProfilePageState extends State<ProfilePage> {
                       ),
                     )
                   else if (_creator == null)
-                    const Text(
+                    Text(
                       key: Key('creator-center-loading'),
-                      'Loading stats…',
+                      context.l10n.loadingStats,
                     )
                   else
                     Card(
@@ -515,38 +514,38 @@ class _ProfilePageState extends State<ProfilePage> {
                               runSpacing: 8,
                               children: [
                                 _statChip(
-                                  'Followers',
+                                  context.l10n.followers,
                                   '${_creator!.followerCount}',
                                 ),
                                 _statChip(
-                                  'Following',
+                                  context.l10n.following,
                                   '${_creator!.followingCount}',
                                 ),
                                 _statChip(
-                                  'Live rooms',
+                                  context.l10n.liveRooms,
                                   '${_creator!.liveRooms}',
                                 ),
                                 _statChip(
-                                  'Total rooms',
+                                  context.l10n.totalRooms,
                                   '${_creator!.totalRooms}',
                                 ),
                                 _statChip(
-                                  'Gift coins',
+                                  context.l10n.giftCoins,
                                   '${_creator!.giftCoinsReceived}',
                                 ),
                                 _statChip(
-                                  'Gift credits',
+                                  context.l10n.giftCredits,
                                   '${_creator!.giftCreditEntries}',
                                 ),
                               ],
                             ),
                             if (_creator!.rooms.isNotEmpty) ...[
-                              const SizedBox(height: 12),
+                              SizedBox(height: 12),
                               Text(
-                                'Your rooms',
+                                context.l10n.yourRooms,
                                 style: Theme.of(context).textTheme.labelLarge,
                               ),
-                              const SizedBox(height: 4),
+                              SizedBox(height: 4),
                               ..._creator!.rooms.take(5).map(
                                     (r) => Text(
                                       '· ${r.title} (${r.status})',
@@ -558,53 +557,66 @@ class _ProfilePageState extends State<ProfilePage> {
                         ),
                       ),
                     ),
-                  const SizedBox(height: 24),
+                  SizedBox(height: 24),
                   Text(
-                    'Privacy & data',
+                    context.l10n.privacyData,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
-                  const SizedBox(height: 8),
+                  SizedBox(height: 8),
                   OutlinedButton.icon(
                     key: const Key('export-account'),
                     onPressed: _busyDsar ? null : _export,
                     icon: const Icon(Icons.download_outlined),
-                    label: const Text('Export my data'),
+                    label: Text(context.l10n.exportMyData),
                   ),
-                  const SizedBox(height: 8),
+                  SizedBox(height: 8),
                   OutlinedButton.icon(
                     key: const Key('logout-all-sessions'),
                     onPressed: _logoutAllDevices,
                     icon: const Icon(Icons.devices),
                     label: Text(
                       _sessionCount > 0
-                          ? 'Sign out all devices ($_sessionCount)'
-                          : 'Sign out all devices',
+                          ? context.l10n.signOutAllDevicesCount(_sessionCount)
+                          : context.l10n.signOutAllDevices,
                     ),
                   ),
                   if (_sessions.isNotEmpty) ...[
-                    const SizedBox(height: 8),
+                    SizedBox(height: 8),
+                    Text(
+                      key: const Key('active-sessions-title'),
+                      context.l10n.activeSessions,
+                      style: Theme.of(context).textTheme.labelLarge,
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      context.l10n.activeSessionsHint,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    const SizedBox(height: 4),
                     ..._sessions.map(
                       (s) => ListTile(
                         key: Key('session-${s.jti}'),
                         contentPadding: EdgeInsets.zero,
                         dense: true,
                         title: Text(
-                          s.jti.length > 12 ? '${s.jti.substring(0, 12)}…' : s.jti,
+                          s.listLabel,
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                         subtitle: Text(
-                          'expires ${s.expiresAt}',
+                          s.jti.length > 16
+                              ? 'jti ${s.jti.substring(0, 16)}…'
+                              : (s.jti.isEmpty ? 'jti —' : 'jti ${s.jti}'),
                           style: Theme.of(context).textTheme.labelSmall,
                         ),
                         trailing: TextButton(
                           key: Key('revoke-session-${s.jti}'),
                           onPressed: () => _revokeSession(s),
-                          child: const Text('Revoke'),
+                          child: Text(context.l10n.revoke),
                         ),
                       ),
                     ),
                   ],
-                  const SizedBox(height: 8),
+                  SizedBox(height: 8),
                   OutlinedButton.icon(
                     key: const Key('delete-account'),
                     onPressed: _busyDsar ? null : _deleteAccount,
@@ -613,7 +625,7 @@ class _ProfilePageState extends State<ProfilePage> {
                       color: Theme.of(context).colorScheme.error,
                     ),
                     label: Text(
-                      'Delete account',
+                      context.l10n.deleteAccount,
                       style: TextStyle(
                         color: Theme.of(context).colorScheme.error,
                       ),

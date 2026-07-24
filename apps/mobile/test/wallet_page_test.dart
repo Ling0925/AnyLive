@@ -6,6 +6,7 @@ import 'package:anylive_mobile/config/app_config.dart';
 import 'package:anylive_mobile/features/wallet/wallet_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:anylive_mobile/l10n/l10n.dart';
 
 ApiClient _dummy() => ApiClient(baseUrl: 'http://x', accessToken: 't');
 
@@ -90,6 +91,10 @@ void main() {
     final events = _FakeEvents();
     await tester.pumpWidget(
       MaterialApp(
+        
+        locale: const Locale('en'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         home: WalletPage(
           config: config,
           accessToken: 't',
@@ -115,6 +120,10 @@ void main() {
     final gifts = _FakeGifts();
     await tester.pumpWidget(
       MaterialApp(
+        
+        locale: const Locale('en'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         home: WalletPage(
           config: config,
           accessToken: 't',

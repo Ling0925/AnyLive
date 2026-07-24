@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../api/rooms_repository.dart';
 import '../theme/any_colors.dart';
 import 'live_badge.dart';
+import '../l10n/l10n.dart';
 
 /// 16:9 room card for Home / Following feeds.
 class LiveCard extends StatelessWidget {
@@ -66,7 +67,7 @@ class LiveCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    room.title.isEmpty ? 'Untitled live' : room.title,
+                    room.title.isEmpty ? context.l10n.untitledLive : room.title,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(

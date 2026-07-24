@@ -83,4 +83,35 @@ void main() {
       expect(isLikelyHlsUrl('https://cdn.example/video.mp4'), isFalse);
     });
   });
+
+  group('normalizePlaybackUrl', () {
+    test('rewrites localhost and 0.0.0.0 to preferHost', () {
+      expect(
+        normalizePlaybackUrl('http://localhost:8080/live/r1.m3u8'),
+        'http://127.0.0.1:8080/live/r1.m3u8',
+      );
+      expect(
+        normalizePlaybackUrl('http://0.0.0.0:8080/live/r1.m3u8'),
+        'http://127.0.0.1:8080/live/r1.m3u8',
+      );
+      expect(
+        normalizePlaybackUrl(
+          'http://[::1]:8080/live/r1.m3u8',
+          preferHost: '127.0.0.1',
+        ),
+        'http://127.0.0.1:8080/live/r1.m3u8',
+      );
+    });
+
+    test('leaves non-loopback hosts unchanged', () {
+      expect(
+        normalizePlaybackUrl('http://cdn.example/live/r1.m3u8'),
+        'http://cdn.example/live/r1.m3u8',
+      );
+      expect(
+        normalizePlaybackUrl('http://127.0.0.1:8080/live/r1.m3u8'),
+        'http://127.0.0.1:8080/live/r1.m3u8',
+      );
+    });
+  });
 }

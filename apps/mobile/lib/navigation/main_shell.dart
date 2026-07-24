@@ -6,6 +6,7 @@ import '../features/auth/login_page.dart';
 import '../features/feed/feed_page.dart';
 import '../features/go_live/go_live_page.dart';
 import '../features/you/you_page.dart';
+import '../l10n/l10n.dart';
 import '../theme/any_colors.dart';
 
 /// Bottom-nav shell: Home | Following | Go Live | You (YouTube-style IA).
@@ -124,6 +125,8 @@ class _MainShellState extends State<MainShell> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
+
     if (!_loggedIn) {
       return Scaffold(
         backgroundColor: AnyColors.bg,
@@ -154,23 +157,26 @@ class _MainShellState extends State<MainShell> {
                     ),
                   ),
                   const SizedBox(height: 20),
-                  const Text(
-                    'AnyLive',
-                    style: TextStyle(
+                  Text(
+                    l10n.appTitle,
+                    style: const TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.w700,
                       color: AnyColors.textPrimary,
                     ),
                   ),
                   const SizedBox(height: 8),
-                  const Text(
-                    'AnyLive Mobile',
+                  Text(
+                    l10n.appTagline,
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: AnyColors.textSecondary),
+                    style: const TextStyle(color: AnyColors.textSecondary),
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    'env: ${widget.config.environment} · ${widget.config.flavorLabel}',
+                    l10n.envFlavorLine(
+                      widget.config.environment,
+                      widget.config.flavorLabel,
+                    ),
                     style: const TextStyle(
                       color: AnyColors.textMuted,
                       fontSize: 12,
@@ -187,7 +193,7 @@ class _MainShellState extends State<MainShell> {
                   FilledButton(
                     key: const Key('shell-login'),
                     onPressed: _openLogin,
-                    child: const Text('Sign in'),
+                    child: Text(l10n.signIn),
                   ),
                 ],
               ),
@@ -248,26 +254,26 @@ class _MainShellState extends State<MainShell> {
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-        destinations: const [
+        destinations: [
           NavigationDestination(
-            icon: Icon(Icons.home_outlined),
-            selectedIcon: Icon(Icons.home),
-            label: 'Home',
+            icon: const Icon(Icons.home_outlined),
+            selectedIcon: const Icon(Icons.home),
+            label: l10n.navHome,
           ),
           NavigationDestination(
-            icon: Icon(Icons.subscriptions_outlined),
-            selectedIcon: Icon(Icons.subscriptions),
-            label: 'Following',
+            icon: const Icon(Icons.subscriptions_outlined),
+            selectedIcon: const Icon(Icons.subscriptions),
+            label: l10n.navFollowing,
           ),
           NavigationDestination(
-            icon: Icon(Icons.videocam_outlined),
-            selectedIcon: Icon(Icons.videocam),
-            label: 'Go Live',
+            icon: const Icon(Icons.videocam_outlined),
+            selectedIcon: const Icon(Icons.videocam),
+            label: l10n.navGoLive,
           ),
           NavigationDestination(
-            icon: Icon(Icons.person_outline),
-            selectedIcon: Icon(Icons.person),
-            label: 'You',
+            icon: const Icon(Icons.person_outline),
+            selectedIcon: const Icon(Icons.person),
+            label: l10n.navYou,
           ),
         ],
       ),

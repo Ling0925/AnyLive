@@ -27,6 +27,7 @@ void main() {
     expect(loaded.displayName, 'Ada');
     expect(loaded.email, 'ada@example.com');
     expect(loaded.refreshToken, 'refresh-tok');
+    expect(await store.savedAtMs(), isNotNull);
 
     await store.clear();
     expect(await store.load(), isNull);
@@ -39,5 +40,26 @@ void main() {
     });
     final store = SessionStore();
     expect(await store.load(), isNull);
+  });
+
+  test('accessLikelyStale uses saved_at_ms and expires_in', () async {
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    SharedPreferences.setMockInitialValues({
+      'anylive_session_v1':
+          '{"user_id":"u1","display_name":"Ada","email":"a@b.com",'
+          '"access_token":"tok","refresh_token":"r","expires_in":600,'
+          '"saved_at_ms":${nowMs - 400000}}',
+    });
+    final store = SessionStore();
+    expect(await store.accessLikelyStale(), isTrue);
+
+    SharedPreferences.setMockInitialValues({
+      'anylive_session_v1':
+          '{"user_id":"u1","display_name":"Ada","email":"a@b.com",'
+          '"access_token":"tok","refresh_token":"r","expires_in":600,'
+          '"saved_at_ms":$nowMs}',
+    });
+    final store2 = SessionStore();
+    expect(await store2.accessLikelyStale(), isFalse);
   });
 }
