@@ -1,1570 +1,177 @@
 <script setup lang="ts">
-import Hls from 'hls.js'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useI18n } from './i18n'
+import { useAdminApp } from './composables/useAdminApp'
+import AppIcon from './components/AppIcon.vue'
 import {
+  Inbox,
+  FolderOpen,
+  Sun,
+  Moon,
+  Radio,
+  Shield,
+  ScrollText,
+  RefreshCw,
+  LogOut,
+} from './components/icons'
+
+const {
   ADMIN_NAV,
-  adminGiftsPath,
-  adminGateMessage,
-  adminTitle,
-  apiUrl,
-  auditPath,
-  authErrorMessage,
-  banUserPath,
-  unbanUserPath,
-  adminUsersPath,
-  adminResetPasswordPath,
-  adminRevokeSessionsPath,
-  passwordLoginPath,
-  buildHls,
-  classifyAdminGrant,
-  clearAdminSession,
-  countByStatus,
-  createRoomPath,
-  demoPrepHints,
-  filterAudit,
-  filterRooms,
-  forceCloseRoomPath,
+  actionBusy,
+  actionReason,
+  adminGateHint,
+  analyticsBusy,
+  analyticsByName,
+  analyticsHint,
+  analyticsRecent,
+  apiBase,
+  auditQuery,
+  avatarLetter,
+  banUser,
+  banUserId,
+  bannedUsers,
+  beginEditGift,
+  cancelEditGift,
+  closePreview,
+  closedCount,
+  copyGiftSeedCmd,
+  copyText,
+  createBusy,
+  createDisplayName,
+  createEmail,
+  createGift,
+  createPassword,
+  createUser,
+  createUsername,
+  displayName,
+  email,
+  error,
+  expireBusy,
+  expireHint,
+  fillBanFromLookup,
+  fillMuteFromLookup,
+  filteredAudit,
+  forceCloseRoom,
   formatTs,
-  giftsListPath,
-  grantAdminPath,
-  isAdminForbidden,
-  loadAdminSession,
-  logoutPath,
-  muteUserPath,
-  navBlurb,
-  navLabel,
-  openReportCount,
-  otpSendPath,
-  otpVerifyPath,
-  parsePublishInfo,
-  reportResolvePath,
-  reportsListPath,
-  roomPlayPath,
-  roomPublishPath,
-  roomStartPath,
+  giftBusy,
+  giftEditActive,
+  giftEditId,
+  giftName,
+  giftPrice,
+  giftSeedCopyHint,
+  gifts,
+  go,
+  goLiveBusy,
+  goLiveCopyHint,
+  goLiveHls,
+  goLivePublish,
+  goLiveRefreshPublish,
+  goLiveRoomId,
+  goLiveRoomStatus,
+  goLiveStart,
+  goLiveStop,
+  goLiveTitle,
+  idleCount,
+  isAdmin,
+  isAuthed,
+  listBusy,
+  liveCount,
+  loadAudit,
+  loadGifts,
+  loadModerationLists,
+  loadPublishForRoom,
+  loadReports,
+  loadRooms,
+  loadUsers,
+  locale,
+  loginBusy,
+  loginStep,
+  logout,
+  lookupBusy,
+  lookupStatus,
+  lookupUserId,
+  lookupUserModeration,
+  metricsBusy,
+  metricsHint,
+  metricsText,
+  muteUser,
+  muteUserIdInput,
+  mutedUsers,
+  nav,
+  notice,
+  onToggleTheme,
+  otpCode,
+  otpSent,
+  pageBlurb,
+  pageTitle,
+  pagedRooms,
+  password,
+  passwordLogin,
+  prepHints,
+  previewBusy,
+  previewError,
+  previewHlsUrl,
+  previewRoom,
+  previewRoomId,
+  previewVideoEl,
+  reconcileBalanced,
+  reconcileBusy,
+  reconcileHint,
+  refreshLists,
+  reportOpen,
+  reports,
+  resendCooldown,
+  resetUserPassword,
+  resolveReport,
+  revokeUserSessions,
+  roomIdInput,
+  roomListMeta,
+  roomPageSize,
+  roomQuery,
+  roomStatusFilter,
   roomStatusTone,
-  roomStopPath,
-  roomsPath,
-  saveAdminSession,
+  rooms,
+  runAnalyticsSummary,
+  runExpirePayOrders,
+  runMetricsScrape,
+  runWalletReconcile,
+  saveGiftEdit,
+  sendOtp,
+  sessionRestoring,
+  sessionRoleLabel,
+  setLocale,
+  setRoomPage,
+  setTheme,
+  setUserStatus,
   shortId,
-  tokenRefreshPath,
-  unmuteUserPath,
-  walletReconcilePath,
-  payExpireOrdersPath,
-  metricsPath,
-  analyticsSummaryPath,
-  bannedUsersPath,
-  mutedUsersPath,
-  userModerationPath,
-  type AdminNavKey,
-  type PublishInfo,
-} from './lib/admin'
-
-const { t, locale, setLocale } = useI18n()
-
-const apiBase = import.meta.env.VITE_API_BASE ?? 'http://localhost:8088'
-const envLabel = import.meta.env.MODE === 'production' ? 'prod' : 'local'
-const title = computed(() => adminTitle(envLabel, locale.value))
-
-const accessToken = ref<string | null>(null)
-const refreshToken = ref('')
-const displayName = ref('')
-const userId = ref('')
-const nav = ref<AdminNavKey>('dashboard')
-/** null = unknown (pre-check), true = can call admin APIs, false = logged-in but not ops. */
-const isAdmin = ref<boolean | null>(null)
-const sessionRestoring = ref(true)
-
-const email = ref('')
-const password = ref('')
-const otpCode = ref('')
-const loginBusy = ref(false)
-const otpSent = ref(false)
-const useOtpLogin = ref(false)
-const resendCooldown = ref(0)
-let resendTimer: ReturnType<typeof setInterval> | null = null
-
-const roomIdInput = ref('')
-const userIdInput = ref('')
-const muteUserIdInput = ref('')
-const unmuteUserIdInput = ref('')
-const actionReason = ref('')
-const actionBusy = ref(false)
-
-const giftName = ref('')
-const giftPrice = ref('')
-const giftBusy = ref(false)
-/** When set, gift form upserts this catalog id instead of creating a new item. */
-const giftEditId = ref<string | null>(null)
-const giftEditActive = ref(true)
-
-const rooms = ref<Array<{ id: string; title: string; status: string; owner_id?: string }>>([])
-const gifts = ref<Array<{ id: string; name: string; price: number; active?: boolean }>>([])
-const reports = ref<
-  Array<{
-    id: string
-    reporter_id: string
-    target_type: string
-    target_id: string
-    reason: string
-    status?: string
-    created_at: string
-  }>
->([])
-const audit = ref<
-  Array<{
-    id: string
-    actor_id: string
-    action: string
-    target: string
-    detail: string
-    created_at: string
-  }>
->([])
-
-const roomQuery = ref('')
-const roomStatusFilter = ref('all')
-const auditQuery = ref('')
-
-const error = ref('')
-const notice = ref('')
-const listBusy = ref(false)
-
-const previewRoomId = ref<string | null>(null)
-const previewHlsUrl = ref('')
-const previewBusy = ref(false)
-const previewError = ref('')
-const previewVideoEl = ref<HTMLVideoElement | null>(null)
-let previewDetach: (() => void) | null = null
-
-// --- go-live ---
-const goLiveTitle = ref('')
-const goLiveBusy = ref(false)
-const goLiveRoomId = ref('')
-const goLiveRoomStatus = ref('')
-const goLivePublish = ref<PublishInfo | null>(null)
-const goLiveHls = ref('')
-const goLiveCopyHint = ref('')
-
-const reconcileBusy = ref(false)
-const reconcileHint = ref('')
-const reconcileBalanced = ref<boolean | null>(null)
-const reconcileChecked = ref(0)
-const reconcileImbalance = ref(0)
-const expireBusy = ref(false)
-const expireHint = ref('')
-const metricsBusy = ref(false)
-const metricsHint = ref('')
-const metricsText = ref('')
-const metricsLines = ref(0)
-const analyticsBusy = ref(false)
-const analyticsHint = ref('')
-const analyticsRetained = ref(0)
-const analyticsUsers = ref(0)
-const analyticsByName = ref<Array<{ name: string; count: number }>>([])
-const analyticsRecent = ref<
-  Array<{ id: string; user_id: string; name: string; occurred_at: string }>
->([])
-
-// --- users admin ---
-type AdminUserRow = {
-  id: string
-  display_name: string
-  email?: string | null
-  username?: string | null
-  status: string
-  created_at: string
-  banned: boolean
-  muted: boolean
-  admin_role?: string | null
-  must_change_password: boolean
-}
-const usersList = ref<AdminUserRow[]>([])
-const usersTotal = ref(0)
-const usersQuery = ref('')
-const usersBusy = ref(false)
-const createDisplayName = ref('')
-const createUsername = ref('')
-const createEmail = ref('')
-const createPassword = ref('')
-const createBusy = ref(false)
-const tempPasswordNotice = ref('')
-const unbanUserIdInput = ref('')
-const lookupUserId = ref('')
-const lookupBusy = ref(false)
-const lookupStatus = ref<{
-  user_id: string
-  banned: boolean
-  muted: boolean
-  ban_reason: string | null
-  mute_reason: string | null
-  banned_at: string | null
-  muted_at: string | null
-} | null>(null)
-const bannedUsers = ref<Array<{ user_id: string; reason: string; created_at: string }>>([])
-const mutedUsers = ref<Array<{ user_id: string; reason: string; created_at: string }>>([])
-
-const isAuthed = computed(() => Boolean(accessToken.value))
-const liveCount = computed(() => countByStatus(rooms.value, 'live'))
-const idleCount = computed(() => countByStatus(rooms.value, 'idle'))
-const closedCount = computed(() => countByStatus(rooms.value, 'closed'))
-const reportOpen = computed(() => openReportCount(reports.value))
-const pageTitle = computed(() => navLabel(nav.value, locale.value))
-const pageBlurb = computed(() => navBlurb(nav.value, locale.value))
-const avatarLetter = computed(() => (displayName.value || 'A').slice(0, 1).toUpperCase())
-/** Set when POST /admin/grant returns bootstrap_closed so gate copy is more specific. */
-const bootstrapClosed = ref(false)
-
-const filteredRooms = computed(() =>
-  filterRooms(rooms.value, roomQuery.value, roomStatusFilter.value),
-)
-const filteredAudit = computed(() => filterAudit(audit.value, auditQuery.value))
-
-const adminGateHint = computed(() =>
-  isAdmin.value === false
-    ? adminGateMessage(
-        {
-          apiBase,
-          email: email.value || displayName.value,
-          bootstrapClosed: bootstrapClosed.value,
-        },
-        locale.value,
-      )
-    : '',
-)
-const sessionRoleLabel = computed(() => {
-  if (isAdmin.value === true) return t('topbar.roleAdmin')
-  if (isAdmin.value === false) return t('topbar.roleNonAdmin')
-  return isAuthed.value ? t('topbar.roleChecking') : t('topbar.roleNone')
-})
-const prepHints = computed(() =>
-  demoPrepHints({ isAdmin: isAdmin.value, giftCount: gifts.value.length }, locale.value),
-)
-const giftSeedCmd = './scripts/dogfood-gift-seed.sh'
-const giftSeedCopyHint = ref('')
-
-const loginStep = computed(() => {
-  if (otpSent.value || otpCode.value.trim()) return 2
-  return 1
-})
-
-function statusLabel(status: string): string {
-  const key = `status.${status}` as const
-  const mapped = t(key)
-  return mapped === key ? status : mapped
-}
-
-async function copyGiftSeedCmd() {
-  giftSeedCopyHint.value = ''
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(giftSeedCmd)
-      giftSeedCopyHint.value = t('dashboard.seedCopied')
-      return
-    }
-  } catch {
-    // fall through
-  }
-  window.prompt(t('dashboard.copySeed'), giftSeedCmd)
-  giftSeedCopyHint.value = t('dashboard.seedReady')
-}
-
-function startResendCooldown(sec = 60) {
-  resendCooldown.value = sec
-  if (resendTimer) clearInterval(resendTimer)
-  resendTimer = setInterval(() => {
-    resendCooldown.value -= 1
-    if (resendCooldown.value <= 0 && resendTimer) {
-      clearInterval(resendTimer)
-      resendTimer = null
-    }
-  }, 1000)
-}
-
-function authHeaders(json = true): HeadersInit {
-  const h: Record<string, string> = {}
-  if (json) h['Content-Type'] = 'application/json'
-  if (accessToken.value) h.Authorization = `Bearer ${accessToken.value}`
-  return h
-}
-
-function persistSession() {
-  if (!accessToken.value) {
-    clearAdminSession()
-    return
-  }
-  saveAdminSession({
-    accessToken: accessToken.value,
-    refreshToken: refreshToken.value,
-    displayName: displayName.value,
-    userId: userId.value,
-    email: email.value,
-  })
-}
-
-/** Rotate access via refresh token. Returns true when a new access token is stored. */
-async function tryRefreshAccess(): Promise<boolean> {
-  const rt = refreshToken.value.trim()
-  if (!rt) return false
-  try {
-    const res = await fetch(apiUrl(apiBase, tokenRefreshPath()), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_token: rt }),
-    })
-    if (!res.ok) return false
-    const data = (await res.json()) as {
-      access_token?: string
-      refresh_token?: string
-    }
-    const next = (data.access_token || '').trim()
-    if (!next) return false
-    accessToken.value = next
-    if (data.refresh_token) refreshToken.value = data.refresh_token
-    persistSession()
-    return true
-  } catch {
-    return false
-  }
-}
-
-/** fetch with one automatic refresh retry on 401. */
-async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
-  const res = await fetch(input, init)
-  if (res.status !== 401 || !refreshToken.value) return res
-  const ok = await tryRefreshAccess()
-  if (!ok) return res
-  const headers = new Headers(init?.headers)
-  if (accessToken.value) headers.set('Authorization', `Bearer ${accessToken.value}`)
-  return fetch(input, { ...init, headers })
-}
-
-function teardownPreviewPlayer() {
-  previewDetach?.()
-  previewDetach = null
-}
-
-function attachPreviewHls(video: HTMLVideoElement, src: string) {
-  teardownPreviewPlayer()
-  if (Hls.isSupported()) {
-    const hls = new Hls()
-    hls.loadSource(src)
-    hls.attachMedia(video)
-    previewDetach = () => hls.destroy()
-    return
-  }
-  if (video.canPlayType('application/vnd.apple.mpegurl')) {
-    video.src = src
-    previewDetach = () => {
-      video.removeAttribute('src')
-      video.load()
-    }
-    return
-  }
-  previewError.value = t('rooms.hlsUnsupported')
-}
-
-watch([previewVideoEl, previewHlsUrl], ([el, url]) => {
-  if (el && url) attachPreviewHls(el, url)
-  else teardownPreviewPlayer()
-})
-
-onBeforeUnmount(() => {
-  teardownPreviewPlayer()
-  if (resendTimer) clearInterval(resendTimer)
-})
-
-function go(key: AdminNavKey) {
-  nav.value = key
-  notice.value = ''
-  error.value = ''
-  if (key === 'users' && accessToken.value) {
-    void loadUsers()
-    void loadModerationLists()
-  }
-}
-
-async function previewRoom(room: { id: string; status: string }) {
-  previewError.value = ''
-  if (room.status !== 'live') {
-    previewError.value = t('rooms.notLive')
-    previewRoomId.value = room.id
-    previewHlsUrl.value = ''
-    return
-  }
-  previewBusy.value = true
-  previewRoomId.value = room.id
-  previewHlsUrl.value = ''
-  try {
-    const res = await apiFetch(apiUrl(apiBase, roomPlayPath(room.id)))
-    if (!res.ok) throw new Error(`play ${res.status}`)
-    const play = await res.json()
-    previewHlsUrl.value = buildHls(play, room.id)
-    await nextTick()
-  } catch (e) {
-    previewError.value = String(e)
-  } finally {
-    previewBusy.value = false
-  }
-}
-
-function closePreview() {
-  teardownPreviewPlayer()
-  previewRoomId.value = null
-  previewHlsUrl.value = ''
-  previewError.value = ''
-}
-
-function useRoomId(id: string) {
-  roomIdInput.value = id
-  nav.value = 'moderation'
-}
-
-function useUserId(id: string) {
-  userIdInput.value = id
-  muteUserIdInput.value = id
-  nav.value = 'moderation'
-}
-
-async function loadRooms() {
-  const res = await apiFetch(apiUrl(apiBase, roomsPath()))
-  if (!res.ok) throw new Error(`rooms ${res.status}`)
-  const data = await res.json()
-  rooms.value = data.items ?? []
-}
-
-async function loadGifts() {
-  const path = giftsListPath(isAuthed.value)
-  const res = await apiFetch(apiUrl(apiBase, path), { headers: authHeaders(false) })
-  if (!res.ok) throw new Error(`gifts ${res.status}`)
-  const data = await res.json()
-  gifts.value = data.items ?? []
-}
-
-async function loadReports() {
-  if (!accessToken.value) {
-    reports.value = []
-    return
-  }
-  const res = await apiFetch(apiUrl(apiBase, reportsListPath()), { headers: authHeaders(false) })
-  if (isAdminForbidden(res.status)) {
-    isAdmin.value = false
-    reports.value = []
-    return
-  }
-  if (!res.ok) throw new Error(`reports ${res.status}`)
-  const data = await res.json()
-  reports.value = data.items ?? []
-  if (isAdmin.value !== true) isAdmin.value = true
-}
-
-async function loadAudit() {
-  if (!accessToken.value) {
-    audit.value = []
-    return
-  }
-  const res = await apiFetch(apiUrl(apiBase, auditPath()), { headers: authHeaders(false) })
-  if (isAdminForbidden(res.status)) {
-    isAdmin.value = false
-    audit.value = []
-    return
-  }
-  if (!res.ok) throw new Error(`audit ${res.status}`)
-  const data = await res.json()
-  audit.value = data.items ?? []
-  if (isAdmin.value !== true) isAdmin.value = true
-}
-
-async function refreshLists() {
-  listBusy.value = true
-  // Do not clear a sticky admin-gate error while refreshing rooms.
-  if (isAdmin.value !== false) error.value = ''
-  try {
-    const tasks: Promise<void>[] = [loadRooms(), loadGifts()]
-    if (isAuthed.value) {
-      tasks.push(loadReports(), loadAudit(), loadUsers(), loadModerationLists())
-    } else {
-      reports.value = []
-      audit.value = []
-      usersList.value = []
-      bannedUsers.value = []
-      mutedUsers.value = []
-    }
-    await Promise.all(tasks)
-    if (isAdmin.value === true) {
-      bootstrapClosed.value = false
-    }
-    if (isAdmin.value === false && !error.value) {
-      error.value = adminGateHint.value
-    }
-  } catch (e) {
-    error.value = String(e)
-  } finally {
-    listBusy.value = false
-  }
-}
-
-async function runWalletReconcile() {
-  if (!isAuthed.value) return
-  reconcileBusy.value = true
-  reconcileHint.value = ''
-  try {
-    const res = await apiFetch(apiUrl(apiBase, walletReconcilePath()), {
-      headers: authHeaders(false),
-    })
-    if (!res.ok) throw new Error(`reconcile ${res.status}`)
-    const data = await res.json()
-    reconcileChecked.value = Number(data.checked_users ?? 0)
-    reconcileImbalance.value = Number(data.imbalance_count ?? 0)
-    reconcileBalanced.value = Boolean(data.balanced)
-    reconcileHint.value = data.balanced
-      ? t('dashboard.reconcileBalanced', { n: reconcileChecked.value })
-      : t('dashboard.reconcileImbalance', {
-          n: reconcileImbalance.value,
-          m: reconcileChecked.value,
-        })
-  } catch (e) {
-    reconcileHint.value = String(e)
-    reconcileBalanced.value = null
-  } finally {
-    reconcileBusy.value = false
-  }
-}
-
-async function runExpirePayOrders() {
-  if (!isAuthed.value) return
-  expireBusy.value = true
-  expireHint.value = ''
-  try {
-    const res = await apiFetch(apiUrl(apiBase, payExpireOrdersPath()), {
-      method: 'POST',
-      headers: authHeaders(),
-    })
-    if (!res.ok) throw new Error(`expire-orders ${res.status}`)
-    const data = await res.json()
-    expireHint.value = t('dashboard.expireDone', { n: Number(data.expired_count ?? 0) })
-  } catch (e) {
-    expireHint.value = String(e)
-  } finally {
-    expireBusy.value = false
-  }
-}
-
-async function runMetricsScrape() {
-  metricsBusy.value = true
-  metricsHint.value = ''
-  try {
-    const res = await apiFetch(apiUrl(apiBase, metricsPath()))
-    if (!res.ok) throw new Error(`metrics ${res.status}`)
-    const text = await res.text()
-    metricsText.value = text
-    metricsLines.value = text.split('\n').filter((l) => l.trim() && !l.startsWith('#')).length
-    metricsHint.value = t('dashboard.metricsOk', { n: metricsLines.value })
-  } catch (e) {
-    metricsHint.value = String(e)
-    metricsText.value = ''
-    metricsLines.value = 0
-  } finally {
-    metricsBusy.value = false
-  }
-}
-
-async function runAnalyticsSummary() {
-  if (!isAuthed.value) return
-  analyticsBusy.value = true
-  analyticsHint.value = ''
-  try {
-    const res = await apiFetch(apiUrl(apiBase, analyticsSummaryPath()), {
-      headers: authHeaders(false),
-    })
-    if (!res.ok) throw new Error(`analytics ${res.status}`)
-    const data = await res.json()
-    analyticsRetained.value = Number(data.retained_events ?? 0)
-    analyticsUsers.value = Number(data.distinct_users ?? 0)
-    analyticsByName.value = Array.isArray(data.by_name)
-      ? data.by_name.map((r: { name?: string; count?: number }) => ({
-          name: String(r.name ?? ''),
-          count: Number(r.count ?? 0),
-        }))
-      : []
-    analyticsRecent.value = Array.isArray(data.recent)
-      ? data.recent.map(
-          (r: {
-            id?: string
-            user_id?: string
-            name?: string
-            occurred_at?: string
-          }) => ({
-            id: String(r.id ?? ''),
-            user_id: String(r.user_id ?? ''),
-            name: String(r.name ?? ''),
-            occurred_at: String(r.occurred_at ?? ''),
-          }),
-        )
-      : []
-    analyticsHint.value = t('dashboard.analyticsHint', {
-      n: analyticsRetained.value,
-      m: analyticsUsers.value,
-    })
-  } catch (e) {
-    analyticsHint.value = String(e)
-    analyticsByName.value = []
-    analyticsRecent.value = []
-  } finally {
-    analyticsBusy.value = false
-  }
-}
-
-async function sendOtp() {
-  notice.value = ''
-  error.value = ''
-  const em = email.value.trim()
-  if (!em || !em.includes('@')) {
-    error.value = t('flash.needEmail')
-    return
-  }
-  loginBusy.value = true
-  try {
-    const res = await apiFetch(apiUrl(apiBase, otpSendPath()), {
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify({ email: em }),
-    })
-    if (res.status !== 204) {
-      const bodyText = await res.text().catch(() => '')
-      throw new Error(authErrorMessage(res.status, bodyText, locale.value))
-    }
-    otpSent.value = true
-    notice.value = t('flash.otpSent')
-    startResendCooldown(60)
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    loginBusy.value = false
-  }
-}
-
-async function applySessionFromAuth(data: {
-  access_token?: string
-  refresh_token?: string
-  user?: { display_name?: string; email?: string; id?: string; username?: string }
-}) {
-  accessToken.value = data.access_token ?? null
-  refreshToken.value = data.refresh_token ?? ''
-  displayName.value =
-    data.user?.display_name ?? data.user?.username ?? data.user?.email ?? email.value
-  userId.value = data.user?.id ?? ''
-  isAdmin.value = null
-  persistSession()
-  notice.value = t('flash.loginOk')
-  nav.value = 'dashboard'
-  if (userId.value) {
-    await tryBootstrapAdmin(userId.value)
-  }
-  await refreshLists()
-}
-
-async function passwordLogin() {
-  notice.value = ''
-  error.value = ''
-  const id = email.value.trim()
-  if (!id || !password.value) {
-    error.value = t('flash.needEmail')
-    return
-  }
-  loginBusy.value = true
-  try {
-    const res = await apiFetch(apiUrl(apiBase, passwordLoginPath()), {
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify({
-        identifier: id,
-        password: password.value,
-      }),
-    })
-    if (!res.ok) {
-      const bodyText = await res.text().catch(() => '')
-      throw new Error(authErrorMessage(res.status, bodyText, locale.value))
-    }
-    const data = await res.json()
-    await applySessionFromAuth(data)
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    loginBusy.value = false
-  }
-}
-
-async function verifyOtp() {
-  notice.value = ''
-  error.value = ''
-  loginBusy.value = true
-  try {
-    const res = await apiFetch(apiUrl(apiBase, otpVerifyPath()), {
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify({
-        email: email.value.trim(),
-        code: otpCode.value.trim(),
-      }),
-    })
-    if (!res.ok) {
-      const bodyText = await res.text().catch(() => '')
-      throw new Error(authErrorMessage(res.status, bodyText, locale.value))
-    }
-    const data = await res.json()
-    await applySessionFromAuth(data)
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    loginBusy.value = false
-  }
-}
-
-async function tryBootstrapAdmin(id: string) {
-  try {
-    const res = await apiFetch(apiUrl(apiBase, grantAdminPath()), {
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify({ user_id: id }),
-    })
-    const bodyText = await res.text().catch(() => '')
-    const outcome = classifyAdminGrant(res.status, bodyText)
-    if (outcome === 'granted') {
-      isAdmin.value = true
-      bootstrapClosed.value = false
-      notice.value = t('flash.bootstrapOk')
-      return
-    }
-    if (outcome === 'bootstrap_closed' || outcome === 'conflict') {
-      // Privilege still unknown until audit/reports probe in refreshLists.
-      // Flag closed bootstrap so admin-gate copy is actionable when probe fails.
-      bootstrapClosed.value = true
-      isAdmin.value = null
-      notice.value =
-        outcome === 'conflict' ? t('flash.bootstrapConflict') : t('flash.bootstrapClosed')
-      return
-    }
-    // network-ish error: leave isAdmin unknown
-  } catch {
-    // ignore transport errors; refreshLists will probe
-  }
-}
-
-async function logout() {
-  const rt = refreshToken.value.trim()
-  const at = accessToken.value
-  // Best-effort server revoke; always clear local state.
-  if (at || rt) {
-    try {
-      await fetch(apiUrl(apiBase, logoutPath()), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(at ? { Authorization: `Bearer ${at}` } : {}),
-        },
-        body: JSON.stringify(rt ? { refresh_token: rt } : {}),
-      })
-    } catch {
-      // ignore
-    }
-  }
-  accessToken.value = null
-  refreshToken.value = ''
-  displayName.value = ''
-  userId.value = ''
-  isAdmin.value = null
-  bootstrapClosed.value = false
-  otpSent.value = false
-  otpCode.value = ''
-  clearAdminSession()
-  notice.value = t('flash.logoutOk')
-  cancelEditGift()
-  closePreview()
-  void refreshLists()
-}
-
-async function restoreSession() {
-  sessionRestoring.value = true
-  try {
-    const snap = loadAdminSession()
-    if (!snap) return
-    accessToken.value = snap.accessToken
-    refreshToken.value = snap.refreshToken
-    displayName.value = snap.displayName
-    userId.value = snap.userId
-    if (snap.email) email.value = snap.email
-    // Validate access; rotate on 401.
-    try {
-      const meRes = await fetch(apiUrl(apiBase, '/api/v1/me'), {
-        headers: authHeaders(false),
-      })
-      if (meRes.status === 401) {
-        const ok = await tryRefreshAccess()
-        if (!ok) {
-          accessToken.value = null
-          refreshToken.value = ''
-          clearAdminSession()
-          notice.value = t('flash.sessionExpired')
-          return
-        }
-      } else if (!meRes.ok) {
-        // Keep token; lists may still work or surface errors.
-      } else {
-        const me = (await meRes.json().catch(() => null)) as {
-          display_name?: string
-          email?: string
-          id?: string
-        } | null
-        if (me?.display_name) displayName.value = me.display_name
-        if (me?.email) {
-          displayName.value = displayName.value || me.email
-          email.value = email.value || me.email
-        }
-        if (me?.id) userId.value = me.id
-      }
-    } catch {
-      // offline — keep local session for offline shell
-    }
-    notice.value = t('flash.sessionRestored')
-    await refreshLists()
-  } finally {
-    sessionRestoring.value = false
-  }
-}
-
-async function forceCloseRoom(id?: string) {
-  const roomId = (id ?? roomIdInput.value).trim()
-  if (!accessToken.value) {
-    error.value = t('flash.needLogin')
-    return
-  }
-  if (!roomId) {
-    error.value = t('rooms.needRoomId')
-    return
-  }
-  notice.value = ''
-  error.value = ''
-  actionBusy.value = true
-  try {
-    const res = await apiFetch(apiUrl(apiBase, forceCloseRoomPath()), {
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify({
-        room_id: roomId,
-        reason: actionReason.value.trim() || undefined,
-      }),
-    })
-    if (isAdminForbidden(res.status)) {
-      isAdmin.value = false
-      error.value =
-        adminGateHint.value || adminGateMessage({ apiBase, email: email.value }, locale.value)
-      return
-    }
-    if (!res.ok) throw new Error(`force-close ${res.status}`)
-    notice.value = t('rooms.forceClosed', { id: shortId(roomId) })
-    roomIdInput.value = ''
-    if (goLiveRoomId.value === roomId) {
-      goLiveRoomStatus.value = 'closed'
-      goLivePublish.value = null
-      goLiveHls.value = ''
-    }
-    await Promise.all([loadRooms(), loadAudit()])
-  } catch (e) {
-    error.value = String(e)
-  } finally {
-    actionBusy.value = false
-  }
-}
-
-async function copyText(label: string, text: string) {
-  goLiveCopyHint.value = ''
-  if (!text) return
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text)
-      goLiveCopyHint.value = t('golive.copyLabel', { label })
-      return
-    }
-  } catch {
-    // fall through
-  }
-  window.prompt(t('common.copy') + ' ' + label, text)
-  goLiveCopyHint.value = t('golive.copyReady', { label })
-}
-
-/** One-click go-live: create → start → publish creds → HLS. */
-async function goLiveStart() {
-  if (!accessToken.value) {
-    error.value = t('flash.needLogin')
-    return
-  }
-  const titleText = goLiveTitle.value.trim() || t('golive.liveTitlePlaceholder')
-  notice.value = ''
-  error.value = ''
-  goLiveCopyHint.value = ''
-  goLiveBusy.value = true
-  try {
-    const createRes = await apiFetch(apiUrl(apiBase, createRoomPath()), {
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify({ title: titleText }),
-    })
-    if (!createRes.ok) throw new Error(`create room ${createRes.status}`)
-    const room = await createRes.json()
-    const rid = String(room.id || '')
-    if (!rid) throw new Error('create room missing id')
-    goLiveRoomId.value = rid
-
-    const startRes = await apiFetch(apiUrl(apiBase, roomStartPath(rid)), {
-      method: 'POST',
-      headers: authHeaders(),
-    })
-    if (!startRes.ok) throw new Error(`start ${startRes.status}`)
-    const started = await startRes.json()
-    goLiveRoomStatus.value = String(started.status || 'live')
-
-    const pubRes = await apiFetch(apiUrl(apiBase, roomPublishPath(rid)), {
-      method: 'POST',
-      headers: authHeaders(),
-    })
-    if (!pubRes.ok) throw new Error(`publish ${pubRes.status}`)
-    const pubJson = await pubRes.json()
-    const info = parsePublishInfo(pubJson)
-    if (!info) throw new Error('publish parse failed')
-    goLivePublish.value = info
-
-    try {
-      const playRes = await apiFetch(apiUrl(apiBase, roomPlayPath(rid)))
-      if (playRes.ok) {
-        const play = await playRes.json()
-        goLiveHls.value = buildHls(play, rid)
-      } else {
-        goLiveHls.value = buildHls(null, rid)
-      }
-    } catch {
-      goLiveHls.value = buildHls(null, rid)
-    }
-
-    notice.value = t('golive.started', { title: titleText, id: shortId(rid) })
-    await loadRooms()
-  } catch (e) {
-    error.value = String(e)
-  } finally {
-    goLiveBusy.value = false
-  }
-}
-
-/** Refresh publish creds for current go-live room. */
-async function goLiveRefreshPublish() {
-  const rid = goLiveRoomId.value.trim()
-  if (!accessToken.value || !rid) {
-    error.value = t('golive.needRoom')
-    return
-  }
-  goLiveBusy.value = true
-  error.value = ''
-  try {
-    const pubRes = await apiFetch(apiUrl(apiBase, roomPublishPath(rid)), {
-      method: 'POST',
-      headers: authHeaders(),
-    })
-    if (!pubRes.ok) throw new Error(`publish refresh ${pubRes.status}`)
-    const info = parsePublishInfo(await pubRes.json())
-    if (!info) throw new Error('publish parse failed')
-    goLivePublish.value = info
-    const playRes = await apiFetch(apiUrl(apiBase, roomPlayPath(rid)))
-    if (playRes.ok) {
-      goLiveHls.value = buildHls(await playRes.json(), rid)
-    }
-    notice.value = t('golive.refreshed')
-  } catch (e) {
-    error.value = String(e)
-  } finally {
-    goLiveBusy.value = false
-  }
-}
-
-async function goLiveStop() {
-  const rid = goLiveRoomId.value.trim()
-  if (!accessToken.value || !rid) {
-    error.value = t('golive.noRoom')
-    return
-  }
-  goLiveBusy.value = true
-  error.value = ''
-  try {
-    const res = await apiFetch(apiUrl(apiBase, roomStopPath(rid)), {
-      method: 'POST',
-      headers: authHeaders(),
-    })
-    if (!res.ok) throw new Error(`stop ${res.status}`)
-    const room = await res.json()
-    goLiveRoomStatus.value = String(room.status || 'idle')
-    goLivePublish.value = null
-    goLiveHls.value = ''
-    notice.value = t('golive.stopped', { id: shortId(rid) })
-    await loadRooms()
-  } catch (e) {
-    error.value = String(e)
-  } finally {
-    goLiveBusy.value = false
-  }
-}
-
-/** Re-issue publish credentials for an existing room. */
-async function loadPublishForRoom(id: string) {
-  if (!accessToken.value) {
-    error.value = t('flash.needLogin')
-    return
-  }
-  const rid = id.trim()
-  if (!rid) return
-  goLiveBusy.value = true
-  error.value = ''
-  nav.value = 'golive'
-  try {
-    goLiveRoomId.value = rid
-    const room = rooms.value.find((r) => r.id === rid)
-    goLiveRoomStatus.value = room?.status || ''
-    if (goLiveRoomStatus.value === 'idle') {
-      const startRes = await apiFetch(apiUrl(apiBase, roomStartPath(rid)), {
-        method: 'POST',
-        headers: authHeaders(),
-      })
-      if (!startRes.ok) throw new Error(`start ${startRes.status}`)
-      const started = await startRes.json()
-      goLiveRoomStatus.value = String(started.status || 'live')
-    }
-    const pubRes = await apiFetch(apiUrl(apiBase, roomPublishPath(rid)), {
-      method: 'POST',
-      headers: authHeaders(),
-    })
-    if (!pubRes.ok) throw new Error(`publish ${pubRes.status}`)
-    const info = parsePublishInfo(await pubRes.json())
-    if (!info) throw new Error('publish parse failed')
-    goLivePublish.value = info
-    const playRes = await apiFetch(apiUrl(apiBase, roomPlayPath(rid)))
-    goLiveHls.value = playRes.ok ? buildHls(await playRes.json(), rid) : buildHls(null, rid)
-    notice.value = t('golive.loaded', { id: shortId(rid) })
-    await loadRooms()
-  } catch (e) {
-    error.value = String(e)
-  } finally {
-    goLiveBusy.value = false
-  }
-}
-
-async function banUser() {
-  if (!accessToken.value) {
-    error.value = t('flash.needLogin')
-    return
-  }
-  const id = userIdInput.value.trim()
-  if (!id) {
-    error.value = t('moderation.needUserId')
-    return
-  }
-  notice.value = ''
-  error.value = ''
-  actionBusy.value = true
-  try {
-    const res = await apiFetch(apiUrl(apiBase, banUserPath()), {
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify({
-        user_id: id,
-        reason: actionReason.value.trim() || undefined,
-      }),
-    })
-    if (res.status !== 204) throw new Error(`ban ${res.status}`)
-    notice.value = t('moderation.banned', { id: shortId(id) })
-    userIdInput.value = ''
-    await Promise.all([loadAudit(), loadUsers(), loadModerationLists()])
-  } catch (e) {
-    error.value = String(e)
-  } finally {
-    actionBusy.value = false
-  }
-}
-
-async function loadBannedUsers() {
-  if (!accessToken.value) {
-    bannedUsers.value = []
-    return
-  }
-  const res = await apiFetch(apiUrl(apiBase, bannedUsersPath()), { headers: authHeaders(false) })
-  if (isAdminForbidden(res.status)) {
-    isAdmin.value = false
-    bannedUsers.value = []
-    return
-  }
-  if (!res.ok) throw new Error(`banned users ${res.status}`)
-  const data = await res.json()
-  bannedUsers.value = data.items ?? []
-  if (isAdmin.value !== true) isAdmin.value = true
-}
-
-async function loadMutedUsers() {
-  if (!accessToken.value) {
-    mutedUsers.value = []
-    return
-  }
-  const res = await apiFetch(apiUrl(apiBase, mutedUsersPath()), { headers: authHeaders(false) })
-  if (isAdminForbidden(res.status)) {
-    isAdmin.value = false
-    mutedUsers.value = []
-    return
-  }
-  if (!res.ok) throw new Error(`muted users ${res.status}`)
-  const data = await res.json()
-  mutedUsers.value = data.items ?? []
-  if (isAdmin.value !== true) isAdmin.value = true
-}
-
-async function loadModerationLists() {
-  await Promise.all([loadBannedUsers(), loadMutedUsers()])
-}
-
-async function lookupUserModeration() {
-  if (!accessToken.value) {
-    error.value = t('flash.needLogin')
-    return
-  }
-  const id = lookupUserId.value.trim()
-  if (!id) {
-    error.value = t('users.needUserId')
-    return
-  }
-  notice.value = ''
-  error.value = ''
-  lookupBusy.value = true
-  try {
-    const res = await apiFetch(apiUrl(apiBase, userModerationPath(id)), {
-      headers: authHeaders(false),
-    })
-    if (isAdminForbidden(res.status)) {
-      isAdmin.value = false
-      throw new Error(`moderation status ${res.status}`)
-    }
-    if (!res.ok) throw new Error(`moderation status ${res.status}`)
-    lookupStatus.value = await res.json()
-    notice.value = t('users.lookedUp', { id: shortId(id) })
-  } catch (e) {
-    error.value = String(e)
-  } finally {
-    lookupBusy.value = false
-  }
-}
-
-function fillBanFromLookup() {
-  const id = lookupStatus.value?.user_id || lookupUserId.value.trim()
-  if (!id) return
-  userIdInput.value = id
-  unbanUserIdInput.value = id
-  nav.value = 'moderation'
-}
-
-function fillMuteFromLookup() {
-  const id = lookupStatus.value?.user_id || lookupUserId.value.trim()
-  if (!id) return
-  muteUserIdInput.value = id
-  unmuteUserIdInput.value = id
-  nav.value = 'moderation'
-}
-
-async function loadUsers() {
-  if (!accessToken.value) return
-  usersBusy.value = true
-  try {
-    const q = usersQuery.value.trim()
-    const path = q
-      ? `${adminUsersPath()}?q=${encodeURIComponent(q)}&limit=50`
-      : `${adminUsersPath()}?limit=50`
-    const res = await apiFetch(apiUrl(apiBase, path), { headers: authHeaders() })
-    if (!res.ok) {
-      if (isAdminForbidden(res.status)) {
-        isAdmin.value = false
-      }
-      throw new Error(`users ${res.status}`)
-    }
-    const data = await res.json()
-    usersList.value = Array.isArray(data.items) ? data.items : []
-    usersTotal.value = Number(data.total ?? usersList.value.length)
-  } catch (e) {
-    error.value = String(e)
-  } finally {
-    usersBusy.value = false
-  }
-}
-
-async function createUser() {
-  if (!accessToken.value) {
-    error.value = t('flash.needLogin')
-    return
-  }
-  if (!createDisplayName.value.trim()) {
-    error.value = t('users.displayName')
-    return
-  }
-  createBusy.value = true
-  notice.value = ''
-  error.value = ''
-  tempPasswordNotice.value = ''
-  try {
-    const body: Record<string, unknown> = {
-      display_name: createDisplayName.value.trim(),
-    }
-    if (createUsername.value.trim()) body.username = createUsername.value.trim()
-    if (createEmail.value.trim()) body.email = createEmail.value.trim()
-    if (createPassword.value) body.password = createPassword.value
-    const res = await apiFetch(apiUrl(apiBase, adminUsersPath()), {
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify(body),
-    })
-    if (res.status !== 201) {
-      const text = await res.text().catch(() => '')
-      throw new Error(`create ${res.status} ${text}`)
-    }
-    const data = await res.json()
-    notice.value = t('users.created')
-    if (data.temporary_password) {
-      tempPasswordNotice.value = `${t('users.tempPassword')}: ${data.temporary_password}`
-    }
-    createDisplayName.value = ''
-    createUsername.value = ''
-    createEmail.value = ''
-    createPassword.value = ''
-    await loadUsers()
-  } catch (e) {
-    error.value = String(e)
-  } finally {
-    createBusy.value = false
-  }
-}
-
-async function resetUserPassword(id: string) {
-  if (!accessToken.value) return
-  actionBusy.value = true
-  tempPasswordNotice.value = ''
-  try {
-    const res = await apiFetch(apiUrl(apiBase, adminResetPasswordPath(id)), {
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify({ must_change_password: true }),
-    })
-    if (!res.ok) throw new Error(`reset ${res.status}`)
-    const data = await res.json()
-    if (data.temporary_password) {
-      tempPasswordNotice.value = `${t('users.tempPassword')}: ${data.temporary_password}`
-    }
-    notice.value = t('users.resetPassword')
-    await loadUsers()
-  } catch (e) {
-    error.value = String(e)
-  } finally {
-    actionBusy.value = false
-  }
-}
-
-async function revokeUserSessions(id: string) {
-  if (!accessToken.value) return
-  actionBusy.value = true
-  try {
-    const res = await apiFetch(apiUrl(apiBase, adminRevokeSessionsPath(id)), {
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify({}),
-    })
-    if (!res.ok) throw new Error(`revoke ${res.status}`)
-    notice.value = t('users.revokeSessions')
-  } catch (e) {
-    error.value = String(e)
-  } finally {
-    actionBusy.value = false
-  }
-}
-
-async function unbanUser(targetId?: string) {
-  if (!accessToken.value) {
-    error.value = t('flash.needLogin')
-    return
-  }
-  const id = (targetId ?? unbanUserIdInput.value).trim()
-  if (!id) {
-    error.value = t('moderation.needUserId')
-    return
-  }
-  notice.value = ''
-  error.value = ''
-  actionBusy.value = true
-  try {
-    const res = await apiFetch(apiUrl(apiBase, unbanUserPath()), {
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify({
-        user_id: id,
-        reason: actionReason.value.trim() || undefined,
-      }),
-    })
-    if (res.status !== 204) throw new Error(`unban ${res.status}`)
-    notice.value = t('moderation.unbanned', { id: shortId(id) })
-    if (!targetId) unbanUserIdInput.value = ''
-    if (lookupStatus.value?.user_id === id) {
-      lookupStatus.value = {
-        ...lookupStatus.value,
-        banned: false,
-        ban_reason: null,
-        banned_at: null,
-      }
-    }
-    await Promise.all([loadAudit(), loadModerationLists(), loadUsers()])
-  } catch (e) {
-    error.value = String(e)
-  } finally {
-    actionBusy.value = false
-  }
-}
-
-async function unbanUserId(id: string) {
-  await unbanUser(id)
-}
-
-async function banUserId(id: string) {
-  userIdInput.value = id
-  await banUser()
-}
-
-async function setUserStatus(id: string, status: string) {
-  if (!accessToken.value) return
-  actionBusy.value = true
-  try {
-    const res = await apiFetch(apiUrl(apiBase, `${adminUsersPath()}/${encodeURIComponent(id)}`), {
-      method: 'PATCH',
-      headers: authHeaders(),
-      body: JSON.stringify({ status }),
-    })
-    if (!res.ok) throw new Error(`patch ${res.status}`)
-    notice.value = status === 'disabled' ? t('users.disable') : t('users.enable')
-    await loadUsers()
-  } catch (e) {
-    error.value = String(e)
-  } finally {
-    actionBusy.value = false
-  }
-}
-
-async function muteUser() {
-  if (!accessToken.value) {
-    error.value = t('flash.needLogin')
-    return
-  }
-  const id = muteUserIdInput.value.trim()
-  if (!id) {
-    error.value = t('moderation.needUserId')
-    return
-  }
-  notice.value = ''
-  error.value = ''
-  actionBusy.value = true
-  try {
-    const res = await apiFetch(apiUrl(apiBase, muteUserPath()), {
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify({
-        user_id: id,
-        reason: actionReason.value.trim() || undefined,
-      }),
-    })
-    if (res.status !== 204) throw new Error(`mute ${res.status}`)
-    notice.value = t('moderation.muted', { id: shortId(id) })
-    muteUserIdInput.value = ''
-    await Promise.all([loadAudit(), loadModerationLists()])
-  } catch (e) {
-    error.value = String(e)
-  } finally {
-    actionBusy.value = false
-  }
-}
-
-async function unmuteUser(targetId?: string) {
-  if (!accessToken.value) {
-    error.value = t('flash.needLogin')
-    return
-  }
-  const id = (targetId ?? unmuteUserIdInput.value).trim()
-  if (!id) {
-    error.value = t('moderation.needUserId')
-    return
-  }
-  notice.value = ''
-  error.value = ''
-  actionBusy.value = true
-  try {
-    const res = await apiFetch(apiUrl(apiBase, unmuteUserPath()), {
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify({
-        user_id: id,
-        reason: actionReason.value.trim() || undefined,
-      }),
-    })
-    if (res.status !== 204) throw new Error(`unmute ${res.status}`)
-    notice.value = t('moderation.unmuted', { id: shortId(id) })
-    if (!targetId) unmuteUserIdInput.value = ''
-    if (lookupStatus.value?.user_id === id) {
-      lookupStatus.value = {
-        ...lookupStatus.value,
-        muted: false,
-        mute_reason: null,
-        muted_at: null,
-      }
-    }
-    await Promise.all([loadAudit(), loadModerationLists(), loadUsers()])
-  } catch (e) {
-    error.value = String(e)
-  } finally {
-    actionBusy.value = false
-  }
-}
-
-function beginEditGift(g: { id: string; name: string; price: number; active?: boolean }) {
-  giftEditId.value = g.id
-  giftName.value = g.name
-  giftPrice.value = String(g.price)
-  giftEditActive.value = g.active !== false
-  notice.value = t('gifts.editing', { id: shortId(g.id) })
-  error.value = ''
-}
-
-function cancelEditGift() {
-  giftEditId.value = null
-  giftName.value = ''
-  giftPrice.value = ''
-  giftEditActive.value = true
-}
-
-/**
- * Create or update gift via POST /api/v1/admin/gifts.
- * Optional body.id targets an existing catalog row; active toggles visibility.
- */
-async function upsertGift(opts?: {
-  id?: string
-  name?: string
-  price?: number
-  active?: boolean
-  successLabel?: string
-}) {
-  if (!accessToken.value) {
-    error.value = t('flash.needLogin')
-    return
-  }
-  const id = opts?.id
-  const name = (opts?.name ?? giftName.value).trim()
-  const price = opts?.price ?? Number(giftPrice.value)
-  const active = opts?.active ?? (id ? giftEditActive.value : true)
-  if (!name || !Number.isFinite(price) || price <= 0) {
-    error.value = t('gifts.needFields')
-    return
-  }
-  notice.value = ''
-  error.value = ''
-  giftBusy.value = true
-  try {
-    const body: { name: string; price: number; active: boolean; id?: string } = {
-      name,
-      price,
-      active,
-    }
-    if (id) body.id = id
-    const res = await apiFetch(apiUrl(apiBase, adminGiftsPath()), {
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify(body),
-    })
-    if (isAdminForbidden(res.status)) {
-      isAdmin.value = false
-      error.value =
-        adminGateHint.value || adminGateMessage({ apiBase, email: email.value }, locale.value)
-      return
-    }
-    if (res.status !== 201 && !res.ok) throw new Error(`upsert gift ${res.status}`)
-    const label =
-      opts?.successLabel ??
-      (id ? t('gifts.updated', { name }) : t('gifts.created', { name }))
-    notice.value = label
-    cancelEditGift()
-    await loadGifts()
-  } catch (e) {
-    error.value = String(e)
-  } finally {
-    giftBusy.value = false
-  }
-}
-
-async function createGift() {
-  await upsertGift()
-}
-
-async function saveGiftEdit() {
-  if (!giftEditId.value) {
-    error.value = t('gifts.noEdit')
-    return
-  }
-  await upsertGift({ id: giftEditId.value })
-}
-
-/** Toggle active flag on a gift row without leaving the list. */
-async function toggleGiftActive(g: {
-  id: string
-  name: string
-  price: number
-  active?: boolean
-}) {
-  const next = g.active === false
-  await upsertGift({
-    id: g.id,
-    name: g.name,
-    price: g.price,
-    active: next,
-    successLabel: next ? t('gifts.enabled', { name: g.name }) : t('gifts.disabled', { name: g.name }),
-  })
-}
-
-async function resolveReport(reportId: string) {
-  if (!accessToken.value) {
-    error.value = t('flash.needLogin')
-    return
-  }
-  notice.value = ''
-  error.value = ''
-  actionBusy.value = true
-  try {
-    const res = await apiFetch(apiUrl(apiBase, reportResolvePath(reportId)), {
-      method: 'PATCH',
-      headers: authHeaders(),
-      body: JSON.stringify({
-        status: 'resolved',
-        note: actionReason.value.trim() || undefined,
-      }),
-    })
-    if (!res.ok) throw new Error(`resolve report ${res.status}`)
-    notice.value = t('reports.resolved', { id: shortId(reportId) })
-    await Promise.all([loadReports(), loadAudit()])
-  } catch (e) {
-    error.value = String(e)
-  } finally {
-    actionBusy.value = false
-  }
-}
-
-onMounted(() => {
-  void restoreSession().finally(() => {
-    if (!accessToken.value) void refreshLists()
-  })
-})
+  statusLabel,
+  t,
+  tempPasswordNotice,
+  theme,
+  themeToggleLabel,
+  title,
+  toggleGiftActive,
+  unbanUser,
+  unbanUserId,
+  unmuteUser,
+  unmuteUserIdInput,
+  useOtpLogin,
+  useRoomId,
+  useUserId,
+  userId,
+  userIdInput,
+  usersBusy,
+  usersList,
+  usersListMeta,
+  usersQuery,
+  usersStatusFilter,
+  usersPageSize,
+  usersTotal,
+  searchUsers,
+  setUsersPage,
+  verifyOtp,
+} = useAdminApp()
+
+// Template ref target (assigned by Vue; kept referenced for noUnusedLocals).
+void previewVideoEl
 </script>
 
 <template>
@@ -1575,7 +182,7 @@ onMounted(() => {
       <div class="login-orb o2" />
       <div class="login-grid" />
     </div>
-    <div class="login-shell" style="max-width: min(360px, 100%); grid-template-columns: minmax(0, 1fr)">
+    <div class="login-shell is-restoring">
       <div class="login-restoring login-card">
         <div class="login-spinner" />
         <p class="lead">{{ t('login.restoring') }}</p>
@@ -1602,20 +209,27 @@ onMounted(() => {
               <div class="brand-sub">{{ t('app.console') }}</div>
             </div>
           </div>
-          <h2>{{ t('login.headline') }}</h2>
-          <p>{{ t('login.subhead') }}</p>
+          <span class="login-hero-tag">{{ t('login.heroTag') }}</span>
+          <h2>{{ t('login.heroTitle') }}</h2>
+          <p>{{ t('login.heroBody') }}</p>
         </div>
         <div class="login-features">
           <div class="login-feature">
-            <span class="login-feature-dot" />
+            <span class="login-feature-icon" aria-hidden="true">
+              <AppIcon :component="Radio" :size="16" />
+            </span>
             {{ t('login.features.rooms') }}
           </div>
           <div class="login-feature">
-            <span class="login-feature-dot" />
+            <span class="login-feature-icon" aria-hidden="true">
+              <AppIcon :component="Shield" :size="16" />
+            </span>
             {{ t('login.features.moderation') }}
           </div>
           <div class="login-feature">
-            <span class="login-feature-dot" />
+            <span class="login-feature-icon" aria-hidden="true">
+              <AppIcon :component="ScrollText" :size="16" />
+            </span>
             {{ t('login.features.audit') }}
           </div>
         </div>
@@ -1630,24 +244,69 @@ onMounted(() => {
               <code class="mono">123456</code>
             </p>
           </div>
-          <div class="lang-switch" data-testid="login-lang-switch">
-            <button
-              type="button"
-              :class="{ active: locale === 'zh' }"
-              data-testid="lang-zh"
-              @click="setLocale('zh')"
-            >
-              {{ t('lang.zh') }}
-            </button>
-            <button
-              type="button"
-              :class="{ active: locale === 'en' }"
-              data-testid="lang-en"
-              @click="setLocale('en')"
-            >
-              {{ t('lang.en') }}
-            </button>
+          <div class="login-toolbar">
+            <div class="theme-switch" data-testid="login-theme-switch" role="group" :aria-label="t('theme.label')">
+              <button
+                type="button"
+                :class="{ active: theme === 'light' }"
+                data-testid="theme-light"
+                :aria-pressed="theme === 'light'"
+                @click="setTheme('light')"
+              >
+                {{ t('theme.light') }}
+              </button>
+              <button
+                type="button"
+                :class="{ active: theme === 'dark' }"
+                data-testid="theme-dark"
+                :aria-pressed="theme === 'dark'"
+                @click="setTheme('dark')"
+              >
+                {{ t('theme.dark') }}
+              </button>
+            </div>
+            <div class="lang-switch" data-testid="login-lang-switch">
+              <button
+                type="button"
+                :class="{ active: locale === 'zh' }"
+                data-testid="lang-zh"
+                @click="setLocale('zh')"
+              >
+                {{ t('lang.zh') }}
+              </button>
+              <button
+                type="button"
+                :class="{ active: locale === 'en' }"
+                data-testid="lang-en"
+                @click="setLocale('en')"
+              >
+                {{ t('lang.en') }}
+              </button>
+            </div>
           </div>
+        </div>
+
+        <div class="login-mode-tabs" role="tablist" data-testid="login-mode-tabs">
+          <button
+            type="button"
+            role="tab"
+            :class="{ active: !useOtpLogin }"
+            :aria-selected="!useOtpLogin"
+            data-testid="login-tab-password"
+            @click="useOtpLogin = false"
+          >
+            {{ t('login.modePassword') }}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            :class="{ active: useOtpLogin }"
+            :aria-selected="useOtpLogin"
+            data-testid="login-tab-otp"
+            @click="useOtpLogin = true"
+          >
+            {{ t('login.modeOtp') }}
+          </button>
         </div>
 
         <div class="login-steps" aria-hidden="true">
@@ -1659,7 +318,7 @@ onMounted(() => {
         <p v-if="error" class="flash err" data-testid="login-error">{{ error }}</p>
 
         <label class="field">
-          <span>{{ t('login.email') }} / username</span>
+          <span>{{ t('login.email') }}</span>
           <input
             v-model="email"
             type="text"
@@ -1671,12 +330,12 @@ onMounted(() => {
 
         <template v-if="!useOtpLogin">
           <label class="field">
-            <span>Password</span>
+            <span>{{ t('login.password') }}</span>
             <input
               v-model="password"
               type="password"
               autocomplete="current-password"
-              placeholder="••••••••"
+              :placeholder="t('login.passwordPlaceholder')"
               data-testid="login-password"
               @keyup.enter="passwordLogin"
             />
@@ -1689,15 +348,6 @@ onMounted(() => {
             @click="passwordLogin"
           >
             {{ loginBusy ? t('login.submitting') : t('login.submit') }}
-          </button>
-          <button
-            type="button"
-            class="btn"
-            style="margin-top: 8px"
-            data-testid="login-toggle-otp"
-            @click="useOtpLogin = true"
-          >
-            Dev OTP
           </button>
         </template>
 
@@ -1727,6 +377,7 @@ onMounted(() => {
               autocomplete="one-time-code"
               :placeholder="t('login.otpPlaceholder')"
               data-testid="login-otp"
+              @keyup.enter="verifyOtp"
             />
             <span class="otp-dev-tip">{{ t('login.tipDev') }} · 123456</span>
           </label>
@@ -1739,18 +390,9 @@ onMounted(() => {
           >
             {{ loginBusy ? t('login.submitting') : t('login.submit') }}
           </button>
-          <button
-            type="button"
-            class="btn"
-            style="margin-top: 8px"
-            data-testid="login-toggle-password"
-            @click="useOtpLogin = false"
-          >
-            Password
-          </button>
         </template>
 
-        <p class="login-secure">{{ t('login.secureNote') }} · API {{ apiBase }}</p>
+        <p class="login-secure">{{ t('login.secureNote') }} · {{ t('login.api') }} {{ apiBase }}</p>
       </div>
     </div>
   </div>
@@ -1776,11 +418,32 @@ onMounted(() => {
           :data-testid="`nav-${item.key}`"
           @click="go(item.key)"
         >
+          <span class="nav-icon" aria-hidden="true">
+            <AppIcon :name="item.key" :size="15" />
+          </span>
           <span>{{ t(item.labelKey) }}</span>
         </button>
       </nav>
 
       <div class="sidebar-foot">
+        <div class="theme-switch" data-testid="sidebar-theme-switch" role="group" :aria-label="t('theme.label')">
+          <button
+            type="button"
+            :class="{ active: theme === 'light' }"
+            :aria-pressed="theme === 'light'"
+            @click="setTheme('light')"
+          >
+            {{ t('theme.light') }}
+          </button>
+          <button
+            type="button"
+            :class="{ active: theme === 'dark' }"
+            :aria-pressed="theme === 'dark'"
+            @click="setTheme('dark')"
+          >
+            {{ t('theme.dark') }}
+          </button>
+        </div>
         <div class="lang-switch" data-testid="sidebar-lang-switch">
           <button
             type="button"
@@ -1805,9 +468,11 @@ onMounted(() => {
           :disabled="listBusy"
           @click="refreshLists"
         >
+          <AppIcon :component="RefreshCw" :size="14" />
           {{ t('topbar.refresh') }}
         </button>
         <button type="button" class="btn ghost" data-testid="logout" @click="logout">
+          <AppIcon :component="LogOut" :size="14" />
           {{ t('topbar.logout') }}
         </button>
       </div>
@@ -1815,26 +480,37 @@ onMounted(() => {
 
     <div class="main">
       <header class="topbar">
-        <div>
+        <div class="topbar-title">
           <h1>{{ pageTitle }}</h1>
           <p class="muted">{{ pageBlurb }}</p>
         </div>
-        <div class="session">
-          <div class="avatar">{{ avatarLetter }}</div>
-          <div>
-            <div style="font-weight: 600">{{ displayName || 'operator' }}</div>
-            <div
-              class="dim mono"
-              style="font-size: 0.72rem; display: flex; gap: 0.35rem; align-items: center; min-width: 0; flex-wrap: wrap"
-            >
-              <span style="overflow: hidden; text-overflow: ellipsis">{{ shortId(userId, 10) }}</span>
-              <span
-                class="role-pill"
-                :class="{ admin: isAdmin === true }"
-                data-testid="session-role"
-              >
-                {{ sessionRoleLabel }}
-              </span>
+        <div class="session-tools">
+          <button
+            type="button"
+            class="theme-icon-btn"
+            data-testid="topbar-theme-toggle"
+            :title="themeToggleLabel"
+            :aria-label="themeToggleLabel"
+            @click="onToggleTheme"
+          >
+            <!-- sun when dark (click → light); moon when light (click → dark) -->
+            <AppIcon v-if="theme === 'dark'" :component="Sun" :size="16" />
+            <AppIcon v-else :component="Moon" :size="16" />
+          </button>
+          <div class="session">
+            <div class="avatar">{{ avatarLetter }}</div>
+            <div class="session-meta">
+              <div class="session-name">{{ displayName || 'operator' }}</div>
+              <div class="session-sub">
+                <span>{{ shortId(userId, 10) }}</span>
+                <span
+                  class="role-pill"
+                  :class="{ admin: isAdmin === true }"
+                  data-testid="session-role"
+                >
+                  {{ sessionRoleLabel }}
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -1869,17 +545,16 @@ onMounted(() => {
           <section
             v-if="isAdmin === true"
             class="panel"
-            style="margin-bottom: 0"
             data-testid="demo-prep"
           >
             <div class="panel-head">
               <h2>{{ t('dashboard.demoPrep') }}</h2>
             </div>
             <p class="panel-desc">{{ t('dashboard.demoPrepDesc') }}</p>
-            <ul class="muted" style="margin: 0.25rem 0 0.5rem; padding-left: 1.2rem; font-size: 0.88rem; overflow-wrap: anywhere">
+            <ul class="muted list-bullets">
               <li v-for="(line, i) in prepHints.lines" :key="i">{{ line }}</li>
             </ul>
-            <div class="row" style="gap: 0.5rem; flex-wrap: wrap; align-items: center; min-width: 0">
+            <div class="row">
               <code class="mono" data-testid="demo-prep-gift-seed">{{ prepHints.giftSeedCmd }}</code>
               <button
                 type="button"
@@ -1889,7 +564,7 @@ onMounted(() => {
               >
                 {{ t('dashboard.copySeed') }}
               </button>
-              <span class="dim mono" style="font-size: 0.78rem" data-testid="demo-prep-runbook">
+              <span class="dim mono" data-testid="demo-prep-runbook">
                 {{ prepHints.runbookPath }}
               </span>
             </div>
@@ -1906,7 +581,7 @@ onMounted(() => {
             <div class="panel-head">
               <h2>{{ t('dashboard.walletOps') }}</h2>
             </div>
-            <div class="row" style="gap: 0.75rem; flex-wrap: wrap; align-items: center">
+            <div class="row">
               <button
                 type="button"
                 class="btn primary"
@@ -1948,7 +623,6 @@ onMounted(() => {
             <pre
               v-if="metricsText"
               class="mono"
-              style="max-height: 180px; max-width: 100%; overflow: auto; font-size: 11px; margin-top: 0.5rem; white-space: pre-wrap; word-break: break-all"
             >{{ metricsText.slice(0, 4000) }}</pre>
           </section>
 
@@ -1966,7 +640,7 @@ onMounted(() => {
             </div>
             <p class="panel-desc">{{ t('dashboard.analyticsDesc') }}</p>
             <p v-if="analyticsHint" class="hint">{{ analyticsHint }}</p>
-            <div v-if="analyticsByName.length" class="table-wrap" style="margin-top: 0.5rem">
+            <div v-if="analyticsByName.length" class="table-wrap">
               <table class="data">
                 <thead>
                   <tr>
@@ -1982,7 +656,7 @@ onMounted(() => {
                 </tbody>
               </table>
             </div>
-            <ul v-if="analyticsRecent.length" class="muted" style="margin-top: 0.75rem">
+            <ul v-if="analyticsRecent.length" class="muted">
               <li v-for="ev in analyticsRecent.slice(0, 5)" :key="ev.id">
                 {{ ev.name }} · {{ ev.user_id.slice(0, 8) }} · {{ formatTs(ev.occurred_at) }}
               </li>
@@ -1995,8 +669,8 @@ onMounted(() => {
                 <h2>{{ t('dashboard.roomsPreview') }}</h2>
                 <button type="button" class="btn sm" @click="go('rooms')">{{ t('common.all') }}</button>
               </div>
-              <div class="table-wrap" v-if="rooms.length">
-                <table class="data">
+              <div class="table-wrap is-compact" v-if="rooms.length">
+                <table class="data data-compact">
                   <thead>
                     <tr>
                       <th>{{ t('rooms.colTitle') }}</th>
@@ -2022,7 +696,9 @@ onMounted(() => {
                 </table>
               </div>
               <div v-else class="empty">
-                <div class="empty-icon">◎</div>
+                <div class="empty-icon">
+                  <AppIcon :component="Inbox" :size="28" />
+                </div>
                 {{ t('dashboard.noRooms') }}
               </div>
             </section>
@@ -2032,8 +708,8 @@ onMounted(() => {
                 <h2>{{ t('dashboard.reportsPreview') }}</h2>
                 <button type="button" class="btn sm" @click="go('reports')">{{ t('dashboard.queue') }}</button>
               </div>
-              <div class="table-wrap" v-if="reports.length">
-                <table class="data">
+              <div class="table-wrap is-compact" v-if="reports.length">
+                <table class="data data-compact">
                   <thead>
                     <tr>
                       <th>{{ t('reports.colTarget') }}</th>
@@ -2060,7 +736,9 @@ onMounted(() => {
                 </table>
               </div>
               <div v-else class="empty">
-                <div class="empty-icon">◇</div>
+                <div class="empty-icon">
+                  <AppIcon :component="FolderOpen" :size="28" />
+                </div>
                 {{ t('dashboard.noReports') }}
               </div>
             </section>
@@ -2122,13 +800,12 @@ onMounted(() => {
           <div
             v-if="goLiveRoomId"
             class="action-card"
-            style="margin-top: 1rem"
             data-testid="golive-room-info"
           >
             <h3>{{ t('golive.roomInfo') }}</h3>
             <p class="mono" data-testid="golive-room-id">{{ t('golive.roomId') }}：{{ goLiveRoomId }}</p>
             <p class="muted">{{ t('common.status') }}：{{ statusLabel(goLiveRoomStatus) || '—' }}</p>
-            <div class="actions" style="margin-top: 0.5rem">
+            <div class="actions">
               <button
                 type="button"
                 class="btn sm"
@@ -2151,12 +828,11 @@ onMounted(() => {
           <div
             v-if="goLivePublish"
             class="split-actions"
-            style="margin-top: 1rem"
             data-testid="golive-obs"
           >
             <div class="action-card">
               <h3>{{ t('golive.obsServer') }}</h3>
-              <p class="mono" style="word-break: break-all" data-testid="golive-obs-server">
+              <p class="mono" data-testid="golive-obs-server">
                 {{ goLivePublish.server }}
               </p>
               <button
@@ -2170,7 +846,7 @@ onMounted(() => {
             </div>
             <div class="action-card">
               <h3>{{ t('golive.streamKey') }}</h3>
-              <p class="mono" style="word-break: break-all" data-testid="golive-obs-stream-key">
+              <p class="mono" data-testid="golive-obs-stream-key">
                 {{ goLivePublish.streamKey }}
               </p>
               <button
@@ -2181,13 +857,13 @@ onMounted(() => {
               >
                 {{ t('golive.copyStreamKey') }}
               </button>
-              <p class="dim" style="margin-top: 0.5rem; font-size: 0.8rem">
+              <p class="card-note">
                 {{ t('golive.streamKeyHint') }}
               </p>
             </div>
             <div class="action-card">
               <h3>{{ t('golive.pushUrl') }}</h3>
-              <p class="mono" style="word-break: break-all" data-testid="golive-push-url">
+              <p class="mono" data-testid="golive-push-url">
                 {{ goLivePublish.pushUrl }}
               </p>
               <button
@@ -2198,13 +874,13 @@ onMounted(() => {
               >
                 {{ t('golive.copyPushUrl') }}
               </button>
-              <p v-if="goLivePublish.expiresAt" class="dim" style="margin-top: 0.5rem; font-size: 0.8rem">
+              <p v-if="goLivePublish.expiresAt" class="card-note">
                 {{ t('golive.expires') }}：{{ formatTs(goLivePublish.expiresAt) }}
               </p>
             </div>
             <div class="action-card">
               <h3>{{ t('golive.audienceHls') }}</h3>
-              <p class="mono" style="word-break: break-all" data-testid="golive-hls">
+              <p class="mono" data-testid="golive-hls">
                 {{ goLiveHls || '—' }}
               </p>
               <div class="actions">
@@ -2227,15 +903,15 @@ onMounted(() => {
                   >{{ t('golive.openHls') }}</a
                 >
               </div>
-              <p class="dim" style="margin-top: 0.5rem; font-size: 0.8rem">
+              <p class="card-note">
                 {{ t('golive.h5Hint') }}{{ goLiveRoomId || 'roomId' }}
               </p>
             </div>
           </div>
 
-          <div class="panel" style="margin-top: 1.25rem; box-shadow: none">
-            <h3 style="margin: 0 0 0.5rem; font-size: 0.95rem">{{ t('golive.obsGuide') }}</h3>
-            <ol class="muted" style="margin: 0; padding-left: 1.2rem; font-size: 0.88rem">
+          <div class="inset-guide" data-testid="golive-obs-guide">
+            <h3>{{ t('golive.obsGuide') }}</h3>
+            <ol class="guide-list">
               <li>{{ t('golive.obsStep1') }}</li>
               <li>{{ t('golive.obsStep2') }}</li>
               <li>{{ t('golive.obsStep3') }}</li>
@@ -2275,7 +951,7 @@ onMounted(() => {
                 data-testid="rooms-search"
               />
             </label>
-            <label class="field" style="max-width: min(160px, 100%)">
+            <label class="field field-sm">
               <span>{{ t('common.filter') }}</span>
               <select v-model="roomStatusFilter" data-testid="rooms-status-filter">
                 <option value="all">{{ t('rooms.filterAll') }}</option>
@@ -2284,87 +960,132 @@ onMounted(() => {
                 <option value="closed">{{ t('status.closed') }}</option>
               </select>
             </label>
+            <label class="field field-sm">
+              <span>{{ t('common.pageSize') }}</span>
+              <select v-model.number="roomPageSize" data-testid="rooms-page-size">
+                <option :value="10">10</option>
+                <option :value="20">20</option>
+                <option :value="50">50</option>
+              </select>
+            </label>
           </div>
 
-          <div class="table-wrap" v-if="filteredRooms.length" data-testid="rooms-table">
-            <table class="data">
+          <div class="list-meta" v-if="roomListMeta.total" data-testid="rooms-meta">
+            <span>{{ t('rooms.resultCount', { n: roomListMeta.total }) }}</span>
+            <span class="dim">{{
+              t('common.showing', {
+                from: roomListMeta.from,
+                to: roomListMeta.to,
+                total: roomListMeta.total,
+              })
+            }}</span>
+          </div>
+
+          <div class="table-wrap is-dense" v-if="pagedRooms.length" data-testid="rooms-table">
+            <table class="data data-rooms">
               <thead>
                 <tr>
-                  <th>{{ t('rooms.colTitle') }}</th>
-                  <th>{{ t('rooms.colStatus') }}</th>
-                  <th>{{ t('rooms.colOwner') }}</th>
-                  <th>{{ t('rooms.colId') }}</th>
-                  <th>{{ t('common.actions') }}</th>
+                  <th class="col-title">{{ t('rooms.colTitle') }}</th>
+                  <th class="col-status">{{ t('rooms.colStatus') }}</th>
+                  <th class="col-owner">{{ t('rooms.colOwner') }}</th>
+                  <th class="col-id">{{ t('rooms.colId') }}</th>
+                  <th class="col-actions">{{ t('common.actions') }}</th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="r in filteredRooms" :key="r.id" :data-testid="`room-row-${r.id}`">
-                  <td>{{ r.title }}</td>
-                  <td>
+                <tr
+                  v-for="r in pagedRooms"
+                  :key="r.id"
+                  :data-testid="`room-row-${r.id}`"
+                  :class="{ 'is-previewing': previewRoomId === r.id }"
+                >
+                  <td class="col-title" :title="r.title">{{ r.title }}</td>
+                  <td class="col-status">
                     <span class="badge" :class="roomStatusTone(r.status)">{{
                       statusLabel(r.status)
                     }}</span>
                   </td>
-                  <td class="mono">{{ shortId(r.owner_id || '') }}</td>
-                  <td class="mono" :title="r.id">{{ shortId(r.id) }}</td>
+                  <td class="col-owner mono" :title="r.owner_id || ''">{{
+                    shortId(r.owner_id || '')
+                  }}</td>
+                  <td class="col-id mono" :title="r.id">{{ shortId(r.id) }}</td>
                   <td class="actions">
-                    <button
-                      type="button"
-                      class="btn sm"
-                      data-testid="room-preview"
-                      :disabled="previewBusy"
-                      @click="previewRoom(r)"
-                    >
-                      {{ t('rooms.preview') }}
-                    </button>
-                    <button
-                      type="button"
-                      class="btn sm primary"
-                      data-testid="room-publish-info"
-                      :disabled="goLiveBusy || !isAuthed || r.status === 'closed'"
-                      @click="loadPublishForRoom(r.id)"
-                    >
-                      {{ t('rooms.publishInfo') }}
-                    </button>
-                    <button
-                      type="button"
-                      class="btn sm"
-                      data-testid="room-fill-force-close"
-                      @click="useRoomId(r.id)"
-                    >
-                      {{ t('rooms.fillForceClose') }}
-                    </button>
-                    <button
-                      type="button"
-                      class="btn sm danger"
-                      data-testid="room-force-close"
-                      :disabled="actionBusy || r.status === 'closed'"
-                      @click="forceCloseRoom(r.id)"
-                    >
-                      {{ t('rooms.forceClose') }}
-                    </button>
+                    <div class="row-actions">
+                      <button
+                        type="button"
+                        class="btn sm"
+                        :class="{ primary: previewRoomId === r.id }"
+                        data-testid="room-preview"
+                        :disabled="previewBusy"
+                        @click="previewRoom(r)"
+                      >
+                        {{ t('rooms.preview') }}
+                      </button>
+                      <button
+                        type="button"
+                        class="btn sm primary"
+                        data-testid="room-publish-info"
+                        :disabled="goLiveBusy || !isAuthed || r.status === 'closed'"
+                        @click="loadPublishForRoom(r.id)"
+                      >
+                        {{ t('rooms.publishInfo') }}
+                      </button>
+                      <button
+                        type="button"
+                        class="btn sm"
+                        data-testid="room-fill-force-close"
+                        @click="useRoomId(r.id)"
+                      >
+                        {{ t('rooms.fillForceClose') }}
+                      </button>
+                      <button
+                        type="button"
+                        class="btn sm danger"
+                        data-testid="room-force-close"
+                        :disabled="actionBusy || r.status === 'closed'"
+                        @click="forceCloseRoom(r.id)"
+                      >
+                        {{ t('rooms.forceClose') }}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               </tbody>
             </table>
           </div>
           <div v-else class="empty" data-testid="rooms-empty">
-            <div class="empty-icon">◎</div>
+            <div class="empty-icon">
+              <AppIcon :component="Inbox" :size="28" />
+            </div>
             {{ t('rooms.empty') }}
           </div>
 
-          <div v-if="previewRoomId" class="preview" data-testid="room-preview-panel">
-            <div class="panel-head">
-              <h2>{{ t('rooms.previewTitle') }} · {{ shortId(previewRoomId, 12) }}</h2>
-              <button type="button" class="btn sm ghost" data-testid="room-preview-close" @click="closePreview">
-                {{ t('common.close') }}
-              </button>
-            </div>
-            <p v-if="previewError" class="flash err">{{ previewError }}</p>
-            <p v-if="previewHlsUrl" class="preview-url mono">
-              <a :href="previewHlsUrl" target="_blank" rel="noopener">{{ previewHlsUrl }}</a>
-            </p>
-            <video v-if="previewHlsUrl" ref="previewVideoEl" controls playsinline class="preview-video" />
+          <div
+            v-if="roomListMeta.total > 0"
+            class="pager"
+            data-testid="rooms-pager"
+          >
+            <button
+              type="button"
+              class="btn sm"
+              data-testid="rooms-page-prev"
+              :disabled="roomListMeta.page <= 1"
+              @click="setRoomPage(roomListMeta.page - 1)"
+            >
+              {{ t('common.prev') }}
+            </button>
+            <span class="pager-label">{{
+              t('common.page', { page: roomListMeta.page, pages: roomListMeta.pages })
+            }}</span>
+            <button
+              type="button"
+              class="btn sm"
+              data-testid="rooms-page-next"
+              :disabled="roomListMeta.page >= roomListMeta.pages"
+              @click="setRoomPage(roomListMeta.page + 1)"
+            >
+              {{ t('common.next') }}
+            </button>
           </div>
         </section>
 
@@ -2383,7 +1104,7 @@ onMounted(() => {
             </button>
           </div>
           <p class="panel-desc">{{ t('reports.desc') }}</p>
-          <label class="field" style="max-width: min(420px, 100%)">
+          <label class="field field-md">
             <span>{{ t('reports.note') }}</span>
             <input
               v-model="actionReason"
@@ -2392,7 +1113,7 @@ onMounted(() => {
               data-testid="report-note"
             />
           </label>
-          <div class="table-wrap" v-if="reports.length" data-testid="reports-table">
+          <div class="table-wrap is-dense" v-if="reports.length" data-testid="reports-table">
             <table class="data">
               <thead>
                 <tr>
@@ -2418,40 +1139,44 @@ onMounted(() => {
                   <td class="mono">{{ shortId(r.reporter_id) }}</td>
                   <td class="mono">{{ formatTs(r.created_at) }}</td>
                   <td class="actions">
-                    <button
-                      type="button"
-                      class="btn sm primary"
-                      data-testid="report-resolve"
-                      :disabled="actionBusy || r.status === 'resolved'"
-                      @click="resolveReport(r.id)"
-                    >
-                      {{ t('reports.resolve') }}
-                    </button>
-                    <button
-                      v-if="r.target_type === 'room'"
-                      type="button"
-                      class="btn sm"
-                      data-testid="report-to-force-close"
-                      @click="useRoomId(r.target_id)"
-                    >
-                      {{ t('reports.toForceClose') }}
-                    </button>
-                    <button
-                      v-if="r.target_type === 'user'"
-                      type="button"
-                      class="btn sm"
-                      data-testid="report-to-moderation"
-                      @click="useUserId(r.target_id)"
-                    >
-                      {{ t('reports.toModeration') }}
-                    </button>
+                    <div class="row-actions">
+                      <button
+                        type="button"
+                        class="btn sm primary"
+                        data-testid="report-resolve"
+                        :disabled="actionBusy || r.status === 'resolved'"
+                        @click="resolveReport(r.id)"
+                      >
+                        {{ t('reports.resolve') }}
+                      </button>
+                      <button
+                        v-if="r.target_type === 'room'"
+                        type="button"
+                        class="btn sm"
+                        data-testid="report-to-force-close"
+                        @click="useRoomId(r.target_id)"
+                      >
+                        {{ t('reports.toForceClose') }}
+                      </button>
+                      <button
+                        v-if="r.target_type === 'user'"
+                        type="button"
+                        class="btn sm"
+                        data-testid="report-to-moderation"
+                        @click="useUserId(r.target_id)"
+                      >
+                        {{ t('reports.toModeration') }}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               </tbody>
             </table>
           </div>
           <div v-else class="empty" data-testid="reports-empty">
-            <div class="empty-icon">◇</div>
+            <div class="empty-icon">
+              <AppIcon :component="FolderOpen" :size="28" />
+            </div>
             {{ t('reports.empty') }}
           </div>
         </section>
@@ -2471,7 +1196,7 @@ onMounted(() => {
             </button>
           </div>
           <p class="panel-desc">{{ t('gifts.desc') }}</p>
-          <p class="hint" data-testid="gifts-seed-hint" style="margin-top: 0">
+          <p class="hint seed-hint" data-testid="gifts-seed-hint">
             {{ t('gifts.seedHint') }}
             <code class="mono">./scripts/dogfood-gift-seed.sh</code>
             {{ t('gifts.seedHint2') }}
@@ -2481,14 +1206,13 @@ onMounted(() => {
             {{ t('gifts.seedHint4') }}
             <button
               type="button"
-              class="btn sm"
-              style="margin-left: 0.35rem"
+              class="btn sm inline-btn"
               data-testid="gifts-copy-seed-cmd"
               @click="copyGiftSeedCmd"
             >
               {{ t('gifts.copyCmd') }}
             </button>
-            <span v-if="giftSeedCopyHint" class="dim" style="margin-left: 0.35rem">{{
+            <span v-if="giftSeedCopyHint" class="dim inline-hint">{{
               giftSeedCopyHint
             }}</span>
           </p>
@@ -2502,7 +1226,7 @@ onMounted(() => {
                 data-testid="gift-name"
               />
             </label>
-            <label class="field" style="max-width: min(160px, 100%)">
+            <label class="field field-sm">
               <span>{{ t('gifts.price') }}</span>
               <input
                 v-model="giftPrice"
@@ -2513,7 +1237,7 @@ onMounted(() => {
                 data-testid="gift-price"
               />
             </label>
-            <label v-if="giftEditId" class="field" style="max-width: min(140px, 100%)">
+            <label v-if="giftEditId" class="field field-sm">
               <span>{{ t('gifts.status') }}</span>
               <select v-model="giftEditActive" data-testid="gift-active">
                 <option :value="true">{{ t('gifts.active') }}</option>
@@ -2554,7 +1278,7 @@ onMounted(() => {
           <p v-if="giftEditId" class="hint" data-testid="gift-edit-hint">
             {{ t('gifts.editing', { id: shortId(giftEditId, 12) }) }}
           </p>
-          <div class="table-wrap" v-if="gifts.length" data-testid="gifts-table">
+          <div class="table-wrap is-dense" v-if="gifts.length" data-testid="gifts-table">
             <table class="data">
               <thead>
                 <tr>
@@ -2580,32 +1304,36 @@ onMounted(() => {
                   </td>
                   <td class="mono">{{ shortId(g.id, 12) }}</td>
                   <td class="actions">
-                    <button
-                      type="button"
-                      class="btn sm"
-                      data-testid="gift-edit"
-                      :disabled="giftBusy"
-                      @click="beginEditGift(g)"
-                    >
-                      {{ t('gifts.edit') }}
-                    </button>
-                    <button
-                      type="button"
-                      class="btn sm"
-                      :class="g.active === false ? 'primary' : 'danger'"
-                      data-testid="gift-toggle-active"
-                      :disabled="giftBusy"
-                      @click="toggleGiftActive(g)"
-                    >
-                      {{ g.active === false ? t('gifts.enable') : t('gifts.disable') }}
-                    </button>
+                    <div class="row-actions">
+                      <button
+                        type="button"
+                        class="btn sm"
+                        data-testid="gift-edit"
+                        :disabled="giftBusy"
+                        @click="beginEditGift(g)"
+                      >
+                        {{ t('gifts.edit') }}
+                      </button>
+                      <button
+                        type="button"
+                        class="btn sm"
+                        :class="g.active === false ? 'primary' : 'danger'"
+                        data-testid="gift-toggle-active"
+                        :disabled="giftBusy"
+                        @click="toggleGiftActive(g)"
+                      >
+                        {{ g.active === false ? t('gifts.enable') : t('gifts.disable') }}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               </tbody>
             </table>
           </div>
           <div v-else class="empty" data-testid="gifts-empty">
-            <div class="empty-icon">✦</div>
+            <div class="empty-icon">
+              <AppIcon :component="Inbox" :size="28" />
+            </div>
             {{ t('gifts.empty') }}
           </div>
         </section>
@@ -2614,34 +1342,250 @@ onMounted(() => {
         <section v-else-if="nav === 'users'" class="panel" data-testid="panel-users">
           <div class="panel-head">
             <h2>{{ t('users.title') }}</h2>
-            <button type="button" class="btn sm" :disabled="usersBusy" @click="loadUsers">
-              {{ t('common.refresh') }}
-            </button>
+            <div class="toolbar">
+              <span class="stat-chip">{{ t('users.total', { n: usersTotal }) }}</span>
+              <span class="stat-chip">{{ t('users.bannedList') }} · {{ bannedUsers.length }}</span>
+              <span class="stat-chip">{{ t('users.mutedList') }} · {{ mutedUsers.length }}</span>
+              <button
+                type="button"
+                class="btn sm"
+                data-testid="users-list-refresh"
+                :disabled="usersBusy"
+                @click="loadUsers"
+              >
+                {{ t('common.refresh') }}
+              </button>
+            </div>
           </div>
           <p class="panel-desc">{{ t('navBlurb.users') }}</p>
           <p v-if="tempPasswordNotice" class="flash ok" data-testid="temp-password">
             {{ tempPasswordNotice }}
           </p>
 
-          <div class="split-actions" style="margin-bottom: 16px">
-            <div class="action-card">
-              <h3>{{ t('users.create') }}</h3>
-              <label class="field">
-                <span>{{ t('users.displayName') }}</span>
-                <input v-model="createDisplayName" type="text" data-testid="create-display-name" />
-              </label>
-              <label class="field">
-                <span>{{ t('users.username') }}</span>
-                <input v-model="createUsername" type="text" data-testid="create-username" />
-              </label>
-              <label class="field">
-                <span>{{ t('users.email') }}</span>
-                <input v-model="createEmail" type="email" data-testid="create-email" />
-              </label>
-              <label class="field">
-                <span>{{ t('users.password') }}</span>
-                <input v-model="createPassword" type="text" data-testid="create-password" />
-              </label>
+          <!-- Search + status filter (primary work surface) -->
+          <div class="filter-bar" data-testid="users-filter-bar">
+            <label class="field field-lg">
+              <span>{{ t('common.search') }}</span>
+              <input
+                v-model="usersQuery"
+                type="search"
+                :placeholder="t('users.searchPlaceholder')"
+                data-testid="users-query"
+                @keyup.enter="searchUsers"
+              />
+            </label>
+            <label class="field field-sm">
+              <span>{{ t('users.status') }}</span>
+              <select v-model="usersStatusFilter" data-testid="users-status-filter">
+                <option value="all">{{ t('common.all') }}</option>
+                <option value="active">{{ t('users.statusActive') }}</option>
+                <option value="disabled">{{ t('users.statusDisabled') }}</option>
+                <option value="deleted">{{ t('users.statusDeleted') }}</option>
+              </select>
+            </label>
+            <label class="field field-sm">
+              <span>{{ t('common.pageSize') }}</span>
+              <select v-model.number="usersPageSize" data-testid="users-page-size">
+                <option :value="10">10</option>
+                <option :value="20">20</option>
+                <option :value="50">50</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              class="btn primary"
+              data-testid="users-search-submit"
+              :disabled="usersBusy"
+              @click="searchUsers"
+            >
+              {{ t('users.search') }}
+            </button>
+          </div>
+
+          <div class="list-meta" v-if="usersListMeta.total" data-testid="users-meta">
+            <span>{{ t('users.total', { n: usersListMeta.total }) }}</span>
+            <span class="dim">{{
+              t('common.showing', {
+                from: usersListMeta.from,
+                to: usersListMeta.to,
+                total: usersListMeta.total,
+              })
+            }}</span>
+          </div>
+
+          <div v-if="usersList.length" class="table-wrap is-dense" data-testid="users-table-wrap">
+            <table class="data data-users" data-testid="users-table">
+              <thead>
+                <tr>
+                  <th class="col-user">{{ t('users.displayName') }}</th>
+                  <th class="col-email">{{ t('users.email') }}</th>
+                  <th class="col-status">{{ t('users.status') }}</th>
+                  <th class="col-actions">{{ t('users.actions') }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="u in usersList" :key="u.id" :data-testid="`user-row-${u.id}`">
+                  <td class="col-user">
+                    <div class="user-cell">
+                      <span class="user-name" :title="u.display_name">{{ u.display_name }}</span>
+                      <span v-if="u.admin_role" class="role-pill admin">{{ u.admin_role }}</span>
+                    </div>
+                    <div class="cell-sub mono" :title="u.id">{{ shortId(u.id) }}</div>
+                    <div v-if="u.username" class="cell-sub mono" :title="u.username">
+                      @{{ u.username }}
+                    </div>
+                  </td>
+                  <td class="col-email" :title="u.email || ''">{{ u.email || '—' }}</td>
+                  <td class="col-status col-status-mix">
+                    <div class="badge-row">
+                      <span
+                        class="badge"
+                        :class="
+                          u.status === 'active'
+                            ? 'ok'
+                            : u.status === 'disabled'
+                              ? 'idle'
+                              : 'closed'
+                        "
+                      >
+                        {{
+                          u.status === 'active'
+                            ? t('users.statusActive')
+                            : u.status === 'disabled'
+                              ? t('users.statusDisabled')
+                              : u.status === 'deleted'
+                                ? t('users.statusDeleted')
+                                : u.status
+                        }}
+                      </span>
+                      <span v-if="u.banned" class="badge closed">{{ t('users.banned') }}</span>
+                      <span v-if="u.muted" class="badge idle">{{ t('users.muted') }}</span>
+                      <span v-if="u.must_change_password" class="badge unknown">{{
+                        t('users.mustChangePassword')
+                      }}</span>
+                    </div>
+                  </td>
+                  <td class="actions col-actions">
+                    <div class="row-actions">
+                      <button
+                        type="button"
+                        class="btn sm"
+                        :disabled="actionBusy"
+                        :title="t('users.resetPassword')"
+                        @click="resetUserPassword(u.id)"
+                      >
+                        {{ t('users.resetPasswordShort') }}
+                      </button>
+                      <button
+                        type="button"
+                        class="btn sm"
+                        :disabled="actionBusy"
+                        :title="t('users.revokeSessions')"
+                        @click="revokeUserSessions(u.id)"
+                      >
+                        {{ t('users.revokeSessionsShort') }}
+                      </button>
+                      <button
+                        v-if="!u.banned"
+                        type="button"
+                        class="btn sm danger"
+                        :disabled="actionBusy"
+                        @click="banUserId(u.id)"
+                      >
+                        {{ t('users.ban') }}
+                      </button>
+                      <button
+                        v-else
+                        type="button"
+                        class="btn sm"
+                        :disabled="actionBusy"
+                        @click="unbanUserId(u.id)"
+                      >
+                        {{ t('users.unban') }}
+                      </button>
+                      <button
+                        v-if="u.status === 'active'"
+                        type="button"
+                        class="btn sm"
+                        :disabled="actionBusy"
+                        @click="setUserStatus(u.id, 'disabled')"
+                      >
+                        {{ t('users.disable') }}
+                      </button>
+                      <button
+                        v-else-if="u.status === 'disabled'"
+                        type="button"
+                        class="btn sm primary"
+                        :disabled="actionBusy"
+                        @click="setUserStatus(u.id, 'active')"
+                      >
+                        {{ t('users.enable') }}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-else class="empty" data-testid="users-empty">
+            <div class="empty-icon">
+              <AppIcon :component="Inbox" :size="28" />
+            </div>
+            {{ usersBusy ? t('common.loading') : t('users.empty') }}
+          </div>
+
+          <div
+            v-if="usersListMeta.total > 0"
+            class="pager"
+            data-testid="users-pager"
+          >
+            <button
+              type="button"
+              class="btn sm"
+              data-testid="users-page-prev"
+              :disabled="usersListMeta.page <= 1 || usersBusy"
+              @click="setUsersPage(usersListMeta.page - 1)"
+            >
+              {{ t('common.prev') }}
+            </button>
+            <span class="pager-label">{{
+              t('common.page', { page: usersListMeta.page, pages: usersListMeta.pages })
+            }}</span>
+            <button
+              type="button"
+              class="btn sm"
+              data-testid="users-page-next"
+              :disabled="usersListMeta.page >= usersListMeta.pages || usersBusy"
+              @click="setUsersPage(usersListMeta.page + 1)"
+            >
+              {{ t('common.next') }}
+            </button>
+          </div>
+
+          <!-- Compact provision form -->
+          <details class="section-block users-create-fold" data-testid="users-create-fold">
+            <summary class="users-create-summary">{{ t('users.create') }}</summary>
+            <div class="action-card action-card-md mt-sm">
+              <div class="row">
+                <label class="field">
+                  <span>{{ t('users.displayName') }}</span>
+                  <input v-model="createDisplayName" type="text" data-testid="create-display-name" />
+                </label>
+                <label class="field">
+                  <span>{{ t('users.username') }}</span>
+                  <input v-model="createUsername" type="text" data-testid="create-username" />
+                </label>
+              </div>
+              <div class="row">
+                <label class="field">
+                  <span>{{ t('users.email') }}</span>
+                  <input v-model="createEmail" type="email" data-testid="create-email" />
+                </label>
+                <label class="field">
+                  <span>{{ t('users.password') }}</span>
+                  <input v-model="createPassword" type="text" data-testid="create-password" />
+                </label>
+              </div>
               <button
                 type="button"
                 class="btn primary"
@@ -2652,102 +1596,9 @@ onMounted(() => {
                 {{ t('users.create') }}
               </button>
             </div>
-            <div class="action-card">
-              <h3>{{ t('users.search') }}</h3>
-              <label class="field">
-                <span>{{ t('users.searchPlaceholder') }}</span>
-                <input
-                  v-model="usersQuery"
-                  type="search"
-                  data-testid="users-query"
-                  @keyup.enter="loadUsers"
-                />
-              </label>
-              <button type="button" class="btn" :disabled="usersBusy" @click="loadUsers">
-                {{ t('users.search') }}
-              </button>
-              <p class="dim">{{ t('users.total', { n: usersTotal }) }}</p>
-            </div>
-          </div>
+          </details>
 
-          <div v-if="usersList.length" class="table-wrap">
-            <table data-testid="users-table">
-              <thead>
-                <tr>
-                  <th>{{ t('users.displayName') }}</th>
-                  <th>{{ t('users.username') }}</th>
-                  <th>{{ t('users.email') }}</th>
-                  <th>{{ t('users.status') }}</th>
-                  <th>{{ t('users.actions') }}</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="u in usersList" :key="u.id">
-                  <td>
-                    {{ u.display_name }}
-                    <div class="dim mono" style="font-size: 0.72rem">{{ shortId(u.id) }}</div>
-                  </td>
-                  <td class="mono">{{ u.username || '—' }}</td>
-                  <td>{{ u.email || '—' }}</td>
-                  <td>
-                    {{ u.status }}
-                    <span v-if="u.banned" class="pill danger">{{ t('users.banned') }}</span>
-                    <span v-if="u.muted" class="pill">{{ t('users.muted') }}</span>
-                  </td>
-                  <td class="row" style="gap: 4px; flex-wrap: wrap">
-                    <button type="button" class="btn sm" :disabled="actionBusy" @click="resetUserPassword(u.id)">
-                      {{ t('users.resetPassword') }}
-                    </button>
-                    <button type="button" class="btn sm" :disabled="actionBusy" @click="revokeUserSessions(u.id)">
-                      {{ t('users.revokeSessions') }}
-                    </button>
-                    <button
-                      v-if="!u.banned"
-                      type="button"
-                      class="btn sm danger"
-                      :disabled="actionBusy"
-                      @click="banUserId(u.id)"
-                    >
-                      {{ t('users.ban') }}
-                    </button>
-                    <button
-                      v-else
-                      type="button"
-                      class="btn sm"
-                      :disabled="actionBusy"
-                      @click="unbanUserId(u.id)"
-                    >
-                      {{ t('users.unban') }}
-                    </button>
-                    <button
-                      v-if="u.status === 'active'"
-                      type="button"
-                      class="btn sm"
-                      :disabled="actionBusy"
-                      @click="setUserStatus(u.id, 'disabled')"
-                    >
-                      {{ t('users.disable') }}
-                    </button>
-                    <button
-                      v-else-if="u.status === 'disabled'"
-                      type="button"
-                      class="btn sm primary"
-                      :disabled="actionBusy"
-                      @click="setUserStatus(u.id, 'active')"
-                    >
-                      {{ t('users.enable') }}
-                    </button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div v-else class="empty" data-testid="users-empty">
-            <div class="empty-icon">◎</div>
-            {{ usersBusy ? t('common.loading') : t('users.empty') }}
-          </div>
-        
-          <div class="panel-head" style="margin-top: 1.5rem">
+          <div class="panel-head section-divider">
             <h3>{{ t('users.moderationLists') }}</h3>
             <button
               type="button"
@@ -2761,7 +1612,7 @@ onMounted(() => {
           </div>
           <p class="panel-desc">{{ t('users.desc') }}</p>
 
-          <div class="action-card" style="max-width: 640px; margin-bottom: 1rem" data-testid="users-lookup">
+          <div class="action-card action-card-md section-block" data-testid="users-lookup">
             <h3>{{ t('users.lookup') }}</h3>
             <label class="field">
               <span>{{ t('moderation.userId') }}</span>
@@ -2773,7 +1624,7 @@ onMounted(() => {
                 data-testid="users-lookup-id"
               />
             </label>
-            <div class="row" style="gap: 0.5rem; flex-wrap: wrap">
+            <div class="row row-tight">
               <button
                 type="button"
                 class="btn primary"
@@ -2802,11 +1653,11 @@ onMounted(() => {
                 {{ t('users.fillMute') }}
               </button>
             </div>
-            <div v-if="lookupStatus" class="hint" style="margin-top: 0.75rem" data-testid="users-lookup-result">
+            <div v-if="lookupStatus" class="hint" data-testid="users-lookup-result">
               <strong>{{ t('users.statusTitle') }}</strong>
-              <div class="mono" style="margin-top: 0.25rem">{{ shortId(lookupStatus.user_id, 16) }}</div>
-              <div v-if="lookupStatus.banned || lookupStatus.muted" style="margin-top: 0.35rem">
-                <span v-if="lookupStatus.banned" class="badge closed" style="margin-right: 0.35rem">
+              <div class="mono mt-xs">{{ shortId(lookupStatus.user_id, 16) }}</div>
+              <div v-if="lookupStatus.banned || lookupStatus.muted" class="mt-xs badge-row">
+                <span v-if="lookupStatus.banned" class="badge closed">
                   {{ t('users.statusBanned') }}
                   <template v-if="lookupStatus.ban_reason"> · {{ lookupStatus.ban_reason }}</template>
                   <template v-if="lookupStatus.banned_at">
@@ -2821,8 +1672,8 @@ onMounted(() => {
                   </template>
                 </span>
               </div>
-              <div v-else class="dim" style="margin-top: 0.35rem">{{ t('users.statusClear') }}</div>
-              <div class="row" style="gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap">
+              <div v-else class="dim mt-xs">{{ t('users.statusClear') }}</div>
+              <div class="row row-tight mt-sm">
                 <button
                   v-if="lookupStatus.banned"
                   type="button"
@@ -2850,8 +1701,8 @@ onMounted(() => {
           <div class="split-actions">
             <div class="action-card" data-testid="users-banned-card">
               <h3>{{ t('users.bannedList') }} · {{ bannedUsers.length }}</h3>
-              <div class="table-wrap" v-if="bannedUsers.length" data-testid="users-banned-table">
-                <table class="data">
+              <div class="table-wrap is-compact" v-if="bannedUsers.length" data-testid="users-banned-table">
+                <table class="data data-compact">
                   <thead>
                     <tr>
                       <th>{{ t('users.colUser') }}</th>
@@ -2862,8 +1713,8 @@ onMounted(() => {
                   </thead>
                   <tbody>
                     <tr v-for="u in bannedUsers" :key="u.user_id" :data-testid="`banned-row-${u.user_id}`">
-                      <td class="mono">{{ shortId(u.user_id, 12) }}</td>
-                      <td>{{ u.reason || t('common.none') }}</td>
+                      <td class="mono" :title="u.user_id">{{ shortId(u.user_id, 12) }}</td>
+                      <td :title="u.reason || ''">{{ u.reason || t('common.none') }}</td>
                       <td class="mono">{{ formatTs(u.created_at) }}</td>
                       <td class="actions">
                         <button
@@ -2885,8 +1736,8 @@ onMounted(() => {
 
             <div class="action-card" data-testid="users-muted-card">
               <h3>{{ t('users.mutedList') }} · {{ mutedUsers.length }}</h3>
-              <div class="table-wrap" v-if="mutedUsers.length" data-testid="users-muted-table">
-                <table class="data">
+              <div class="table-wrap is-compact" v-if="mutedUsers.length" data-testid="users-muted-table">
+                <table class="data data-compact">
                   <thead>
                     <tr>
                       <th>{{ t('users.colUser') }}</th>
@@ -2897,8 +1748,8 @@ onMounted(() => {
                   </thead>
                   <tbody>
                     <tr v-for="u in mutedUsers" :key="u.user_id" :data-testid="`muted-row-${u.user_id}`">
-                      <td class="mono">{{ shortId(u.user_id, 12) }}</td>
-                      <td>{{ u.reason || t('common.none') }}</td>
+                      <td class="mono" :title="u.user_id">{{ shortId(u.user_id, 12) }}</td>
+                      <td :title="u.reason || ''">{{ u.reason || t('common.none') }}</td>
                       <td class="mono">{{ formatTs(u.created_at) }}</td>
                       <td class="actions">
                         <button
@@ -2918,7 +1769,6 @@ onMounted(() => {
               <div v-else class="empty" data-testid="users-muted-empty">{{ t('users.emptyMuted') }}</div>
             </div>
           </div>
-
         </section>
 
         <!-- Moderation -->
@@ -2929,7 +1779,7 @@ onMounted(() => {
           <p class="panel-desc">{{ t('moderation.desc') }}</p>
           <p class="danger-note">{{ t('moderation.dangerHint') }}</p>
 
-          <label class="field" style="max-width: min(480px, 100%)">
+          <label class="field field-lg">
             <span>{{ t('moderation.reason') }}</span>
             <input
               v-model="actionReason"
@@ -3026,7 +1876,7 @@ onMounted(() => {
                 class="btn primary"
                 data-testid="moderation-unmute-submit"
                 :disabled="actionBusy || !unmuteUserIdInput.trim()"
-                @click="unmuteUser"
+                @click="() => unmuteUser()"
               >
                 {{ t('moderation.unmuteSubmit') }}
               </button>
@@ -3060,7 +1910,7 @@ onMounted(() => {
               />
             </label>
           </div>
-          <div class="table-wrap" v-if="filteredAudit.length" data-testid="audit-table">
+          <div class="table-wrap is-dense" v-if="filteredAudit.length" data-testid="audit-table">
             <table class="data">
               <thead>
                 <tr>
@@ -3083,11 +1933,64 @@ onMounted(() => {
             </table>
           </div>
           <div v-else class="empty" data-testid="audit-empty">
-            <div class="empty-icon">☰</div>
+            <div class="empty-icon">
+              <AppIcon :component="FolderOpen" :size="28" />
+            </div>
             {{ t('audit.empty') }}
           </div>
         </section>
       </div>
     </div>
   </div>
+
+  <!-- Room HLS preview modal (above list, doesn't bury player under rows) -->
+  <Teleport to="body">
+    <div
+      v-if="previewRoomId"
+      class="modal-overlay"
+      data-testid="room-preview-panel"
+      role="presentation"
+      @click.self="closePreview"
+    >
+      <div
+        class="modal-dialog preview-modal"
+        role="dialog"
+        aria-modal="true"
+        :aria-label="t('rooms.previewTitle')"
+        data-testid="room-preview-dialog"
+        @keydown.escape.prevent="closePreview"
+      >
+        <div class="modal-head">
+          <div class="modal-title">
+            <h2>{{ t('rooms.previewTitle') }}</h2>
+            <span class="mono dim">{{ shortId(previewRoomId, 12) }}</span>
+          </div>
+          <button
+            type="button"
+            class="btn sm ghost"
+            data-testid="room-preview-close"
+            @click="closePreview"
+          >
+            {{ t('common.close') }}
+          </button>
+        </div>
+        <div class="modal-body">
+          <p v-if="previewBusy" class="hint">{{ t('common.loading') }}</p>
+          <p v-if="previewError" class="flash err">{{ previewError }}</p>
+          <p v-if="previewHlsUrl" class="preview-url mono">
+            <a :href="previewHlsUrl" target="_blank" rel="noopener">{{ previewHlsUrl }}</a>
+          </p>
+          <video
+            v-if="previewHlsUrl"
+            ref="previewVideoEl"
+            controls
+            playsinline
+            autoplay
+            class="preview-video"
+          />
+        </div>
+      </div>
+    </div>
+  </Teleport>
+
 </template>
